@@ -2,6 +2,7 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CircleIcon, Settings2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 interface DeviceCardProps {
   device: {
@@ -15,6 +16,8 @@ interface DeviceCardProps {
 }
 
 export const DeviceCard = ({ device }: DeviceCardProps) => {
+  const navigate = useNavigate();
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case "online":
@@ -27,7 +30,10 @@ export const DeviceCard = ({ device }: DeviceCardProps) => {
   };
 
   return (
-    <Card className="p-6 hover:shadow-lg transition-shadow animate-fade-up">
+    <Card 
+      className="p-6 hover:shadow-lg transition-shadow animate-fade-up cursor-pointer"
+      onClick={() => navigate(`/device/${device.id}`)}
+    >
       <div className="flex justify-between items-start mb-4">
         <div>
           <div className="flex items-center gap-2 mb-2">
@@ -39,7 +45,13 @@ export const DeviceCard = ({ device }: DeviceCardProps) => {
           <h3 className="font-semibold text-lg mb-1">{device.model}</h3>
           <p className="text-sm text-muted-foreground">{device.serialNumber}</p>
         </div>
-        <button className="hover:bg-accent p-2 rounded-full transition-colors">
+        <button 
+          className="hover:bg-accent p-2 rounded-full transition-colors"
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate(`/device/${device.id}`);
+          }}
+        >
           <Settings2 className="h-5 w-5" />
         </button>
       </div>
