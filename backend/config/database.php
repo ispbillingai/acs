@@ -2,9 +2,9 @@
 <?php
 class Database {
     private $host = "localhost";
-    private $db_name = "tr069_acs";
-    private $username = "root";
-    private $password = "";
+    private $db_name = "acs";
+    private $username = "acs";
+    private $password = "acs";
     public $conn;
 
     public function getConnection() {
