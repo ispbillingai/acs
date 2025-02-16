@@ -32,6 +32,9 @@ class TR069Server {
         $method = $_SERVER['REQUEST_METHOD'];
         error_log("TR069Server: Request method: " . $method);
         
+        // Log all server variables for debugging
+        error_log("TR069Server: SERVER variables: " . print_r($_SERVER, true));
+        
         if (!$this->authenticateRequest()) {
             error_log("TR069Server: Authentication failed");
             header('WWW-Authenticate: Basic realm="TR-069 ACS"');
@@ -42,6 +45,9 @@ class TR069Server {
         error_log("TR069Server: Authentication successful");
         
         $rawPost = file_get_contents('php://input');
+        error_log("TR069Server: Raw input length: " . strlen($rawPost));
+        error_log("TR069Server: Raw input: " . $rawPost);
+        
         if (empty($rawPost)) {
             error_log("TR069Server: Empty POST data received");
             $this->handleEmptyRequest();
@@ -54,10 +60,12 @@ class TR069Server {
         try {
             $xml = new SimpleXMLElement($rawPost);
             error_log("TR069Server: XML parsed successfully");
+            error_log("TR069Server: XML content: " . $xml->asXML());
             $this->processRequest($xml);
         } catch (Exception $e) {
             error_log("TR069Server XML Error: " . $e->getMessage());
             error_log("TR069Server Error trace: " . $e->getTraceAsString());
+            error_log("TR069Server Raw POST data that caused error: " . $rawPost);
             header('HTTP/1.1 500 Internal Server Error');
             exit('Error processing request');
         }

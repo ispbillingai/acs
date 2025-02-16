@@ -1,7 +1,5 @@
 
 <?php
-require_once __DIR__ . '/backend/tr069/server.php';
-
 // Enable error reporting with maximum verbosity
 error_reporting(E_ALL | E_STRICT);
 ini_set('display_errors', 0);
@@ -99,6 +97,7 @@ if (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') {
 // Initialize and run the TR-069 server
 try {
     logWithTimestamp("=== INITIALIZING TR-069 SERVER ===");
+    require_once __DIR__ . '/backend/tr069/server.php';
     $server = new TR069Server();
     logWithTimestamp("TR-069 Server initialized successfully");
     
