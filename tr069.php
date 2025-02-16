@@ -1,5 +1,14 @@
 
 <?php
+// Disable SSL verification (not recommended for production)
+stream_context_set_default([
+    'ssl' => [
+        'verify_peer' => false,
+        'verify_peer_name' => false,
+        'allow_self_signed' => true
+    ]
+]);
+
 // Enable error reporting with maximum verbosity
 error_reporting(E_ALL | E_STRICT);
 ini_set('display_errors', 0);
