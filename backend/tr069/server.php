@@ -10,6 +10,10 @@ class TR069Server {
     private $soapResponse;
     private $deviceId;
     private $sessionId;
+    
+    // Default credentials - you should change these
+    private $validUsername = "admin";
+    private $validPassword = "admin";
 
     public function __construct() {
         $database = new Database();
@@ -23,7 +27,7 @@ class TR069Server {
         
         $method = $_SERVER['REQUEST_METHOD'];
         
-        if (!isset($_SERVER['PHP_AUTH_USER'])) {
+        if (!$this->authenticateRequest()) {
             header('WWW-Authenticate: Basic realm="TR-069 ACS"');
             header('HTTP/1.1 401 Unauthorized');
             exit('Authentication required');
@@ -45,6 +49,17 @@ class TR069Server {
         }
 
         $this->sendResponse();
+    }
+
+    private function authenticateRequest() {
+        if (!isset($_SERVER['PHP_AUTH_USER']) || !isset($_SERVER['PHP_AUTH_PW'])) {
+            return false;
+        }
+
+        $username = $_SERVER['PHP_AUTH_USER'];
+        $password = $_SERVER['PHP_AUTH_PW'];
+
+        return ($username === $this->validUsername && $password === $this->validPassword);
     }
 
     private function processRequest($xml) {
