@@ -11,6 +11,18 @@ ini_set('error_log', __DIR__ . '/tr069_error.log');
 // Set unlimited execution time for long-running sessions
 set_time_limit(0);
 
+// Disable SSL verification requirement
+if (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') {
+    // Allow self-signed certificates and disable verification
+    stream_context_set_default([
+        'ssl' => [
+            'verify_peer' => false,
+            'verify_peer_name' => false,
+            'allow_self_signed' => true
+        ]
+    ]);
+}
+
 // Initialize and run the TR-069 server
 try {
     $server = new TR069Server();
