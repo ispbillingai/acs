@@ -1,6 +1,5 @@
 
-CREATE DATABASE IF NOT EXISTS tr069_acs;
-USE tr069_acs;
+
 
 -- Simplified Devices table
 CREATE TABLE IF NOT EXISTS devices (
