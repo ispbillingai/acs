@@ -10,108 +10,82 @@ class DeviceManager {
     public function updateDevice($deviceInfo) {
         try {
             $sql = "INSERT INTO devices 
-                    (serial_number, oui, manufacturer, model_name, software_version, 
-                    hardware_version, last_contact, status) 
-                    VALUES (:serial, :oui, :manufacturer, :model, :sw_ver, 
-                    :hw_ver, NOW(), 'online') 
+                    (serial_number, manufacturer, model_name, status, 
+                    last_contact, ssid, connected_clients) 
+                    VALUES (:serial, :manufacturer, :model, :status, 
+                    NOW(), :ssid, :connected_clients) 
                     ON DUPLICATE KEY UPDATE 
                     last_contact = NOW(),
-                    status = 'online',
-                    software_version = :sw_ver,
-                    hardware_version = :hw_ver";
+                    status = :status,
+                    ssid = :ssid,
+                    connected_clients = :connected_clients";
 
             $stmt = $this->db->prepare($sql);
             $stmt->execute([
                 ':serial' => $deviceInfo['serialNumber'],
-                ':oui' => $deviceInfo['oui'],
                 ':manufacturer' => $deviceInfo['manufacturer'],
-                ':model' => $deviceInfo['productClass'],
-                ':sw_ver' => $deviceInfo['softwareVersion'],
-                ':hw_ver' => $deviceInfo['hardwareVersion']
+                ':model' => $deviceInfo['modelName'],
+                ':status' => $deviceInfo['status'],
+                ':ssid' => $deviceInfo['ssid'] ?? '',
+                ':connected_clients' => $deviceInfo['connected_clients'] ?? 0
             ]);
 
-            // Get device ID
-            if ($this->db->lastInsertId()) {
-                return $this->db->lastInsertId();
-            } else {
-                $stmt = $this->db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
-                $stmt->execute([':serial' => $deviceInfo['serialNumber']]);
-                return $stmt->fetchColumn();
-            }
+            return $this->db->lastInsertId() ?: $this->getDeviceId($deviceInfo['serialNumber']);
         } catch (PDOException $e) {
             error_log("Database error in updateDevice: " . $e->getMessage());
             throw $e;
         }
     }
 
-    public function updateParameter($deviceId, $name, $value, $type) {
+    public function updateSSID($deviceId, $ssid, $password) {
         try {
-            $sql = "INSERT INTO parameters 
-                    (device_id, param_name, param_value, param_type, updated_at) 
-                    VALUES (:device_id, :name, :value, :type, NOW()) 
-                    ON DUPLICATE KEY UPDATE 
-                    param_value = :value,
-                    param_type = :type,
-                    updated_at = NOW()";
+            $sql = "UPDATE devices 
+                    SET ssid = :ssid, 
+                        ssid_password = :password 
+                    WHERE id = :device_id";
 
             $stmt = $this->db->prepare($sql);
             return $stmt->execute([
                 ':device_id' => $deviceId,
-                ':name' => $name,
-                ':value' => $value,
-                ':type' => $type
+                ':ssid' => $ssid,
+                ':password' => $password
             ]);
         } catch (PDOException $e) {
-            error_log("Database error in updateParameter: " . $e->getMessage());
+            error_log("Database error in updateSSID: " . $e->getMessage());
             throw $e;
         }
     }
 
-    public function logEvent($serialNumber, $eventCode) {
+    public function updateConnectedClients($deviceId, $clients) {
         try {
-            // Get device ID first
-            $stmt = $this->db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
-            $stmt->execute([':serial' => $serialNumber]);
-            $deviceId = $stmt->fetchColumn();
-
-            if ($deviceId) {
-                $sql = "INSERT INTO events (device_id, event_code, created_at) 
-                        VALUES (:device_id, :event_code, NOW())";
-                
-                $stmt = $this->db->prepare($sql);
-                return $stmt->execute([
-                    ':device_id' => $deviceId,
-                    ':event_code' => $eventCode
-                ]);
-            }
-            return false;
-        } catch (PDOException $e) {
-            error_log("Database error in logEvent: " . $e->getMessage());
-            throw $e;
-        }
-    }
-
-    public function getDevice($serialNumber) {
-        try {
-            $sql = "SELECT * FROM devices WHERE serial_number = :serial";
-            $stmt = $this->db->prepare($sql);
-            $stmt->execute([':serial' => $serialNumber]);
-            return $stmt->fetch(PDO::FETCH_ASSOC);
-        } catch (PDOException $e) {
-            error_log("Database error in getDevice: " . $e->getMessage());
-            throw $e;
-        }
-    }
-
-    public function getDeviceParameters($deviceId) {
-        try {
-            $sql = "SELECT * FROM parameters WHERE device_id = :device_id";
+            // First, clear existing clients
+            $sql = "DELETE FROM connected_clients WHERE device_id = :device_id";
             $stmt = $this->db->prepare($sql);
             $stmt->execute([':device_id' => $deviceId]);
-            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            // Then insert new clients
+            foreach ($clients as $client) {
+                $sql = "INSERT INTO connected_clients 
+                        (device_id, mac_address, ip_address, hostname, connected_since) 
+                        VALUES (:device_id, :mac, :ip, :hostname, NOW())";
+                
+                $stmt = $this->db->prepare($sql);
+                $stmt->execute([
+                    ':device_id' => $deviceId,
+                    ':mac' => $client['mac'],
+                    ':ip' => $client['ip'],
+                    ':hostname' => $client['hostname']
+                ]);
+            }
         } catch (PDOException $e) {
-            error_log("Database error in getDeviceParameters: " . $e->getMessage());
+            error_log("Database error in updateConnectedClients: " . $e->getMessage());
             throw $e;
         }
+    }
+
+    private function getDeviceId($serialNumber) {
+        $stmt = $this->db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
+        $stmt->execute([':serial' => $serialNumber]);
+        return $stmt->fetchColumn();
     }
 }
