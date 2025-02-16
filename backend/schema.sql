@@ -1,6 +1,4 @@
 
-
-
 -- Simplified Devices table
 CREATE TABLE IF NOT EXISTS devices (
     id INT PRIMARY KEY AUTO_INCREMENT,
