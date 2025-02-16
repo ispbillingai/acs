@@ -16,34 +16,47 @@ class TR069Server {
     private $validPassword = "admin";
 
     public function __construct() {
+        error_log("TR069Server: Constructing new server instance");
         $database = new Database();
         $this->db = $database->getConnection();
         $this->sessionManager = new SessionManager($this->db);
         $this->deviceManager = new DeviceManager($this->db);
+        error_log("TR069Server: Construction completed");
     }
 
     public function handleRequest() {
+        error_log("TR069Server: Beginning request handling");
         error_log("TR-069 Request received: " . date('Y-m-d H:i:s'));
         
         $method = $_SERVER['REQUEST_METHOD'];
+        error_log("TR069Server: Request method: " . $method);
         
         if (!$this->authenticateRequest()) {
+            error_log("TR069Server: Authentication failed");
             header('WWW-Authenticate: Basic realm="TR-069 ACS"');
             header('HTTP/1.1 401 Unauthorized');
             exit('Authentication required');
         }
 
+        error_log("TR069Server: Authentication successful");
+        
         $rawPost = file_get_contents('php://input');
         if (empty($rawPost)) {
+            error_log("TR069Server: Empty POST data received");
             $this->handleEmptyRequest();
             return;
         }
 
+        error_log("TR069Server: Processing POST data of length: " . strlen($rawPost));
+        error_log("TR069Server: POST data preview: " . substr($rawPost, 0, 500));
+
         try {
             $xml = new SimpleXMLElement($rawPost);
+            error_log("TR069Server: XML parsed successfully");
             $this->processRequest($xml);
         } catch (Exception $e) {
-            error_log("TR-069 Error: " . $e->getMessage());
+            error_log("TR069Server XML Error: " . $e->getMessage());
+            error_log("TR069Server Error trace: " . $e->getTraceAsString());
             header('HTTP/1.1 500 Internal Server Error');
             exit('Error processing request');
         }
@@ -52,14 +65,22 @@ class TR069Server {
     }
 
     private function authenticateRequest() {
+        error_log("TR069Server: Starting authentication");
+        
         if (!isset($_SERVER['PHP_AUTH_USER']) || !isset($_SERVER['PHP_AUTH_PW'])) {
+            error_log("TR069Server: Missing authentication credentials");
             return false;
         }
 
         $username = $_SERVER['PHP_AUTH_USER'];
         $password = $_SERVER['PHP_AUTH_PW'];
-
-        return ($username === $this->validUsername && $password === $this->validPassword);
+        
+        error_log("TR069Server: Attempting authentication for user: " . $username);
+        
+        $result = ($username === $this->validUsername && $password === $this->validPassword);
+        error_log("TR069Server: Authentication result: " . ($result ? "success" : "failure"));
+        
+        return $result;
     }
 
     private function processRequest($xml) {
