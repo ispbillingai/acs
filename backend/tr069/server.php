@@ -1,3 +1,4 @@
+
 <?php
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/session_manager.php';
@@ -62,6 +63,30 @@ class TR069Server {
         }
 
         $this->sendResponse();
+    }
+
+    private function handleEmptyRequest() {
+        error_log("TR069Server: Handling empty request");
+        
+        if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+            error_log("TR069Server: Handling GET request - sending empty response");
+            header('Content-Type: text/html; charset=utf-8');
+            echo "TR-069 ACS Server";
+            return;
+        }
+        
+        // For empty POST requests, send an empty 204 response
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            error_log("TR069Server: Handling empty POST request - sending 204 response");
+            header('HTTP/1.1 204 No Content');
+            return;
+        }
+        
+        // For any other method, send 405 Method Not Allowed
+        error_log("TR069Server: Invalid method " . $_SERVER['REQUEST_METHOD']);
+        header('HTTP/1.1 405 Method Not Allowed');
+        header('Allow: GET, POST');
+        exit('Method Not Allowed');
     }
 
     private function authenticateRequest() {
