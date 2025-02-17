@@ -14,20 +14,6 @@ class DeviceManager {
             $stmt->execute([':serial' => $deviceInfo['serialNumber']]);
             $existingId = $stmt->fetchColumn();
 
-            $params = [
-                'manufacturer' => $deviceInfo['manufacturer'],
-                'model_name' => $deviceInfo['modelName'],
-                'serial_number' => $deviceInfo['serialNumber'],
-                'mac_address' => $deviceInfo['macAddress'] ?? null,
-                'status' => $deviceInfo['status'],
-                'ip_address' => $_SERVER['REMOTE_ADDR'],
-                'software_version' => $deviceInfo['softwareVersion'] ?? null,
-                'hardware_version' => $deviceInfo['hardwareVersion'] ?? null,
-                'ssid' => $deviceInfo['ssid'] ?? null,
-                'uptime' => $deviceInfo['uptime'] ?? null,
-                'tr069_password' => $deviceInfo['tr069Password'] ?? null
-            ];
-
             if ($existingId) {
                 // Update existing device
                 $sql = "UPDATE devices SET 
@@ -41,10 +27,22 @@ class DeviceManager {
                         hardware_version = :hardware_version,
                         ssid = :ssid,
                         uptime = :uptime,
-                        tr069_password = COALESCE(:tr069_password, tr069_password)
+                        tr069_password = :tr069_password
                         WHERE id = :id";
 
-                $params[':id'] = $existingId;
+                $params = [
+                    ':manufacturer' => $deviceInfo['manufacturer'],
+                    ':model_name' => $deviceInfo['modelName'],
+                    ':mac_address' => $deviceInfo['macAddress'] ?? null,
+                    ':status' => $deviceInfo['status'],
+                    ':ip_address' => $_SERVER['REMOTE_ADDR'],
+                    ':software_version' => $deviceInfo['softwareVersion'] ?? null,
+                    ':hardware_version' => $deviceInfo['hardwareVersion'] ?? null,
+                    ':ssid' => $deviceInfo['ssid'] ?? null,
+                    ':uptime' => $deviceInfo['uptime'] ?? null,
+                    ':tr069_password' => $deviceInfo['tr069Password'] ?? null,
+                    ':id' => $existingId
+                ];
                 
                 error_log("Updating device with params: " . print_r($params, true));
                 $stmt = $this->db->prepare($sql);
@@ -62,6 +60,20 @@ class DeviceManager {
                         (:serial_number, :manufacturer, :model_name, :mac_address, :status,
                         NOW(), :ip_address, :software_version, :hardware_version,
                         :ssid, :uptime, :tr069_password)";
+
+                $params = [
+                    ':serial_number' => $deviceInfo['serialNumber'],
+                    ':manufacturer' => $deviceInfo['manufacturer'],
+                    ':model_name' => $deviceInfo['modelName'],
+                    ':mac_address' => $deviceInfo['macAddress'] ?? null,
+                    ':status' => $deviceInfo['status'],
+                    ':ip_address' => $_SERVER['REMOTE_ADDR'],
+                    ':software_version' => $deviceInfo['softwareVersion'] ?? null,
+                    ':hardware_version' => $deviceInfo['hardwareVersion'] ?? null,
+                    ':ssid' => $deviceInfo['ssid'] ?? null,
+                    ':uptime' => $deviceInfo['uptime'] ?? null,
+                    ':tr069_password' => $deviceInfo['tr069Password'] ?? null
+                ];
 
                 error_log("Inserting new device with params: " . print_r($params, true));
                 $stmt = $this->db->prepare($sql);
