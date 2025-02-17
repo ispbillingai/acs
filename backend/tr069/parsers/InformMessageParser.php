@@ -13,28 +13,20 @@ class InformMessageParser {
         'InternetGatewayDevice.DeviceInfo.SoftwareVersion' => 'softwareVersion',
         'Device.LAN.MACAddress' => 'macAddress',
         'InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.MACAddress' => 'macAddress',
-        
-        // Ethernet interface MAC address paths
         'Device.Ethernet.Interface.1.MACAddress' => 'macAddress',
         'Device.Ethernet.Interface.1.orig-mac-address' => 'macAddress',
         'Device.Interface.ether1.MACAddress' => 'macAddress',
         'Device.Interface.ether1.orig-mac-address' => 'macAddress',
         'Device.LAN.Interface.1.orig-mac-address' => 'macAddress',
-        
-        // SSID and WiFi parameters for different TR-069 implementations
         'Device.WiFi.SSID.1.SSID' => 'ssid',
         'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID' => 'ssid',
         'Device.WiFi.AccessPoint.1.Security.KeyPassphrase' => 'ssidPassword',
         'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase' => 'ssidPassword',
-        
-        // Mikrotik specific SSID and password paths
         'Device.WiFi.Radio.1.SSID' => 'ssid',
         'Device.WiFi.Radio.1.SecurityKey' => 'ssidPassword',
         'Device.WiFi.SSID.1.Name' => 'ssid',
         'Device.WiFi.AccessPoint.1.Security.PreSharedKey' => 'ssidPassword',
         'Device.WiFi.AccessPoint.1.Security.PSKPassphrase' => 'ssidPassword',
-        
-        // Uptime parameter
         'Device.DeviceInfo.UpTime' => 'uptime',
         'InternetGatewayDevice.DeviceInfo.UpTime' => 'uptime'
     ];
