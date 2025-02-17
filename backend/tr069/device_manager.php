@@ -27,15 +27,18 @@ class DeviceManager {
                         WHERE id = :id";
 
                 $stmt = $this->db->prepare($sql);
-                $stmt->execute([
+                $params = [
                     ':id' => $existingId,
                     ':manufacturer' => $deviceInfo['manufacturer'],
                     ':model' => $deviceInfo['modelName'],
                     ':status' => $deviceInfo['status'],
                     ':ip_address' => $_SERVER['REMOTE_ADDR'],
-                    ':software_version' => $deviceInfo['softwareVersion'] ?? null,
-                    ':hardware_version' => $deviceInfo['hardwareVersion'] ?? null
-                ]);
+                    ':software_version' => $deviceInfo['softwareVersion'],
+                    ':hardware_version' => $deviceInfo['hardwareVersion']
+                ];
+                
+                error_log("Updating device with params: " . print_r($params, true));
+                $stmt->execute($params);
 
                 return $existingId;
             } else {
@@ -48,15 +51,18 @@ class DeviceManager {
                         NOW(), :ip_address, :software_version, :hardware_version)";
 
                 $stmt = $this->db->prepare($sql);
-                $stmt->execute([
+                $params = [
                     ':serial' => $deviceInfo['serialNumber'],
                     ':manufacturer' => $deviceInfo['manufacturer'],
                     ':model' => $deviceInfo['modelName'],
                     ':status' => $deviceInfo['status'],
                     ':ip_address' => $_SERVER['REMOTE_ADDR'],
-                    ':software_version' => $deviceInfo['softwareVersion'] ?? null,
-                    ':hardware_version' => $deviceInfo['hardwareVersion'] ?? null
-                ]);
+                    ':software_version' => $deviceInfo['softwareVersion'],
+                    ':hardware_version' => $deviceInfo['hardwareVersion']
+                ];
+                
+                error_log("Inserting new device with params: " . print_r($params, true));
+                $stmt->execute($params);
 
                 return $this->db->lastInsertId();
             }
@@ -64,11 +70,5 @@ class DeviceManager {
             error_log("Database error in updateDevice: " . $e->getMessage());
             throw $e;
         }
-    }
-
-    private function getDeviceId($serialNumber) {
-        $stmt = $this->db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
-        $stmt->execute([':serial' => $serialNumber]);
-        return $stmt->fetchColumn();
     }
 }

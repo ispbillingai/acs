@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS devices (
     ip_address VARCHAR(45),
     last_contact DATETIME,
     status ENUM('online', 'offline', 'provisioning'),
+    software_version VARCHAR(32),
+    hardware_version VARCHAR(32),
     ssid VARCHAR(64),
     ssid_password VARCHAR(64),
     connected_clients INT DEFAULT 0,

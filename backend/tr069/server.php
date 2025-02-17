@@ -1,4 +1,3 @@
-
 <?php
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/session_manager.php';
@@ -99,35 +98,43 @@ class TR069Server {
     }
 
     private function handleInform($request) {
-        $deviceId = $request->DeviceId;
-        $parameterList = $request->ParameterList->children();
-        
-        // Extract device information
-        $deviceInfo = [
-            'manufacturer' => (string)$deviceId->Manufacturer,
-            'serialNumber' => (string)$deviceId->SerialNumber,
-            'modelName' => (string)$deviceId->ProductClass,
-            'status' => 'online'
-        ];
-
-        // Process parameters
-        foreach ($parameterList as $param) {
-            $name = (string)$param->Name;
-            $value = (string)$param->Value;
+        try {
+            $deviceId = $request->DeviceId;
             
-            if (strpos($name, 'DeviceInfo.SoftwareVersion') !== false) {
-                $deviceInfo['softwareVersion'] = $value;
-            } elseif (strpos($name, 'DeviceInfo.HardwareVersion') !== false) {
-                $deviceInfo['hardwareVersion'] = $value;
-            }
-        }
+            // Extract device information
+            $deviceInfo = [
+                'manufacturer' => (string)$deviceId->Manufacturer,
+                'serialNumber' => (string)$deviceId->SerialNumber,
+                'modelName' => (string)$deviceId->ProductClass,
+                'status' => 'online',
+                'softwareVersion' => '',
+                'hardwareVersion' => ''
+            ];
 
-        // Update device in database
-        $this->deviceId = $this->deviceManager->updateDevice($deviceInfo);
-        $this->sessionId = $this->sessionManager->createSession($deviceInfo['serialNumber']);
-        
-        // Create inform response
-        $this->soapResponse = $this->createInformResponse();
+            // Process parameters
+            if (isset($request->ParameterList)) {
+                foreach ($request->ParameterList->children() as $param) {
+                    $name = (string)$param->Name;
+                    $value = (string)$param->Value;
+                    
+                    if (strpos($name, 'DeviceInfo.SoftwareVersion') !== false) {
+                        $deviceInfo['softwareVersion'] = $value;
+                    } elseif (strpos($name, 'DeviceInfo.HardwareVersion') !== false) {
+                        $deviceInfo['hardwareVersion'] = $value;
+                    }
+                }
+            }
+
+            // Update device in database
+            $this->deviceId = $this->deviceManager->updateDevice($deviceInfo);
+            $this->sessionId = $this->sessionManager->createSession($deviceInfo['serialNumber']);
+            
+            // Create inform response
+            $this->soapResponse = $this->createInformResponse();
+        } catch (Exception $e) {
+            error_log("Error in handleInform: " . $e->getMessage());
+            throw $e;
+        }
     }
 
     private function createInformResponse() {
