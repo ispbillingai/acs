@@ -20,11 +20,11 @@ class InformMessageParser {
         'Device.WiFi.AccessPoint.1.Security.KeyPassphrase' => 'ssidPassword',
         'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase' => 'ssidPassword',
         'Device.Ethernet.Interface.1.MACAddress' => 'macAddress',
+        'Device.Ethernet.Interface.1.orig-mac-address' => 'macAddress',
         'InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.MACAddress' => 'macAddress',
-        'Device.Interface.1.MAC' => 'macAddress',
-        'Device.Interface.1.Stats.UpTime' => 'uptime',
-        'Device.WiFi.Radio.1.SSID' => 'ssid',
-        'Device.WiFi.Radio.1.SecurityKey' => 'ssidPassword'
+        'Device.Interface.ether1.MACAddress' => 'macAddress',
+        'Device.Interface.ether1.orig-mac-address' => 'macAddress',
+        'Device.LAN.Interface.1.orig-mac-address' => 'macAddress'
     ];
 
     public function parseInform($request) {
@@ -60,6 +60,10 @@ class InformMessageParser {
             // Process parameters
             $this->processParameters($parameterList, $deviceInfo);
             error_log("After processing parameters: " . print_r($deviceInfo, true));
+            
+            // Additional parsing for Mikrotik ethernet interfaces
+            $this->processMikrotikInterfaces($parameterList, $deviceInfo);
+            error_log("After processing Mikrotik interfaces: " . print_r($deviceInfo, true));
             
             // Ensure required fields
             $this->ensureRequiredFields($deviceInfo);
@@ -135,6 +139,28 @@ class InformMessageParser {
         if (strpos($name, '.MAC') !== false) {
             $deviceInfo['macAddress'] = $value;
             error_log("Found ether1 MAC address: $value");
+        }
+    }
+
+    private function processMikrotikInterfaces($parameterList, &$deviceInfo) {
+        error_log("Processing Mikrotik interfaces...");
+        
+        foreach ($parameterList as $param) {
+            $name = (string)($param->Name ?? $param->children()->Name ?? '');
+            $value = (string)($param->Value ?? $param->children()->Value ?? '');
+            
+            error_log("Checking interface parameter: $name = $value");
+
+            // Check for ethernet interface parameters
+            if (strpos($name, 'Device.Ethernet.Interface.') === 0 || 
+                strpos($name, 'Device.Interface.ether1') === 0) {
+                
+                if (strpos($name, '.MACAddress') !== false || 
+                    strpos($name, '.orig-mac-address') !== false) {
+                    $deviceInfo['macAddress'] = $value;
+                    error_log("Found Mikrotik ethernet MAC address: $value");
+                }
+            }
         }
     }
 
