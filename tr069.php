@@ -1,14 +1,5 @@
 
 <?php
-// Disable SSL verification (not recommended for production)
-stream_context_set_default([
-    'ssl' => [
-        'verify_peer' => false,
-        'verify_peer_name' => false,
-        'allow_self_signed' => true
-    ]
-]);
-
 // Enable error reporting with maximum verbosity
 error_reporting(E_ALL | E_STRICT);
 ini_set('display_errors', 0);
@@ -38,11 +29,6 @@ logWithTimestamp("Request Method: " . $_SERVER['REQUEST_METHOD']);
 logWithTimestamp("Request URI: " . $_SERVER['REQUEST_URI']);
 logWithTimestamp("Query String: " . (isset($_SERVER['QUERY_STRING']) ? $_SERVER['QUERY_STRING'] : 'none'));
 
-// HTTPS and SSL Information
-logWithTimestamp("HTTPS Status: " . (isset($_SERVER['HTTPS']) ? $_SERVER['HTTPS'] : 'off'));
-logWithTimestamp("Server Protocol: " . $_SERVER['SERVER_PROTOCOL']);
-logWithTimestamp("SSL Version: " . (isset($_SERVER['SSL_PROTOCOL']) ? $_SERVER['SSL_PROTOCOL'] : 'unknown'));
-
 // Server Information
 logWithTimestamp("Server Software: " . $_SERVER['SERVER_SOFTWARE']);
 logWithTimestamp("Server Name: " . $_SERVER['SERVER_NAME']);
@@ -71,35 +57,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         foreach ($_POST as $key => $value) {
             logWithTimestamp("POST[$key]: " . print_r($value, true));
         }
-    }
-}
-
-// SSL Certificate Information
-logWithTimestamp("=== SSL CERTIFICATE INFO ===");
-if (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') {
-    $ssl_info = openssl_get_cert_locations();
-    logWithTimestamp("SSL Certificate Locations: " . print_r($ssl_info, true));
-    
-    // Get current SSL context
-    $context = stream_context_get_default();
-    logWithTimestamp("Current SSL Context: " . print_r($context, true));
-    
-    // Attempt to disable SSL verification
-    $ssl_context = [
-        'ssl' => [
-            'verify_peer' => false,
-            'verify_peer_name' => false,
-            'allow_self_signed' => true
-        ]
-    ];
-    
-    try {
-        stream_context_set_default($ssl_context);
-        logWithTimestamp("SSL Context modified successfully");
-        logWithTimestamp("New SSL Context: " . print_r(stream_context_get_default(), true));
-    } catch (Exception $e) {
-        logWithTimestamp("Error setting SSL context: " . $e->getMessage());
-        logWithTimestamp("SSL Error Stack: " . print_r(error_get_last(), true));
     }
 }
 
