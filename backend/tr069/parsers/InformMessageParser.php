@@ -33,36 +33,38 @@ class InformMessageParser {
     ];
 
     public function parseInform($request) {
-        // Log the raw XML content with better formatting
-        $rawXml = $request->asXML();
-        error_log("=== BEGIN RAW XML CONTENT ===");
-        error_log($rawXml);
-        error_log("=== END RAW XML CONTENT ===");
+        // Register all possible namespaces that Mikrotik might use
+        $namespaces = $request->getNamespaces(true);
+        error_log("Found XML namespaces: " . print_r($namespaces, true));
+
+        // Extract SOAP and CWMP namespaces
+        $soapEnv = isset($namespaces['soapenv']) ? $namespaces['soapenv'] : 'http://schemas.xmlsoap.org/soap/envelope/';
+        $cwmp = isset($namespaces['cwmp']) ? $namespaces['cwmp'] : 'urn:dslforum-org:cwmp-1-0';
         
+        error_log("Using SOAP namespace: " . $soapEnv);
+        error_log("Using CWMP namespace: " . $cwmp);
+
         try {
-            $deviceId = $request->DeviceId ?? $request->children()->DeviceId;
-            error_log("Extracted DeviceId: " . print_r($deviceId, true));
-            
-            // Enhanced parameter list extraction
-            error_log("=== PARAMETER LIST EXTRACTION ===");
-            $parameterList = null;
-            
-            // Try multiple paths to get parameter list
-            if (isset($request->ParameterList->ParameterValueStruct)) {
-                error_log("Found parameters in direct path");
-                $parameterList = $request->ParameterList->ParameterValueStruct;
-            } elseif (isset($request->children()->ParameterList)) {
-                error_log("Found parameters in children path");
-                $parameterList = $request->children()->ParameterList->children()->ParameterValueStruct;
+            // Get the Inform element using proper namespace
+            $inform = $request->children($soapEnv)->Body->children($cwmp)->Inform;
+            error_log("Extracted Inform element: " . print_r($inform, true));
+
+            // Extract DeviceId with proper namespace handling
+            $deviceId = $inform->DeviceId;
+            if (empty($deviceId)) {
+                $deviceId = $inform->children()->DeviceId;
             }
             
-            if ($parameterList) {
-                error_log("Successfully extracted parameter list");
-                error_log("Parameter List Content: " . print_r($parameterList, true));
-            } else {
-                error_log("WARNING: Could not extract parameter list");
-            }
+            error_log("Extracted DeviceId element: " . print_r($deviceId, true));
             
+            if (empty($deviceId)) {
+                throw new Exception("Missing or invalid DeviceId element");
+            }
+
+            // Get ParameterList with proper namespace handling
+            $parameterList = $inform->ParameterList->children()->ParameterValueStruct;
+            error_log("Parameter List Content: " . print_r($parameterList, true));
+
             // Extract base device info
             $deviceInfo = $this->extractBaseDeviceInfo($deviceId);
             error_log("Base device info: " . print_r($deviceInfo, true));
@@ -75,14 +77,6 @@ class InformMessageParser {
             $this->processMikrotikInterfaces($parameterList, $deviceInfo);
             error_log("After processing Mikrotik interfaces: " . print_r($deviceInfo, true));
             
-            // Process WiFi parameters
-            $this->processWiFiParameters($parameterList, $deviceInfo);
-            error_log("After processing WiFi parameters: " . print_r($deviceInfo, true));
-            
-            // Ensure required fields
-            $this->ensureRequiredFields($deviceInfo);
-            error_log("Final device info: " . print_r($deviceInfo, true));
-            
             return $deviceInfo;
             
         } catch (Exception $e) {
@@ -90,6 +84,41 @@ class InformMessageParser {
             error_log("Stack trace: " . $e->getTraceAsString());
             throw $e;
         }
+    }
+
+    private function extractBaseDeviceInfo($deviceId) {
+        error_log("Extracting base device info from: " . print_r($deviceId, true));
+        
+        $manufacturer = (string)($deviceId->Manufacturer ?? '');
+        $productClass = (string)($deviceId->ProductClass ?? '');
+        $serialNumber = (string)($deviceId->SerialNumber ?? '');
+        $oui = (string)($deviceId->OUI ?? '');
+        
+        // If serial number is empty, use OUI + a timestamp
+        if (empty($serialNumber) && !empty($oui)) {
+            $serialNumber = $oui . '_' . time();
+            error_log("Generated serial number from OUI: $serialNumber");
+        }
+        
+        error_log("Extracted manufacturer: $manufacturer");
+        error_log("Extracted product class: $productClass");
+        error_log("Extracted serial number: $serialNumber");
+        error_log("Extracted OUI: $oui");
+        
+        return [
+            'manufacturer' => $manufacturer,
+            'modelName' => $productClass,
+            'serialNumber' => $serialNumber,
+            'status' => 'online',
+            'macAddress' => null,
+            'softwareVersion' => null,
+            'hardwareVersion' => null,
+            'ssid' => null,
+            'ssidPassword' => null,
+            'uptime' => null,
+            'tr069Password' => null,
+            'connectedClients' => []
+        ];
     }
 
     private function processWiFiParameters($parameterList, &$deviceInfo) {
@@ -118,34 +147,6 @@ class InformMessageParser {
             }
         }
         error_log("=== END WIFI PARAMETER PROCESSING ===");
-    }
-
-    private function extractBaseDeviceInfo($deviceId) {
-        error_log("Extracting base device info from: " . print_r($deviceId, true));
-        
-        // Try different methods to access DeviceId properties
-        $manufacturer = (string)($deviceId->Manufacturer ?? $deviceId->children()->Manufacturer ?? '');
-        $productClass = (string)($deviceId->ProductClass ?? $deviceId->children()->ProductClass ?? '');
-        $serialNumber = (string)($deviceId->SerialNumber ?? $deviceId->children()->SerialNumber ?? '');
-        
-        error_log("Extracted manufacturer: $manufacturer");
-        error_log("Extracted product class: $productClass");
-        error_log("Extracted serial number: $serialNumber");
-        
-        return [
-            'manufacturer' => $manufacturer,
-            'modelName' => $productClass,
-            'serialNumber' => $serialNumber,
-            'status' => 'online',
-            'macAddress' => null,
-            'softwareVersion' => null,
-            'hardwareVersion' => null,
-            'ssid' => null,
-            'ssidPassword' => null,
-            'uptime' => null,
-            'tr069Password' => null,
-            'connectedClients' => []
-        ];
     }
 
     private function processParameters($parameterList, &$deviceInfo) {
