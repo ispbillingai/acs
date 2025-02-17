@@ -8,7 +8,12 @@ import { AlertCircle } from "lucide-react";
 
 // Fetch real devices from the backend
 const fetchDevices = async () => {
-  const response = await fetch('/backend/api/devices.php');
+  const response = await fetch('/backend/api/devices.php', {
+    headers: {
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache'
+    }
+  });
   if (!response.ok) {
     throw new Error('Failed to fetch devices');
   }
@@ -19,7 +24,9 @@ const Index = () => {
   const { data: devices, isLoading, error } = useQuery({
     queryKey: ['devices'],
     queryFn: fetchDevices,
-    refetchInterval: 30000, // Refresh every 30 seconds
+    refetchInterval: 10000, // Refresh every 10 seconds
+    refetchOnWindowFocus: true,
+    staleTime: 0 // Consider data immediately stale
   });
 
   return (
