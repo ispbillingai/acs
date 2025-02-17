@@ -1,36 +1,27 @@
 
 import { DeviceStats } from "@/components/DeviceStats";
 import { DeviceCard } from "@/components/DeviceCard";
+import { useQuery } from "@tanstack/react-query";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { AlertCircle } from "lucide-react";
 
-// Mock data - replace with actual API calls
-const mockDevices = [
-  {
-    id: "1",
-    serialNumber: "HW123456789",
-    model: "Huawei EchoLife HG8245H",
-    status: "online",
-    lastContact: "2024-02-20 15:30:00",
-    ipAddress: "192.168.1.100",
-  },
-  {
-    id: "2",
-    serialNumber: "HW987654321",
-    model: "Huawei EchoLife HG8245Q",
-    status: "offline",
-    lastContact: "2024-02-20 12:15:00",
-    ipAddress: "192.168.1.101",
-  },
-  {
-    id: "3",
-    serialNumber: "HW456789123",
-    model: "Huawei EchoLife HG8245U",
-    status: "provisioning",
-    lastContact: "2024-02-20 14:45:00",
-    ipAddress: "192.168.1.102",
-  },
-] as const;
+// Fetch real devices from the backend
+const fetchDevices = async () => {
+  const response = await fetch('/backend/api/devices.php');
+  if (!response.ok) {
+    throw new Error('Failed to fetch devices');
+  }
+  return response.json();
+};
 
 const Index = () => {
+  const { data: devices, isLoading, error } = useQuery({
+    queryKey: ['devices'],
+    queryFn: fetchDevices,
+    refetchInterval: 30000, // Refresh every 30 seconds
+  });
+
   return (
     <div className="min-h-screen bg-background p-6">
       <div className="max-w-7xl mx-auto space-y-8">
@@ -41,15 +32,37 @@ const Index = () => {
           </p>
         </div>
 
-        <DeviceStats />
+        <DeviceStats devices={devices || []} />
 
         <div>
           <h2 className="text-xl font-semibold mb-4">Connected Devices</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {mockDevices.map((device) => (
-              <DeviceCard key={device.id} device={device} />
-            ))}
-          </div>
+          
+          {isLoading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {[1, 2, 3].map((n) => (
+                <Skeleton key={n} className="h-[200px] w-full" />
+              ))}
+            </div>
+          ) : error ? (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                Error loading devices. Please try again later.
+              </AlertDescription>
+            </Alert>
+          ) : devices?.length === 0 ? (
+            <Alert>
+              <AlertDescription>
+                No devices connected yet. Devices will appear here when they connect to the ACS.
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {devices.map((device) => (
+                <DeviceCard key={device.id} device={device} />
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
