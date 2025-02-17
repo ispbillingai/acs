@@ -1,3 +1,4 @@
+
 <?php
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/session_manager.php';
@@ -101,14 +102,13 @@ class TR069Server {
         try {
             $deviceId = $request->DeviceId;
             
-            // Extract device information
+            // Extract basic device information
             $deviceInfo = [
                 'manufacturer' => (string)$deviceId->Manufacturer,
                 'serialNumber' => (string)$deviceId->SerialNumber,
                 'modelName' => (string)$deviceId->ProductClass,
                 'status' => 'online',
-                'softwareVersion' => '',
-                'hardwareVersion' => ''
+                'connectedClients' => []
             ];
 
             // Process parameters
@@ -117,10 +117,46 @@ class TR069Server {
                     $name = (string)$param->Name;
                     $value = (string)$param->Value;
                     
-                    if (strpos($name, 'DeviceInfo.SoftwareVersion') !== false) {
-                        $deviceInfo['softwareVersion'] = $value;
-                    } elseif (strpos($name, 'DeviceInfo.HardwareVersion') !== false) {
-                        $deviceInfo['hardwareVersion'] = $value;
+                    switch ($name) {
+                        case 'Device.DeviceInfo.SoftwareVersion':
+                            $deviceInfo['softwareVersion'] = $value;
+                            break;
+                        case 'Device.DeviceInfo.HardwareVersion':
+                            $deviceInfo['hardwareVersion'] = $value;
+                            break;
+                        case 'Device.DeviceInfo.ModelName':
+                            $deviceInfo['modelName'] = $value;
+                            break;
+                        case 'Device.Ethernet.Interface.1.MACAddress':
+                            $deviceInfo['macAddress'] = $value;
+                            break;
+                        case 'Device.WiFi.SSID.1.SSID':
+                            $deviceInfo['ssid'] = $value;
+                            break;
+                        case 'Device.DeviceInfo.UpTime':
+                            $deviceInfo['uptime'] = intval($value);
+                            break;
+                        case 'Device.ManagementServer.Password':
+                            $deviceInfo['tr069Password'] = $value;
+                            break;
+                    }
+
+                    // Handle connected clients
+                    if (strpos($name, 'Device.WiFi.AccessPoint.1.AssociatedDevice.') === 0) {
+                        if (!isset($deviceInfo['connectedClients'])) {
+                            $deviceInfo['connectedClients'] = [];
+                        }
+                        // Extract client index from parameter name
+                        preg_match('/AssociatedDevice\.(\d+)\./', $name, $matches);
+                        if ($matches) {
+                            $index = $matches[1];
+                            if (!isset($deviceInfo['connectedClients'][$index])) {
+                                $deviceInfo['connectedClients'][$index] = [];
+                            }
+                            if (strpos($name, '.MACAddress') !== false) {
+                                $deviceInfo['connectedClients'][$index]['macAddress'] = $value;
+                            }
+                        }
                     }
                 }
             }
