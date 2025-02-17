@@ -28,7 +28,8 @@ class InformMessageParser {
         'Device.WiFi.AccessPoint.1.Security.PreSharedKey' => 'ssidPassword',
         'Device.WiFi.AccessPoint.1.Security.PSKPassphrase' => 'ssidPassword',
         'Device.DeviceInfo.UpTime' => 'uptime',
-        'InternetGatewayDevice.DeviceInfo.UpTime' => 'uptime'
+        'InternetGatewayDevice.DeviceInfo.UpTime' => 'uptime',
+        'Device.Interface.ether1.UpTime' => 'uptime'
     ];
 
     public function parseInform($request) {
@@ -38,24 +39,15 @@ class InformMessageParser {
         error_log($rawXml);
         error_log("=== END RAW XML CONTENT ===");
         
-        // Log the full request object structure with better formatting
-        error_log("=== BEGIN FULL REQUEST STRUCTURE ===");
-        error_log(print_r($request, true));
-        error_log("=== END FULL REQUEST STRUCTURE ===");
-        
-        // Log Mikrotik specific identification
-        $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
-        error_log("=== DEVICE IDENTIFICATION ===");
-        error_log("User Agent: " . $userAgent);
-        error_log("Client IP: " . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
-        
         try {
-            // Extract DeviceId information with namespace handling
             $deviceId = $request->DeviceId ?? $request->children()->DeviceId;
             error_log("Extracted DeviceId: " . print_r($deviceId, true));
             
-            // Enhanced parameter list logging
+            // Enhanced parameter list extraction
             error_log("=== PARAMETER LIST EXTRACTION ===");
+            $parameterList = null;
+            
+            // Try multiple paths to get parameter list
             if (isset($request->ParameterList->ParameterValueStruct)) {
                 error_log("Found parameters in direct path");
                 $parameterList = $request->ParameterList->ParameterValueStruct;
@@ -63,19 +55,29 @@ class InformMessageParser {
                 error_log("Found parameters in children path");
                 $parameterList = $request->children()->ParameterList->children()->ParameterValueStruct;
             }
-            error_log("Parameter List Content: " . print_r($parameterList, true));
+            
+            if ($parameterList) {
+                error_log("Successfully extracted parameter list");
+                error_log("Parameter List Content: " . print_r($parameterList, true));
+            } else {
+                error_log("WARNING: Could not extract parameter list");
+            }
             
             // Extract base device info
             $deviceInfo = $this->extractBaseDeviceInfo($deviceId);
             error_log("Base device info: " . print_r($deviceInfo, true));
             
-            // Process parameters
+            // Process parameters with enhanced logging
             $this->processParameters($parameterList, $deviceInfo);
             error_log("After processing parameters: " . print_r($deviceInfo, true));
             
-            // Additional parsing for Mikrotik ethernet interfaces
+            // Additional parsing for Mikrotik interfaces
             $this->processMikrotikInterfaces($parameterList, $deviceInfo);
             error_log("After processing Mikrotik interfaces: " . print_r($deviceInfo, true));
+            
+            // Process WiFi parameters
+            $this->processWiFiParameters($parameterList, $deviceInfo);
+            error_log("After processing WiFi parameters: " . print_r($deviceInfo, true));
             
             // Ensure required fields
             $this->ensureRequiredFields($deviceInfo);
@@ -88,6 +90,34 @@ class InformMessageParser {
             error_log("Stack trace: " . $e->getTraceAsString());
             throw $e;
         }
+    }
+
+    private function processWiFiParameters($parameterList, &$deviceInfo) {
+        error_log("=== BEGIN WIFI PARAMETER PROCESSING ===");
+        foreach ($parameterList as $param) {
+            $name = (string)($param->Name ?? $param->children()->Name ?? '');
+            $value = (string)($param->Value ?? $param->children()->Value ?? '');
+            
+            error_log("Checking WiFi parameter: [$name] = [$value]");
+
+            // Check for SSID
+            if (strpos($name, '.SSID') !== false || 
+                strpos($name, '.wlan1.name') !== false || 
+                strpos($name, '.WLANConfiguration') !== false) {
+                $deviceInfo['ssid'] = $value;
+                error_log("SUCCESS: Found WiFi SSID: $value");
+            }
+            
+            // Check for Password
+            if (strpos($name, '.SecurityKey') !== false || 
+                strpos($name, '.KeyPassphrase') !== false || 
+                strpos($name, '.WPAPassphrase') !== false || 
+                strpos($name, '.PreSharedKey') !== false) {
+                $deviceInfo['ssidPassword'] = $value;
+                error_log("SUCCESS: Found WiFi password: $value");
+            }
+        }
+        error_log("=== END WIFI PARAMETER PROCESSING ===");
     }
 
     private function extractBaseDeviceInfo($deviceId) {
@@ -157,26 +187,6 @@ class InformMessageParser {
             }
         }
         error_log("=== END PARAMETER PROCESSING ===");
-    }
-
-    private function processWiFiParameter($name, $value, &$deviceInfo) {
-        error_log("=== PROCESSING WIFI PARAMETER ===");
-        error_log("Parameter name: $name");
-        error_log("Parameter value: $value");
-
-        if (strpos($name, '.SSID') !== false || strpos($name, '.Name') !== false) {
-            $deviceInfo['ssid'] = $value;
-            error_log("SUCCESS: Found WiFi SSID: $value");
-        } elseif (strpos($name, '.SecurityKey') !== false || 
-                  strpos($name, '.PreSharedKey') !== false || 
-                  strpos($name, '.PSKPassphrase') !== false || 
-                  strpos($name, '.KeyPassphrase') !== false) {
-            $deviceInfo['ssidPassword'] = $value;
-            error_log("SUCCESS: Found WiFi password: $value");
-        } else {
-            error_log("INFO: WiFi parameter didn't match SSID or password patterns");
-        }
-        error_log("=== END WIFI PARAMETER PROCESSING ===");
     }
 
     private function processMikrotikInterfaces($parameterList, &$deviceInfo) {
