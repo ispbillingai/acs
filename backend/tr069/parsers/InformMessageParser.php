@@ -1,4 +1,3 @@
-
 <?php
 class InformMessageParser {
     private $parameterMap = [
@@ -17,7 +16,15 @@ class InformMessageParser {
         'Device.WiFi.SSID.1.SSID' => 'ssid',
         'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID' => 'ssid',
         'Device.DeviceInfo.UpTime' => 'uptime',
-        'InternetGatewayDevice.DeviceInfo.UpTime' => 'uptime'
+        'InternetGatewayDevice.DeviceInfo.UpTime' => 'uptime',
+        'Device.WiFi.AccessPoint.1.Security.KeyPassphrase' => 'ssidPassword',
+        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase' => 'ssidPassword',
+        'Device.Ethernet.Interface.1.MACAddress' => 'macAddress',
+        'InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.MACAddress' => 'macAddress',
+        'Device.Interface.1.MAC' => 'macAddress',
+        'Device.Interface.1.Stats.UpTime' => 'uptime',
+        'Device.WiFi.Radio.1.SSID' => 'ssid',
+        'Device.WiFi.Radio.1.SecurityKey' => 'ssidPassword'
     ];
 
     public function parseInform($request) {
@@ -88,6 +95,7 @@ class InformMessageParser {
             'softwareVersion' => null,
             'hardwareVersion' => null,
             'ssid' => null,
+            'ssidPassword' => null,
             'uptime' => null,
             'tr069Password' => null,
             'connectedClients' => []
@@ -113,7 +121,20 @@ class InformMessageParser {
                 error_log("Mapped parameter $name to $key with value $value");
             }
 
+            // Special handling for Mikrotik Interface parameters
+            if (strpos($name, 'Device.Interface.') === 0) {
+                $this->processMikrotikInterface($name, $value, $deviceInfo);
+            }
+
             $this->processConnectedClient($name, $value, $deviceInfo);
+        }
+    }
+
+    private function processMikrotikInterface($name, $value, &$deviceInfo) {
+        // Specific handling for ether1 interface
+        if (strpos($name, '.MAC') !== false) {
+            $deviceInfo['macAddress'] = $value;
+            error_log("Found ether1 MAC address: $value");
         }
     }
 
