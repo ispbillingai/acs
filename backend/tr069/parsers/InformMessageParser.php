@@ -32,30 +32,38 @@ class InformMessageParser {
     ];
 
     public function parseInform($request) {
-        // Log the raw XML content
+        // Log the raw XML content with better formatting
         $rawXml = $request->asXML();
-        error_log("Raw XML content: " . $rawXml);
+        error_log("=== BEGIN RAW XML CONTENT ===");
+        error_log($rawXml);
+        error_log("=== END RAW XML CONTENT ===");
         
-        // Log the full request object structure
-        error_log("Full request object structure: " . print_r($request, true));
+        // Log the full request object structure with better formatting
+        error_log("=== BEGIN FULL REQUEST STRUCTURE ===");
+        error_log(print_r($request, true));
+        error_log("=== END FULL REQUEST STRUCTURE ===");
         
-        // Check if this is a Mikrotik device
+        // Log Mikrotik specific identification
         $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
-        error_log("Processing request from device: " . $userAgent);
+        error_log("=== DEVICE IDENTIFICATION ===");
+        error_log("User Agent: " . $userAgent);
+        error_log("Client IP: " . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
         
         try {
             // Extract DeviceId information with namespace handling
             $deviceId = $request->DeviceId ?? $request->children()->DeviceId;
             error_log("Extracted DeviceId: " . print_r($deviceId, true));
             
-            // Try different ways to access ParameterList
-            $parameterList = [];
+            // Enhanced parameter list logging
+            error_log("=== PARAMETER LIST EXTRACTION ===");
             if (isset($request->ParameterList->ParameterValueStruct)) {
+                error_log("Found parameters in direct path");
                 $parameterList = $request->ParameterList->ParameterValueStruct;
             } elseif (isset($request->children()->ParameterList)) {
+                error_log("Found parameters in children path");
                 $parameterList = $request->children()->ParameterList->children()->ParameterValueStruct;
             }
-            error_log("Extracted ParameterList: " . print_r($parameterList, true));
+            error_log("Parameter List Content: " . print_r($parameterList, true));
             
             // Extract base device info
             $deviceInfo = $this->extractBaseDeviceInfo($deviceId);
@@ -111,80 +119,89 @@ class InformMessageParser {
     }
 
     private function processParameters($parameterList, &$deviceInfo) {
+        error_log("=== BEGIN PARAMETER PROCESSING ===");
         if (empty($parameterList)) {
-            error_log("No parameters to process");
+            error_log("WARNING: No parameters to process");
             return;
         }
 
+        error_log("Looking for critical parameters:");
+        error_log("- SSID (WiFi name)");
+        error_log("- SSID Password");
+        error_log("- ether1 MAC Address");
+        error_log("- Device Uptime");
+
         foreach ($parameterList as $param) {
-            // Try different ways to access parameter properties
             $name = (string)($param->Name ?? $param->children()->Name ?? '');
             $value = (string)($param->Value ?? $param->children()->Value ?? '');
             
-            error_log("Processing parameter: $name = $value");
+            error_log("Processing parameter: [$name] = [$value]");
 
             if (isset($this->parameterMap[$name])) {
                 $key = $this->parameterMap[$name];
                 $deviceInfo[$key] = $value;
-                error_log("Mapped parameter $name to $key with value $value");
+                error_log("SUCCESS: Mapped parameter $name to $key with value $value");
+            } else {
+                error_log("INFO: No mapping found for parameter: $name");
             }
 
-            // Special handling for Mikrotik Interface parameters
-            if (strpos($name, 'Device.Interface.') === 0) {
-                $this->processMikrotikInterface($name, $value, $deviceInfo);
+            // Enhanced logging for critical parameters
+            if (strpos($name, 'WiFi') !== false || strpos($name, 'WLAN') !== false) {
+                error_log("Found WiFi-related parameter: $name = $value");
             }
-
-            // Special handling for WiFi parameters
-            if (strpos($name, 'Device.WiFi.') === 0) {
-                $this->processWiFiParameter($name, $value, $deviceInfo);
+            if (strpos($name, 'Interface') !== false && strpos($name, 'MAC') !== false) {
+                error_log("Found MAC address-related parameter: $name = $value");
             }
-
-            $this->processConnectedClient($name, $value, $deviceInfo);
+            if (strpos($name, 'UpTime') !== false) {
+                error_log("Found uptime-related parameter: $name = $value");
+            }
         }
+        error_log("=== END PARAMETER PROCESSING ===");
     }
 
     private function processWiFiParameter($name, $value, &$deviceInfo) {
-        // Additional WiFi parameter processing for Mikrotik
+        error_log("=== PROCESSING WIFI PARAMETER ===");
+        error_log("Parameter name: $name");
+        error_log("Parameter value: $value");
+
         if (strpos($name, '.SSID') !== false || strpos($name, '.Name') !== false) {
             $deviceInfo['ssid'] = $value;
-            error_log("Found WiFi SSID: $value");
+            error_log("SUCCESS: Found WiFi SSID: $value");
         } elseif (strpos($name, '.SecurityKey') !== false || 
                   strpos($name, '.PreSharedKey') !== false || 
                   strpos($name, '.PSKPassphrase') !== false || 
                   strpos($name, '.KeyPassphrase') !== false) {
             $deviceInfo['ssidPassword'] = $value;
-            error_log("Found WiFi password: $value");
+            error_log("SUCCESS: Found WiFi password: $value");
+        } else {
+            error_log("INFO: WiFi parameter didn't match SSID or password patterns");
         }
-    }
-
-    private function processMikrotikInterface($name, $value, &$deviceInfo) {
-        // Specific handling for ether1 interface
-        if (strpos($name, '.MAC') !== false) {
-            $deviceInfo['macAddress'] = $value;
-            error_log("Found ether1 MAC address: $value");
-        }
+        error_log("=== END WIFI PARAMETER PROCESSING ===");
     }
 
     private function processMikrotikInterfaces($parameterList, &$deviceInfo) {
-        error_log("Processing Mikrotik interfaces...");
+        error_log("=== BEGIN MIKROTIK INTERFACE PROCESSING ===");
+        error_log("Looking for ether1 MAC address...");
         
         foreach ($parameterList as $param) {
             $name = (string)($param->Name ?? $param->children()->Name ?? '');
             $value = (string)($param->Value ?? $param->children()->Value ?? '');
             
-            error_log("Checking interface parameter: $name = $value");
+            error_log("Checking interface parameter: [$name] = [$value]");
 
-            // Check for ethernet interface parameters
             if (strpos($name, 'Device.Ethernet.Interface.') === 0 || 
                 strpos($name, 'Device.Interface.ether1') === 0) {
+                error_log("Found ethernet interface parameter");
                 
                 if (strpos($name, '.MACAddress') !== false || 
                     strpos($name, '.orig-mac-address') !== false) {
                     $deviceInfo['macAddress'] = $value;
-                    error_log("Found Mikrotik ethernet MAC address: $value");
+                    error_log("SUCCESS: Found Mikrotik ethernet MAC address: $value");
                 }
             }
         }
+        error_log("=== END MIKROTIK INTERFACE PROCESSING ===");
+        error_log("Final MAC address value: " . ($deviceInfo['macAddress'] ?? 'not found'));
     }
 
     private function processConnectedClient($name, $value, &$deviceInfo) {
