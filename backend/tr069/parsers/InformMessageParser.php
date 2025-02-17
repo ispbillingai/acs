@@ -13,18 +13,30 @@ class InformMessageParser {
         'InternetGatewayDevice.DeviceInfo.SoftwareVersion' => 'softwareVersion',
         'Device.LAN.MACAddress' => 'macAddress',
         'InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.MACAddress' => 'macAddress',
-        'Device.WiFi.SSID.1.SSID' => 'ssid',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID' => 'ssid',
-        'Device.DeviceInfo.UpTime' => 'uptime',
-        'InternetGatewayDevice.DeviceInfo.UpTime' => 'uptime',
-        'Device.WiFi.AccessPoint.1.Security.KeyPassphrase' => 'ssidPassword',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase' => 'ssidPassword',
+        
+        // Ethernet interface MAC address paths
         'Device.Ethernet.Interface.1.MACAddress' => 'macAddress',
         'Device.Ethernet.Interface.1.orig-mac-address' => 'macAddress',
-        'InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.MACAddress' => 'macAddress',
         'Device.Interface.ether1.MACAddress' => 'macAddress',
         'Device.Interface.ether1.orig-mac-address' => 'macAddress',
-        'Device.LAN.Interface.1.orig-mac-address' => 'macAddress'
+        'Device.LAN.Interface.1.orig-mac-address' => 'macAddress',
+        
+        // SSID and WiFi parameters for different TR-069 implementations
+        'Device.WiFi.SSID.1.SSID' => 'ssid',
+        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID' => 'ssid',
+        'Device.WiFi.AccessPoint.1.Security.KeyPassphrase' => 'ssidPassword',
+        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase' => 'ssidPassword',
+        
+        // Mikrotik specific SSID and password paths
+        'Device.WiFi.Radio.1.SSID' => 'ssid',
+        'Device.WiFi.Radio.1.SecurityKey' => 'ssidPassword',
+        'Device.WiFi.SSID.1.Name' => 'ssid',
+        'Device.WiFi.AccessPoint.1.Security.PreSharedKey' => 'ssidPassword',
+        'Device.WiFi.AccessPoint.1.Security.PSKPassphrase' => 'ssidPassword',
+        
+        // Uptime parameter
+        'Device.DeviceInfo.UpTime' => 'uptime',
+        'InternetGatewayDevice.DeviceInfo.UpTime' => 'uptime'
     ];
 
     public function parseInform($request) {
@@ -130,7 +142,26 @@ class InformMessageParser {
                 $this->processMikrotikInterface($name, $value, $deviceInfo);
             }
 
+            // Special handling for WiFi parameters
+            if (strpos($name, 'Device.WiFi.') === 0) {
+                $this->processWiFiParameter($name, $value, $deviceInfo);
+            }
+
             $this->processConnectedClient($name, $value, $deviceInfo);
+        }
+    }
+
+    private function processWiFiParameter($name, $value, &$deviceInfo) {
+        // Additional WiFi parameter processing for Mikrotik
+        if (strpos($name, '.SSID') !== false || strpos($name, '.Name') !== false) {
+            $deviceInfo['ssid'] = $value;
+            error_log("Found WiFi SSID: $value");
+        } elseif (strpos($name, '.SecurityKey') !== false || 
+                  strpos($name, '.PreSharedKey') !== false || 
+                  strpos($name, '.PSKPassphrase') !== false || 
+                  strpos($name, '.KeyPassphrase') !== false) {
+            $deviceInfo['ssidPassword'] = $value;
+            error_log("Found WiFi password: $value");
         }
     }
 
