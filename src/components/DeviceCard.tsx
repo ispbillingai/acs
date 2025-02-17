@@ -12,6 +12,9 @@ interface DeviceCardProps {
     status: "online" | "offline" | "provisioning";
     lastContact: string;
     ipAddress: string;
+    manufacturer: string;
+    softwareVersion?: string;
+    hardwareVersion?: string;
   };
 }
 
@@ -42,7 +45,7 @@ export const DeviceCard = ({ device }: DeviceCardProps) => {
               {device.status}
             </Badge>
           </div>
-          <h3 className="font-semibold text-lg mb-1">{device.model}</h3>
+          <h3 className="font-semibold text-lg mb-1">{device.manufacturer} {device.model}</h3>
           <p className="text-sm text-muted-foreground">{device.serialNumber}</p>
         </div>
         <button 
@@ -58,12 +61,18 @@ export const DeviceCard = ({ device }: DeviceCardProps) => {
       <div className="space-y-1">
         <p className="text-sm">
           <span className="text-muted-foreground">Last Contact:</span>{" "}
-          {device.lastContact}
+          {new Date(device.lastContact).toLocaleString()}
         </p>
         <p className="text-sm">
           <span className="text-muted-foreground">IP Address:</span>{" "}
           {device.ipAddress}
         </p>
+        {device.softwareVersion && (
+          <p className="text-sm">
+            <span className="text-muted-foreground">Software:</span>{" "}
+            {device.softwareVersion}
+          </p>
+        )}
       </div>
     </Card>
   );
