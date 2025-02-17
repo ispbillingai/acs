@@ -100,8 +100,16 @@ class TR069Server {
 
     private function handleInform($request) {
         try {
+            // Log the entire request for debugging
+            error_log("Raw Inform request: " . print_r($request, true));
+
+            // Extract DeviceId information
             $deviceId = $request->DeviceId;
+            error_log("Device ID information: " . print_r($deviceId, true));
+
+            // Extract ParameterList
             $parameterList = $request->ParameterList->ParameterValueStruct ?? [];
+            error_log("Parameter List: " . print_r($parameterList, true));
             
             // Extract device information
             $deviceInfo = [
@@ -118,39 +126,41 @@ class TR069Server {
                 'connectedClients' => []
             ];
 
+            // Debug log for initial device info
+            error_log("Initial device info: " . print_r($deviceInfo, true));
+
+            // Mikrotik specific parameter mapping
+            $parameterMap = [
+                'Device.DeviceInfo.Manufacturer' => 'manufacturer',
+                'InternetGatewayDevice.DeviceInfo.Manufacturer' => 'manufacturer',
+                'Device.DeviceInfo.ModelName' => 'modelName',
+                'InternetGatewayDevice.DeviceInfo.ModelName' => 'modelName',
+                'Device.DeviceInfo.SerialNumber' => 'serialNumber',
+                'InternetGatewayDevice.DeviceInfo.SerialNumber' => 'serialNumber',
+                'Device.DeviceInfo.HardwareVersion' => 'hardwareVersion',
+                'InternetGatewayDevice.DeviceInfo.HardwareVersion' => 'hardwareVersion',
+                'Device.DeviceInfo.SoftwareVersion' => 'softwareVersion',
+                'InternetGatewayDevice.DeviceInfo.SoftwareVersion' => 'softwareVersion',
+                'Device.LAN.MACAddress' => 'macAddress',
+                'InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.MACAddress' => 'macAddress',
+                'Device.WiFi.SSID.1.SSID' => 'ssid',
+                'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID' => 'ssid',
+                'Device.DeviceInfo.UpTime' => 'uptime',
+                'InternetGatewayDevice.DeviceInfo.UpTime' => 'uptime'
+            ];
+
             // Process parameters
             foreach ($parameterList as $param) {
                 $name = (string)$param->Name;
                 $value = (string)$param->Value;
                 
-                // Log the parameter for debugging
                 error_log("Processing parameter: $name = $value");
-                
-                switch ($name) {
-                    case 'Device.DeviceInfo.SoftwareVersion':
-                    case 'InternetGatewayDevice.DeviceInfo.SoftwareVersion':
-                        $deviceInfo['softwareVersion'] = $value;
-                        break;
-                    case 'Device.DeviceInfo.HardwareVersion':
-                    case 'InternetGatewayDevice.DeviceInfo.HardwareVersion':
-                        $deviceInfo['hardwareVersion'] = $value;
-                        break;
-                    case 'Device.Ethernet.Interface.1.MACAddress':
-                    case 'InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.MACAddress':
-                        $deviceInfo['macAddress'] = $value;
-                        break;
-                    case 'Device.WiFi.SSID.1.SSID':
-                    case 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID':
-                        $deviceInfo['ssid'] = $value;
-                        break;
-                    case 'Device.DeviceInfo.UpTime':
-                    case 'InternetGatewayDevice.DeviceInfo.UpTime':
-                        $deviceInfo['uptime'] = intval($value);
-                        break;
-                    case 'Device.ManagementServer.Password':
-                    case 'InternetGatewayDevice.ManagementServer.Password':
-                        $deviceInfo['tr069Password'] = $value;
-                        break;
+
+                // Check if parameter exists in our mapping
+                if (isset($parameterMap[$name])) {
+                    $key = $parameterMap[$name];
+                    $deviceInfo[$key] = $value;
+                    error_log("Mapped parameter $name to $key with value $value");
                 }
 
                 // Handle connected clients
@@ -164,13 +174,21 @@ class TR069Server {
                         }
                         if (strpos($name, '.MACAddress') !== false) {
                             $deviceInfo['connectedClients'][$index]['macAddress'] = $value;
+                        } elseif (strpos($name, '.IPAddress') !== false) {
+                            $deviceInfo['connectedClients'][$index]['ipAddress'] = $value;
                         }
                     }
                 }
             }
 
+            // Ensure we have required fields
+            if (empty($deviceInfo['serialNumber'])) {
+                $deviceInfo['serialNumber'] = $deviceInfo['macAddress'] ?? md5(uniqid());
+                error_log("Generated serial number for device: " . $deviceInfo['serialNumber']);
+            }
+
             // Log the final device info for debugging
-            error_log("Final device info: " . print_r($deviceInfo, true));
+            error_log("Final device info before database update: " . print_r($deviceInfo, true));
 
             // Update device in database
             $this->deviceId = $this->deviceManager->updateDevice($deviceInfo);
@@ -180,6 +198,7 @@ class TR069Server {
             $this->soapResponse = $this->createInformResponse();
         } catch (Exception $e) {
             error_log("Error in handleInform: " . $e->getMessage());
+            error_log("Stack trace: " . $e->getTraceAsString());
             throw $e;
         }
     }
