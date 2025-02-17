@@ -101,65 +101,76 @@ class TR069Server {
     private function handleInform($request) {
         try {
             $deviceId = $request->DeviceId;
+            $parameterList = $request->ParameterList->ParameterValueStruct ?? [];
             
-            // Extract basic device information
+            // Extract device information
             $deviceInfo = [
                 'manufacturer' => (string)$deviceId->Manufacturer,
-                'serialNumber' => (string)$deviceId->SerialNumber,
                 'modelName' => (string)$deviceId->ProductClass,
+                'serialNumber' => (string)$deviceId->SerialNumber,
                 'status' => 'online',
+                'macAddress' => null,
+                'softwareVersion' => null,
+                'hardwareVersion' => null,
+                'ssid' => null,
+                'uptime' => null,
+                'tr069Password' => null,
                 'connectedClients' => []
             ];
 
             // Process parameters
-            if (isset($request->ParameterList)) {
-                foreach ($request->ParameterList->children() as $param) {
-                    $name = (string)$param->Name;
-                    $value = (string)$param->Value;
-                    
-                    switch ($name) {
-                        case 'Device.DeviceInfo.SoftwareVersion':
-                            $deviceInfo['softwareVersion'] = $value;
-                            break;
-                        case 'Device.DeviceInfo.HardwareVersion':
-                            $deviceInfo['hardwareVersion'] = $value;
-                            break;
-                        case 'Device.DeviceInfo.ModelName':
-                            $deviceInfo['modelName'] = $value;
-                            break;
-                        case 'Device.Ethernet.Interface.1.MACAddress':
-                            $deviceInfo['macAddress'] = $value;
-                            break;
-                        case 'Device.WiFi.SSID.1.SSID':
-                            $deviceInfo['ssid'] = $value;
-                            break;
-                        case 'Device.DeviceInfo.UpTime':
-                            $deviceInfo['uptime'] = intval($value);
-                            break;
-                        case 'Device.ManagementServer.Password':
-                            $deviceInfo['tr069Password'] = $value;
-                            break;
-                    }
+            foreach ($parameterList as $param) {
+                $name = (string)$param->Name;
+                $value = (string)$param->Value;
+                
+                // Log the parameter for debugging
+                error_log("Processing parameter: $name = $value");
+                
+                switch ($name) {
+                    case 'Device.DeviceInfo.SoftwareVersion':
+                    case 'InternetGatewayDevice.DeviceInfo.SoftwareVersion':
+                        $deviceInfo['softwareVersion'] = $value;
+                        break;
+                    case 'Device.DeviceInfo.HardwareVersion':
+                    case 'InternetGatewayDevice.DeviceInfo.HardwareVersion':
+                        $deviceInfo['hardwareVersion'] = $value;
+                        break;
+                    case 'Device.Ethernet.Interface.1.MACAddress':
+                    case 'InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.MACAddress':
+                        $deviceInfo['macAddress'] = $value;
+                        break;
+                    case 'Device.WiFi.SSID.1.SSID':
+                    case 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID':
+                        $deviceInfo['ssid'] = $value;
+                        break;
+                    case 'Device.DeviceInfo.UpTime':
+                    case 'InternetGatewayDevice.DeviceInfo.UpTime':
+                        $deviceInfo['uptime'] = intval($value);
+                        break;
+                    case 'Device.ManagementServer.Password':
+                    case 'InternetGatewayDevice.ManagementServer.Password':
+                        $deviceInfo['tr069Password'] = $value;
+                        break;
+                }
 
-                    // Handle connected clients
-                    if (strpos($name, 'Device.WiFi.AccessPoint.1.AssociatedDevice.') === 0) {
-                        if (!isset($deviceInfo['connectedClients'])) {
-                            $deviceInfo['connectedClients'] = [];
+                // Handle connected clients
+                if (strpos($name, 'Device.WiFi.AccessPoint.1.AssociatedDevice.') === 0 ||
+                    strpos($name, 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDevice.') === 0) {
+                    preg_match('/AssociatedDevice\.(\d+)\./', $name, $matches);
+                    if ($matches) {
+                        $index = $matches[1];
+                        if (!isset($deviceInfo['connectedClients'][$index])) {
+                            $deviceInfo['connectedClients'][$index] = [];
                         }
-                        // Extract client index from parameter name
-                        preg_match('/AssociatedDevice\.(\d+)\./', $name, $matches);
-                        if ($matches) {
-                            $index = $matches[1];
-                            if (!isset($deviceInfo['connectedClients'][$index])) {
-                                $deviceInfo['connectedClients'][$index] = [];
-                            }
-                            if (strpos($name, '.MACAddress') !== false) {
-                                $deviceInfo['connectedClients'][$index]['macAddress'] = $value;
-                            }
+                        if (strpos($name, '.MACAddress') !== false) {
+                            $deviceInfo['connectedClients'][$index]['macAddress'] = $value;
                         }
                     }
                 }
             }
+
+            // Log the final device info for debugging
+            error_log("Final device info: " . print_r($deviceInfo, true));
 
             // Update device in database
             $this->deviceId = $this->deviceManager->updateDevice($deviceInfo);
