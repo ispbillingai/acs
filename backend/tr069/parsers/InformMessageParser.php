@@ -21,25 +21,68 @@ class InformMessageParser {
     ];
 
     public function parseInform($request) {
-        error_log("Raw Inform request: " . print_r($request, true));
+        // Log the raw XML content
+        $rawXml = $request->asXML();
+        error_log("Raw XML content: " . $rawXml);
         
-        $deviceId = $request->DeviceId;
-        $parameterList = $request->ParameterList->ParameterValueStruct ?? [];
+        // Log the full request object structure
+        error_log("Full request object structure: " . print_r($request, true));
         
-        $deviceInfo = $this->extractBaseDeviceInfo($deviceId);
-        $this->processParameters($parameterList, $deviceInfo);
-        $this->ensureRequiredFields($deviceInfo);
+        // Check if this is a Mikrotik device
+        $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
+        error_log("Processing request from device: " . $userAgent);
         
-        return $deviceInfo;
+        try {
+            // Extract DeviceId information with namespace handling
+            $deviceId = $request->DeviceId ?? $request->children()->DeviceId;
+            error_log("Extracted DeviceId: " . print_r($deviceId, true));
+            
+            // Try different ways to access ParameterList
+            $parameterList = [];
+            if (isset($request->ParameterList->ParameterValueStruct)) {
+                $parameterList = $request->ParameterList->ParameterValueStruct;
+            } elseif (isset($request->children()->ParameterList)) {
+                $parameterList = $request->children()->ParameterList->children()->ParameterValueStruct;
+            }
+            error_log("Extracted ParameterList: " . print_r($parameterList, true));
+            
+            // Extract base device info
+            $deviceInfo = $this->extractBaseDeviceInfo($deviceId);
+            error_log("Base device info: " . print_r($deviceInfo, true));
+            
+            // Process parameters
+            $this->processParameters($parameterList, $deviceInfo);
+            error_log("After processing parameters: " . print_r($deviceInfo, true));
+            
+            // Ensure required fields
+            $this->ensureRequiredFields($deviceInfo);
+            error_log("Final device info: " . print_r($deviceInfo, true));
+            
+            return $deviceInfo;
+            
+        } catch (Exception $e) {
+            error_log("Error parsing Inform message: " . $e->getMessage());
+            error_log("Stack trace: " . $e->getTraceAsString());
+            throw $e;
+        }
     }
 
     private function extractBaseDeviceInfo($deviceId) {
-        error_log("Device ID information: " . print_r($deviceId, true));
+        error_log("Extracting base device info from: " . print_r($deviceId, true));
+        
+        // Try different methods to access DeviceId properties
+        $manufacturer = (string)($deviceId->Manufacturer ?? $deviceId->children()->Manufacturer ?? '');
+        $productClass = (string)($deviceId->ProductClass ?? $deviceId->children()->ProductClass ?? '');
+        $serialNumber = (string)($deviceId->SerialNumber ?? $deviceId->children()->SerialNumber ?? '');
+        
+        error_log("Extracted manufacturer: $manufacturer");
+        error_log("Extracted product class: $productClass");
+        error_log("Extracted serial number: $serialNumber");
         
         return [
-            'manufacturer' => (string)$deviceId->Manufacturer,
-            'modelName' => (string)$deviceId->ProductClass,
-            'serialNumber' => (string)$deviceId->SerialNumber,
+            'manufacturer' => $manufacturer,
+            'modelName' => $productClass,
+            'serialNumber' => $serialNumber,
             'status' => 'online',
             'macAddress' => null,
             'softwareVersion' => null,
@@ -52,9 +95,15 @@ class InformMessageParser {
     }
 
     private function processParameters($parameterList, &$deviceInfo) {
+        if (empty($parameterList)) {
+            error_log("No parameters to process");
+            return;
+        }
+
         foreach ($parameterList as $param) {
-            $name = (string)$param->Name;
-            $value = (string)$param->Value;
+            // Try different ways to access parameter properties
+            $name = (string)($param->Name ?? $param->children()->Name ?? '');
+            $value = (string)($param->Value ?? $param->children()->Value ?? '');
             
             error_log("Processing parameter: $name = $value");
 
@@ -69,18 +118,26 @@ class InformMessageParser {
     }
 
     private function processConnectedClient($name, $value, &$deviceInfo) {
-        if (strpos($name, 'Device.WiFi.AccessPoint.1.AssociatedDevice.') === 0 ||
-            strpos($name, 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDevice.') === 0) {
-            preg_match('/AssociatedDevice\.(\d+)\./', $name, $matches);
-            if ($matches) {
-                $index = $matches[1];
-                if (!isset($deviceInfo['connectedClients'][$index])) {
-                    $deviceInfo['connectedClients'][$index] = [];
-                }
-                if (strpos($name, '.MACAddress') !== false) {
-                    $deviceInfo['connectedClients'][$index]['macAddress'] = $value;
-                } elseif (strpos($name, '.IPAddress') !== false) {
-                    $deviceInfo['connectedClients'][$index]['ipAddress'] = $value;
+        $patterns = [
+            'Device.WiFi.AccessPoint.1.AssociatedDevice.',
+            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDevice.',
+            // Add Mikrotik specific patterns if needed
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (strpos($name, $pattern) === 0) {
+                error_log("Processing connected client parameter: $name = $value");
+                preg_match('/AssociatedDevice\.(\d+)\./', $name, $matches);
+                if ($matches) {
+                    $index = $matches[1];
+                    if (!isset($deviceInfo['connectedClients'][$index])) {
+                        $deviceInfo['connectedClients'][$index] = [];
+                    }
+                    if (strpos($name, '.MACAddress') !== false) {
+                        $deviceInfo['connectedClients'][$index]['macAddress'] = $value;
+                    } elseif (strpos($name, '.IPAddress') !== false) {
+                        $deviceInfo['connectedClients'][$index]['ipAddress'] = $value;
+                    }
                 }
             }
         }
@@ -88,8 +145,15 @@ class InformMessageParser {
 
     private function ensureRequiredFields(&$deviceInfo) {
         if (empty($deviceInfo['serialNumber'])) {
-            $deviceInfo['serialNumber'] = $deviceInfo['macAddress'] ?? md5(uniqid());
-            error_log("Generated serial number for device: " . $deviceInfo['serialNumber']);
+            // Try to use MAC address if available
+            if (!empty($deviceInfo['macAddress'])) {
+                $deviceInfo['serialNumber'] = $deviceInfo['macAddress'];
+                error_log("Using MAC address as serial number: " . $deviceInfo['serialNumber']);
+            } else {
+                // Generate a unique ID as last resort
+                $deviceInfo['serialNumber'] = md5(uniqid() . $_SERVER['REMOTE_ADDR']);
+                error_log("Generated serial number for device: " . $deviceInfo['serialNumber']);
+            }
         }
     }
 }
