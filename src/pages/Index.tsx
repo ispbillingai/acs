@@ -31,12 +31,17 @@ const Index = () => {
   const { data: devices, isLoading, error } = useQuery({
     queryKey: ['devices'],
     queryFn: fetchDevices,
-    refetchInterval: 5000,
+    refetchInterval: 5000, // Refresh every 5 seconds
     refetchOnWindowFocus: true,
     staleTime: 0,
     gcTime: 0,
-    retry: 3
+    retry: 3,
+    onError: (error) => {
+      console.error('Error fetching devices:', error);
+    }
   });
+
+  console.log('Current state:', { devices, isLoading, error });
 
   if (isLoading) {
     return (
@@ -88,7 +93,7 @@ const Index = () => {
 
         <div>
           <h2 className="text-xl font-semibold mb-4">Connected Devices</h2>
-          {devices?.length === 0 ? (
+          {!devices || devices.length === 0 ? (
             <Alert>
               <AlertDescription>
                 No devices connected yet. Devices will appear here when they connect to the ACS.
@@ -96,7 +101,7 @@ const Index = () => {
             </Alert>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {devices?.map((device) => (
+              {devices.map((device) => (
                 <DeviceCard key={device.id} device={device} />
               ))}
             </div>
