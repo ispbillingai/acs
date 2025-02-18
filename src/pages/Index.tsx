@@ -35,10 +35,7 @@ const Index = () => {
     refetchOnWindowFocus: true,
     staleTime: 0,
     gcTime: 0,
-    retry: 3,
-    onError: (error) => {
-      console.error('Error fetching devices:', error);
-    }
+    retry: 3
   });
 
   console.log('Current state:', { devices, isLoading, error });
