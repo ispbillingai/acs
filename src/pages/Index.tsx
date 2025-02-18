@@ -6,27 +6,44 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
 
-// Fetch real devices from the backend
+// Fetch real devices from the backend with cache busting
 const fetchDevices = async () => {
-  const response = await fetch('/backend/api/devices.php', {
+  const timestamp = new Date().getTime(); // Add timestamp for cache busting
+  const response = await fetch(`/backend/api/devices.php?t=${timestamp}`, {
     headers: {
-      'Cache-Control': 'no-cache',
-      'Pragma': 'no-cache'
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
     }
   });
+  
   if (!response.ok) {
+    console.error('Failed to fetch devices:', response.status, response.statusText);
     throw new Error('Failed to fetch devices');
   }
-  return response.json();
+  
+  const data = await response.json();
+  console.log('Fetched devices:', data); // Debug log
+  return data;
 };
 
 const Index = () => {
-  const { data: devices, isLoading, error } = useQuery({
+  const { data: devices, isLoading, error, refetch } = useQuery({
     queryKey: ['devices'],
     queryFn: fetchDevices,
-    refetchInterval: 10000, // Refresh every 10 seconds
+    refetchInterval: 5000, // Refresh every 5 seconds
     refetchOnWindowFocus: true,
-    staleTime: 0 // Consider data immediately stale
+    staleTime: 0, // Consider data immediately stale
+    cacheTime: 0, // Disable caching
+    retry: 3 // Retry failed requests 3 times
+  });
+
+  // Debug logging
+  console.log('Current devices state:', {
+    isLoading,
+    error,
+    devicesCount: devices?.length,
+    devices
   });
 
   return (
@@ -55,6 +72,7 @@ const Index = () => {
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>
                 Error loading devices. Please try again later.
+                {error instanceof Error ? ` (${error.message})` : ''}
               </AlertDescription>
             </Alert>
           ) : devices?.length === 0 ? (
