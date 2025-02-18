@@ -1,7 +1,7 @@
 
 import React from 'react';
-import DeviceStats from '../components/DeviceStats';
-import DeviceCard from '../components/DeviceCard';
+import { DeviceStats } from '../components/DeviceStats';
+import { DeviceCard } from '../components/DeviceCard';
 
 const Index = () => {
   return (
