@@ -32,6 +32,10 @@ export const DeviceCard = ({ device }: DeviceCardProps) => {
     }
   };
 
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleString();
+  };
+
   return (
     <Card 
       className="p-6 hover:shadow-lg transition-shadow animate-fade-up cursor-pointer"
@@ -61,7 +65,7 @@ export const DeviceCard = ({ device }: DeviceCardProps) => {
       <div className="space-y-1">
         <p className="text-sm">
           <span className="text-muted-foreground">Last Contact:</span>{" "}
-          {new Date(device.lastContact).toLocaleString()}
+          {formatDate(device.lastContact)}
         </p>
         <p className="text-sm">
           <span className="text-muted-foreground">IP Address:</span>{" "}

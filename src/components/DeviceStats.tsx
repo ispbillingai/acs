@@ -1,10 +1,10 @@
+
 import { Card } from "@/components/ui/card";
 import { WifiIcon, AlertCircle, CheckCircle2 } from "lucide-react";
 
 interface Device {
   id: string;
   status: string;
-  // ... other device properties
 }
 
 interface DeviceStatsProps {
@@ -32,7 +32,7 @@ const StatsCard = ({ title, value, icon }: StatsCardProps) => (
 export const DeviceStats = ({ devices }: DeviceStatsProps) => {
   const totalDevices = devices?.length || 0;
   const onlineDevices = devices?.filter(d => d.status === 'online').length || 0;
-  const alertDevices = devices?.filter(d => d.status === 'error').length || 0;
+  const alertDevices = devices?.filter(d => d.status === 'offline').length || 0;
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -47,7 +47,7 @@ export const DeviceStats = ({ devices }: DeviceStatsProps) => {
         icon={<CheckCircle2 className="h-6 w-6 text-success-dark" />}
       />
       <StatsCard
-        title="Alerts"
+        title="Offline"
         value={alertDevices}
         icon={<AlertCircle className="h-6 w-6 text-error-dark" />}
       />
