@@ -6,10 +6,26 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
 
+interface Device {
+  id: string;
+  serialNumber: string;
+  model: string;
+  status: "online" | "offline" | "provisioning";
+  lastContact: string;
+  ipAddress: string;
+  manufacturer: string;
+  softwareVersion?: string;
+  hardwareVersion?: string;
+}
+
 // Fetch real devices from the backend with cache busting
-const fetchDevices = async () => {
+const fetchDevices = async (): Promise<Device[]> => {
+  console.log('Fetching devices...');
   const timestamp = new Date().getTime();
-  const response = await fetch(`/backend/api/devices.php?t=${timestamp}`, {
+  const url = `/backend/api/devices.php?t=${timestamp}`;
+  console.log('Fetching from URL:', url);
+  
+  const response = await fetch(url, {
     headers: {
       'Cache-Control': 'no-cache, no-store, must-revalidate',
       'Pragma': 'no-cache',
@@ -19,7 +35,7 @@ const fetchDevices = async () => {
   
   if (!response.ok) {
     console.error('Failed to fetch devices:', response.status, response.statusText);
-    throw new Error('Failed to fetch devices');
+    throw new Error(`Failed to fetch devices: ${response.status} ${response.statusText}`);
   }
   
   const data = await response.json();
@@ -28,19 +44,25 @@ const fetchDevices = async () => {
 };
 
 const Index = () => {
-  const { data: devices, isLoading, error } = useQuery({
+  const { data: devices, isLoading, error } = useQuery<Device[], Error>({
     queryKey: ['devices'],
     queryFn: fetchDevices,
-    refetchInterval: 5000, // Refresh every 5 seconds
+    refetchInterval: 5000,
     refetchOnWindowFocus: true,
     staleTime: 0,
     gcTime: 0,
     retry: 3
   });
 
-  console.log('Current state:', { devices, isLoading, error });
+  console.log('Current render state:', { 
+    devices, 
+    isLoading, 
+    error, 
+    hasDevices: Boolean(devices?.length)
+  });
 
   if (isLoading) {
+    console.log('Rendering loading state...');
     return (
       <div className="min-h-screen bg-background p-6">
         <div className="max-w-7xl mx-auto space-y-8">
@@ -59,6 +81,7 @@ const Index = () => {
   }
 
   if (error) {
+    console.log('Rendering error state:', error);
     return (
       <div className="min-h-screen bg-background p-6">
         <div className="max-w-7xl mx-auto">
@@ -74,6 +97,7 @@ const Index = () => {
     );
   }
 
+  console.log('Rendering success state with devices:', devices);
   return (
     <div className="min-h-screen bg-background p-6">
       <div className="max-w-7xl mx-auto space-y-8">
