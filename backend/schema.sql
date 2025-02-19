@@ -1,3 +1,4 @@
+
 -- Simplified Devices table with additional Mikrotik parameters
 CREATE TABLE IF NOT EXISTS devices (
     id INT PRIMARY KEY AUTO_INCREMENT,
