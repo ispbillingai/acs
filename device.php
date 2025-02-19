@@ -1,8 +1,8 @@
-
 <?php
 // Enable error reporting
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
+ini_set('error_log', __DIR__ . '/acs.log');
 
 require_once __DIR__ . '/backend/config/database.php';
 
@@ -104,12 +104,6 @@ try {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Device Details - ACS Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        // Auto-refresh the page every 5 seconds
-        setTimeout(function() {
-            window.location.reload();
-        }, 5000);
-    </script>
 </head>
 <body class="min-h-screen bg-gray-50">
     <div class="p-6">
