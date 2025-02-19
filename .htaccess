@@ -1,15 +1,19 @@
 
-RewriteEngine On
-RewriteBase /
+# Enable PHP file handling
+AddHandler application/x-httpd-php .php
 
-# Redirect to HTTPS
-RewriteCond %{HTTPS} off
-RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+# Enable rewrite engine
+RewriteEngine On
 
 # Handle PHP files directly
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^(.+)\.html$ $1.php [L,QSA]
+<FilesMatch "\.php$">
+    SetHandler application/x-httpd-php
+</FilesMatch>
 
-# Set index.php as default
+# Ensure index.php is the default index file
 DirectoryIndex index.php
+
+# Allow access to PHP files
+<Files "*.php">
+    Require all granted
+</Files>
