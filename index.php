@@ -1,3 +1,4 @@
+
 <?php
 // Enable error reporting
 error_reporting(E_ALL);
@@ -54,10 +55,11 @@ try {
     $devices = getDevices($db);
     error_log("Successfully fetched devices: " . count($devices));
 
-    // Calculate device statistics
+    // Calculate device statistics with 10-minute threshold
+    $tenMinutesAgo = date('Y-m-d H:i:s', strtotime('-10 minutes'));
     $totalDevices = count($devices);
-    $onlineDevices = count(array_filter($devices, function($device) {
-        return $device['status'] === 'online';
+    $onlineDevices = count(array_filter($devices, function($device) use ($tenMinutesAgo) {
+        return strtotime($device['lastContact']) >= strtotime($tenMinutesAgo);
     }));
     $offlineDevices = $totalDevices - $onlineDevices;
 
@@ -114,28 +116,30 @@ try {
                     </div>
                 <?php else: ?>
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        <?php foreach ($devices as $device): ?>
+                        <?php foreach ($devices as $device): 
+                            $isOnline = strtotime($device['lastContact']) >= strtotime($tenMinutesAgo);
+                        ?>
                             <div class="bg-white p-6 rounded-lg shadow">
                                 <div class="flex items-center justify-between mb-4">
                                     <h3 class="text-lg font-semibold">
-                                        <?php echo htmlspecialchars($device['manufacturer']); ?>
+                                        <?php echo htmlspecialchars($device['manufacturer'] ?: 'Unknown Manufacturer'); ?>
                                     </h3>
-                                    <span class="px-2 py-1 text-sm rounded-full <?php echo $device['status'] === 'online' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'; ?>">
-                                        <?php echo ucfirst($device['status']); ?>
+                                    <span class="px-2 py-1 text-sm rounded-full <?php echo $isOnline ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'; ?>">
+                                        <?php echo $isOnline ? 'Online' : 'Offline'; ?>
                                     </span>
                                 </div>
                                 <div class="space-y-2 text-sm text-gray-600">
                                     <p>
                                         <span class="font-medium">Model:</span>
-                                        <?php echo htmlspecialchars($device['model']); ?>
+                                        <?php echo htmlspecialchars($device['model'] ?: 'Unknown Model'); ?>
                                     </p>
                                     <p>
                                         <span class="font-medium">Serial Number:</span>
-                                        <?php echo htmlspecialchars($device['serialNumber']); ?>
+                                        <?php echo htmlspecialchars($device['serialNumber'] ?: 'N/A'); ?>
                                     </p>
                                     <p>
                                         <span class="font-medium">IP Address:</span>
-                                        <?php echo htmlspecialchars($device['ipAddress']); ?>
+                                        <?php echo htmlspecialchars($device['ipAddress'] ?: 'N/A'); ?>
                                     </p>
                                     <p>
                                         <span class="font-medium">Last Contact:</span>

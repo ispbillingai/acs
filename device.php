@@ -1,3 +1,4 @@
+
 <?php
 // Enable error reporting
 error_reporting(E_ALL);
@@ -55,7 +56,13 @@ try {
                         'lastContact' => $row['last_contact'],
                         'ipAddress' => $row['ip_address'],
                         'softwareVersion' => $row['software_version'],
-                        'hardwareVersion' => $row['hardware_version']
+                        'hardwareVersion' => $row['hardware_version'],
+                        'ssid' => $row['ssid'],
+                        'ssidPassword' => $row['ssid_password'],
+                        'uptime' => $row['uptime'],
+                        'localAdminPassword' => $row['local_admin_password'],
+                        'tr069Password' => $row['tr069_password'],
+                        'connectedClients' => $row['connected_clients']
                     ];
                     error_log("Device details: " . print_r($device, true));
                 }
@@ -90,6 +97,12 @@ try {
         header('Location: index.php');
         exit;
     }
+
+    // Check if device is online (last contact within 10 minutes)
+    $tenMinutesAgo = date('Y-m-d H:i:s', strtotime('-10 minutes'));
+    $isOnline = strtotime($device['lastContact']) >= strtotime($tenMinutesAgo);
+    $device['status'] = $isOnline ? 'online' : 'offline';
+
 } catch (Exception $e) {
     error_log("Critical error in device.php: " . $e->getMessage());
     error_log("Stack trace: " . $e->getTraceAsString());
@@ -127,29 +140,41 @@ try {
                     <div>
                         <p class="text-sm text-gray-600">
                             <span class="font-medium">Manufacturer:</span>
-                            <?php echo htmlspecialchars($device['manufacturer']); ?>
+                            <?php echo htmlspecialchars($device['manufacturer'] ?: 'N/A'); ?>
                         </p>
                         <p class="text-sm text-gray-600">
                             <span class="font-medium">Model:</span>
-                            <?php echo htmlspecialchars($device['model']); ?>
+                            <?php echo htmlspecialchars($device['model'] ?: 'N/A'); ?>
                         </p>
                         <p class="text-sm text-gray-600">
                             <span class="font-medium">Serial Number:</span>
-                            <?php echo htmlspecialchars($device['serialNumber']); ?>
+                            <?php echo htmlspecialchars($device['serialNumber'] ?: 'N/A'); ?>
                         </p>
                         <p class="text-sm text-gray-600">
                             <span class="font-medium">IP Address:</span>
-                            <?php echo htmlspecialchars($device['ipAddress']); ?>
+                            <?php echo htmlspecialchars($device['ipAddress'] ?: 'N/A'); ?>
+                        </p>
+                        <p class="text-sm text-gray-600">
+                            <span class="font-medium">SSID:</span>
+                            <?php echo htmlspecialchars($device['ssid'] ?: 'N/A'); ?>
                         </p>
                     </div>
                     <div>
                         <p class="text-sm text-gray-600">
                             <span class="font-medium">Software Version:</span>
-                            <?php echo htmlspecialchars($device['softwareVersion'] ?? 'N/A'); ?>
+                            <?php echo htmlspecialchars($device['softwareVersion'] ?: 'N/A'); ?>
                         </p>
                         <p class="text-sm text-gray-600">
                             <span class="font-medium">Hardware Version:</span>
-                            <?php echo htmlspecialchars($device['hardwareVersion'] ?? 'N/A'); ?>
+                            <?php echo htmlspecialchars($device['hardwareVersion'] ?: 'N/A'); ?>
+                        </p>
+                        <p class="text-sm text-gray-600">
+                            <span class="font-medium">Uptime:</span>
+                            <?php echo htmlspecialchars($device['uptime'] ?: 'N/A'); ?>
+                        </p>
+                        <p class="text-sm text-gray-600">
+                            <span class="font-medium">Connected Clients:</span>
+                            <?php echo htmlspecialchars($device['connectedClients'] ?: '0'); ?>
                         </p>
                         <p class="text-sm text-gray-600">
                             <span class="font-medium">Last Contact:</span>
