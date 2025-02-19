@@ -4,6 +4,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/session_manager.php';
 require_once __DIR__ . '/device_manager.php';
 require_once __DIR__ . '/parsers/InformMessageParser.php';
+require_once __DIR__ . '/parsers/HuaweiInformMessageParser.php';
 require_once __DIR__ . '/responses/InformResponseGenerator.php';
 require_once __DIR__ . '/auth/AuthenticationHandler.php';
 
@@ -12,6 +13,7 @@ class TR069Server {
     private $sessionManager;
     private $deviceManager;
     private $informParser;
+    private $huaweiInformParser;
     private $responseGenerator;
     private $authHandler;
     private $soapResponse;
@@ -24,6 +26,7 @@ class TR069Server {
         $this->sessionManager = new SessionManager($this->db);
         $this->deviceManager = new DeviceManager($this->db);
         $this->informParser = new InformMessageParser();
+        $this->huaweiInformParser = new HuaweiInformMessageParser();
         $this->responseGenerator = new InformResponseGenerator();
         $this->authHandler = new AuthenticationHandler();
     }
@@ -111,7 +114,22 @@ class TR069Server {
 
     private function handleInform($request) {
         try {
-            $deviceInfo = $this->informParser->parseInform($request);
+            // Get manufacturer from the DeviceId section first
+            $deviceId = $request->DeviceID;
+            $manufacturer = (string)$deviceId->Manufacturer;
+            
+            error_log("Detected device manufacturer: " . $manufacturer);
+            
+            // Select appropriate parser based on manufacturer
+            $deviceInfo = null;
+            if (stripos($manufacturer, 'huawei') !== false) {
+                error_log("Using Huawei parser for device");
+                $deviceInfo = $this->huaweiInformParser->parseInform($request);
+            } else {
+                error_log("Using default/MikroTik parser for device");
+                $deviceInfo = $this->informParser->parseInform($request);
+            }
+            
             $this->deviceId = $this->deviceManager->updateDevice($deviceInfo);
             $this->sessionId = $this->sessionManager->createSession($deviceInfo['serialNumber']);
             $this->soapResponse = $this->responseGenerator->createResponse($this->sessionId);
