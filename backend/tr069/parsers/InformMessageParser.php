@@ -42,47 +42,58 @@ class InformMessageParser {
                 'hardwareVersion' => '',
                 'ssid' => '',
                 'ssidPassword' => '',
-                'uptime' => 0, // Set default integer value
+                'uptime' => 0,
                 'tr069Password' => '',
-                'connectedClients' => []
+                'connectedClients' => [],
+                'localAdminPassword' => ''
             ];
 
-            // Extract DeviceId information from the SOAP message
+            // Extract DeviceId information
             if (isset($request->DeviceId)) {
                 $deviceId = $request->DeviceId;
-                $deviceInfo['manufacturer'] = (string)$deviceId->Manufacturer;
-                $deviceInfo['modelName'] = (string)$deviceId->ProductClass;
-                $deviceInfo['serialNumber'] = (string)$deviceId->SerialNumber;
+                $deviceInfo['manufacturer'] = (string)($deviceId->Manufacturer ?? '');
+                $deviceInfo['modelName'] = (string)($deviceId->ProductClass ?? '');
+                $deviceInfo['serialNumber'] = (string)($deviceId->SerialNumber ?? '');
                 
+                // If no serial number but has OUI, generate one
                 if (empty($deviceInfo['serialNumber']) && isset($deviceId->OUI)) {
-                    $deviceInfo['serialNumber'] = (string)$deviceId->OUI . '_' . time();
+                    $deviceInfo['serialNumber'] = (string)$deviceId->OUI;
                 }
             }
 
-            // Extract Parameters from ParameterList
+            // Extract Parameters
             if (isset($request->ParameterList) && isset($request->ParameterList->ParameterValueStruct)) {
                 foreach ($request->ParameterList->ParameterValueStruct as $param) {
-                    $name = (string)$param->Name;
-                    $value = (string)$param->Value;
+                    $name = (string)($param->Name ?? '');
+                    $value = (string)($param->Value ?? '');
 
                     error_log("Processing parameter: $name = $value");
 
+                    // Direct parameter mappings
+                    if ($name === 'Device.DeviceInfo.HardwareVersion') {
+                        $deviceInfo['hardwareVersion'] = $value;
+                    } elseif ($name === 'Device.DeviceInfo.SoftwareVersion') {
+                        $deviceInfo['softwareVersion'] = $value;
+                    }
+
+                    // Map other parameters
                     if (isset($this->parameterMap[$name])) {
                         $key = $this->parameterMap[$name];
-                        
-                        // Special handling for uptime to ensure it's an integer
                         if ($key === 'uptime') {
                             $deviceInfo[$key] = empty($value) ? 0 : (int)$value;
                         } else {
                             $deviceInfo[$key] = $value;
                         }
-                        
-                        error_log("Mapped $name to $key: " . $deviceInfo[$key]);
                     }
                 }
             }
 
-            error_log("Parsed device info: " . print_r($deviceInfo, true));
+            // Validate required fields
+            if (empty($deviceInfo['serialNumber'])) {
+                throw new Exception("Missing required field: serialNumber");
+            }
+
+            error_log("Final parsed device info: " . print_r($deviceInfo, true));
             return $deviceInfo;
 
         } catch (Exception $e) {

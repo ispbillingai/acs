@@ -9,6 +9,10 @@ class DeviceManager {
 
     public function updateDevice($deviceInfo) {
         try {
+            if (empty($deviceInfo['serialNumber'])) {
+                throw new Exception("Cannot update device: missing serial number");
+            }
+
             // First check if device exists
             $stmt = $this->db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
             $stmt->execute([':serial' => $deviceInfo['serialNumber']]);
@@ -26,9 +30,12 @@ class DeviceManager {
                         software_version = :software_version,
                         hardware_version = :hardware_version,
                         ssid = :ssid,
+                        ssid_password = :ssid_password,
                         uptime = :uptime,
-                        tr069_password = :tr069_password
-                        WHERE id = :id";
+                        local_admin_password = :local_admin_password,
+                        tr069_password = :tr069_password,
+                        connected_clients = :connected_clients
+                        WHERE serial_number = :serial_number";
 
                 $params = [
                     ':manufacturer' => $deviceInfo['manufacturer'] ?: null,
@@ -39,9 +46,12 @@ class DeviceManager {
                     ':software_version' => $deviceInfo['softwareVersion'] ?: null,
                     ':hardware_version' => $deviceInfo['hardwareVersion'] ?: null,
                     ':ssid' => $deviceInfo['ssid'] ?: null,
+                    ':ssid_password' => $deviceInfo['ssidPassword'] ?: null,
                     ':uptime' => $deviceInfo['uptime'] ?: 0,
+                    ':local_admin_password' => $deviceInfo['localAdminPassword'] ?: null,
                     ':tr069_password' => $deviceInfo['tr069Password'] ?: null,
-                    ':id' => $existingId
+                    ':connected_clients' => count($deviceInfo['connectedClients']),
+                    ':serial_number' => $deviceInfo['serialNumber']
                 ];
                 
                 error_log("Updating device with params: " . print_r($params, true));
@@ -55,11 +65,11 @@ class DeviceManager {
                 $sql = "INSERT INTO devices 
                         (serial_number, manufacturer, model_name, mac_address, status, 
                         last_contact, ip_address, software_version, hardware_version, 
-                        ssid, uptime, tr069_password) 
+                        ssid, ssid_password, uptime, local_admin_password, tr069_password, connected_clients) 
                         VALUES 
                         (:serial_number, :manufacturer, :model_name, :mac_address, :status,
                         NOW(), :ip_address, :software_version, :hardware_version,
-                        :ssid, :uptime, :tr069_password)";
+                        :ssid, :ssid_password, :uptime, :local_admin_password, :tr069_password, :connected_clients)";
 
                 $params = [
                     ':serial_number' => $deviceInfo['serialNumber'],
@@ -71,8 +81,11 @@ class DeviceManager {
                     ':software_version' => $deviceInfo['softwareVersion'] ?: null,
                     ':hardware_version' => $deviceInfo['hardwareVersion'] ?: null,
                     ':ssid' => $deviceInfo['ssid'] ?: null,
+                    ':ssid_password' => $deviceInfo['ssidPassword'] ?: null,
                     ':uptime' => $deviceInfo['uptime'] ?: 0,
-                    ':tr069_password' => $deviceInfo['tr069Password'] ?: null
+                    ':local_admin_password' => $deviceInfo['localAdminPassword'] ?: null,
+                    ':tr069_password' => $deviceInfo['tr069Password'] ?: null,
+                    ':connected_clients' => count($deviceInfo['connectedClients'])
                 ];
 
                 error_log("Inserting new device with params: " . print_r($params, true));
