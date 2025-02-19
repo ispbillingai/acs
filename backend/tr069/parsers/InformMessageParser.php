@@ -24,12 +24,6 @@ class InformMessageParser {
 
     public function parseInform($request) {
         try {
-            error_log("Starting to parse Inform message");
-            
-            if (!$request) {
-                throw new Exception("Empty request received");
-            }
-
             $deviceInfo = [
                 'manufacturer' => '',
                 'modelName' => '',
@@ -39,15 +33,16 @@ class InformMessageParser {
                 'softwareVersion' => '',
                 'hardwareVersion' => '',
                 'ssid' => '',
-                'ssid2' => '',
-                'ssidStatus' => '',
-                'securityMode' => '',
                 'ssidPassword' => '',
                 'uptime' => 0,
                 'tr069Password' => '',
                 'connectedClients' => 0,
                 'localAdminPassword' => ''
             ];
+
+            if (!$request) {
+                throw new Exception("Empty request received");
+            }
 
             // Register namespaces
             $namespaces = [
@@ -61,15 +56,12 @@ class InformMessageParser {
 
             // Get Inform section
             $inform = $request->xpath('//cwmp:Inform');
-            error_log("Parsing Inform message structure: " . print_r($inform, true));
 
             if (!empty($inform)) {
                 $inform = $inform[0];
 
                 // Extract DeviceId information
                 $deviceId = $inform->xpath('.//DeviceId')[0];
-                error_log("Processing DeviceId: " . print_r($deviceId, true));
-
                 if ($deviceId) {
                     $deviceInfo['manufacturer'] = (string)$deviceId->Manufacturer;
                     $deviceInfo['modelName'] = (string)$deviceId->ProductClass;
@@ -78,19 +70,23 @@ class InformMessageParser {
 
                 // Extract parameters
                 $parameters = $inform->xpath('.//ParameterList/ParameterValueStruct');
-                error_log("Processing parameters: " . print_r($parameters, true));
 
                 if ($parameters) {
                     foreach ($parameters as $param) {
                         $name = (string)$param->Name;
                         $value = (string)$param->Value;
-                        error_log("Processing parameter: $name = $value");
+
+                        // Only log specific parameters we're interested in
+                        if (strpos($name, 'Device.WiFi.SSID') !== false ||
+                            strpos($name, 'Device.WiFi.AccessPoint') !== false ||
+                            strpos($name, 'Device.DeviceInfo.UpTime') !== false ||
+                            strpos($name, 'Device.Ethernet.Interface.1.MACAddress') !== false) {
+                            error_log("TR-069 Parameter - $name: $value");
+                        }
 
                         // Map parameters
                         if (isset($this->parameterMap[$name])) {
                             $key = $this->parameterMap[$name];
-                            
-                            // Special handling for different types
                             switch ($key) {
                                 case 'uptime':
                                     $deviceInfo[$key] = empty($value) ? 0 : (int)$value;
@@ -101,30 +97,27 @@ class InformMessageParser {
                                 default:
                                     $deviceInfo[$key] = $value;
                             }
-                            
-                            error_log("Mapped $name to $key: " . $deviceInfo[$key]);
                         }
                     }
                 }
 
-                // Log successful parameter extractions
-                error_log("SSID: " . ($deviceInfo['ssid'] ?: 'Not found'));
-                error_log("MAC Address: " . ($deviceInfo['macAddress'] ?: 'Not found'));
-                error_log("Uptime: " . $deviceInfo['uptime']);
-                error_log("Connected Clients: " . $deviceInfo['connectedClients']);
+                // Log only the specific parameters we're tracking
+                error_log("TR-069 Device Parameters Summary:");
+                error_log("- SSID: " . ($deviceInfo['ssid'] ?: 'Not provided'));
+                error_log("- Security Mode: " . ($deviceInfo['securityMode'] ?: 'Not provided'));
+                error_log("- Uptime: " . $deviceInfo['uptime'] . " seconds");
+                error_log("- MAC Address: " . ($deviceInfo['macAddress'] ?: 'Not provided'));
+                error_log("- Connected Clients: " . $deviceInfo['connectedClients']);
             }
 
-            // Validate required fields
             if (empty($deviceInfo['serialNumber'])) {
                 throw new Exception("Missing required field: serialNumber");
             }
 
-            error_log("Final parsed device info: " . print_r($deviceInfo, true));
             return $deviceInfo;
 
         } catch (Exception $e) {
             error_log("Error parsing Inform message: " . $e->getMessage());
-            error_log("Stack trace: " . $e->getTraceAsString());
             throw $e;
         }
     }
