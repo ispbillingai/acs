@@ -13,11 +13,11 @@ class LoginHandler {
 
     public function login($username, $password) {
         try {
-            $stmt = $this->db->prepare("SELECT id, username, password, role FROM users WHERE username = ?");
-            $stmt->execute([$username]);
+            $stmt = $this->db->prepare("SELECT id, username, password, role FROM users WHERE username = ? AND password = ?");
+            $stmt->execute([$username, $password]);
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            if ($user && password_verify($password, $user['password'])) {
+            if ($user) {
                 // Update last login time
                 $updateStmt = $this->db->prepare("UPDATE users SET last_login = NOW() WHERE id = ?");
                 $updateStmt->execute([$user['id']]);
