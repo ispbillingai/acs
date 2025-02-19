@@ -42,7 +42,14 @@ class TR069Server {
         error_log("Raw POST data: " . $rawPost);
         
         if (empty($rawPost)) {
-            $this->handleEmptyRequest();
+            // If empty POST, send GetParameterValues request
+            if (isset($_SERVER['HTTP_COOKIE']) && strpos($_SERVER['HTTP_COOKIE'], 'session_id=') !== false) {
+                preg_match('/session_id=([^;]+)/', $_SERVER['HTTP_COOKIE'], $matches);
+                $this->sessionId = $matches[1];
+                $this->soapResponse = $this->responseGenerator->createGetParameterValuesRequest($this->sessionId);
+            } else {
+                $this->handleEmptyRequest();
+            }
             return;
         }
 
