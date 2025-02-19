@@ -39,6 +39,7 @@ class TR069Server {
         }
 
         $rawPost = file_get_contents('php://input');
+        error_log("Raw POST data: " . $rawPost);
         
         if (empty($rawPost)) {
             $this->handleEmptyRequest();
@@ -46,12 +47,15 @@ class TR069Server {
         }
 
         try {
+            libxml_use_internal_errors(true);
             $xml = new SimpleXMLElement($rawPost);
             $this->processRequest($xml);
         } catch (Exception $e) {
             error_log("TR069Server Error: " . $e->getMessage());
+            error_log("Stack trace: " . $e->getTraceAsString());
             header('HTTP/1.1 500 Internal Server Error');
-            exit('Error processing request');
+            echo "Internal Server Error: " . $e->getMessage();
+            exit;
         }
 
         $this->sendResponse();
@@ -76,12 +80,18 @@ class TR069Server {
 
     private function processRequest($xml) {
         $namespace = $xml->getNamespaces(true);
-        $soapEnv = $namespace['soapenv'];
-        $cwmp = $namespace['cwmp'];
+        $soapEnv = isset($namespace['soapenv']) ? $namespace['soapenv'] : 'http://schemas.xmlsoap.org/soap/envelope/';
+        $cwmp = isset($namespace['cwmp']) ? $namespace['cwmp'] : 'urn:dslforum-org:cwmp-1-0';
 
         $body = $xml->children($soapEnv)->Body;
+        if (empty($body)) {
+            throw new Exception("Empty SOAP Body");
+        }
+
         $request = $body->children($cwmp);
         $requestName = $request->getName();
+
+        error_log("Processing request type: " . $requestName);
 
         switch ($requestName) {
             case 'Inform':
@@ -98,6 +108,8 @@ class TR069Server {
             $this->deviceId = $this->deviceManager->updateDevice($deviceInfo);
             $this->sessionId = $this->sessionManager->createSession($deviceInfo['serialNumber']);
             $this->soapResponse = $this->responseGenerator->createResponse($this->sessionId);
+            
+            error_log("Inform handled successfully. Device ID: " . $this->deviceId . ", Session ID: " . $this->sessionId);
         } catch (Exception $e) {
             error_log("Error in handleInform: " . $e->getMessage());
             error_log("Stack trace: " . $e->getTraceAsString());
