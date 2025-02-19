@@ -1,4 +1,3 @@
-
 <?php
 // Enable error reporting
 error_reporting(E_ALL);
@@ -31,7 +30,6 @@ function getDevices($db) {
                 software_version as softwareVersion,
                 hardware_version as hardwareVersion
                 FROM devices 
-                WHERE last_contact >= DATE_SUB(NOW(), INTERVAL 5 MINUTE)
                 ORDER BY last_contact DESC";
         
         error_log("Executing SQL query: " . $sql);
