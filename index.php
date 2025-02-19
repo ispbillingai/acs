@@ -1,10 +1,20 @@
 
 <?php
+// Enable error reporting
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
 require_once __DIR__ . '/backend/config/database.php';
 
 // Initialize database connection
-$database = new Database();
-$db = $database->getConnection();
+try {
+    $database = new Database();
+    $db = $database->getConnection();
+    error_log("Database connection successful");
+} catch (Exception $e) {
+    error_log("Database connection failed: " . $e->getMessage());
+    die("Database connection failed: " . $e->getMessage());
+}
 
 // Fetch devices
 function getDevices($db) {
@@ -23,23 +33,41 @@ function getDevices($db) {
                 WHERE last_contact >= DATE_SUB(NOW(), INTERVAL 5 MINUTE)
                 ORDER BY last_contact DESC";
         
+        error_log("Executing SQL query: " . $sql);
+        
         $stmt = $db->prepare($sql);
         $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $devices = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        error_log("Found " . count($devices) . " devices");
+        error_log("Devices data: " . print_r($devices, true));
+        
+        return $devices;
     } catch (PDOException $e) {
         error_log("Database error in getDevices: " . $e->getMessage());
+        error_log("SQL State: " . $e->getCode());
         return [];
     }
 }
 
-$devices = getDevices($db);
+// Wrap main logic in try-catch for debugging
+try {
+    $devices = getDevices($db);
+    error_log("Successfully fetched devices: " . count($devices));
 
-// Calculate device statistics
-$totalDevices = count($devices);
-$onlineDevices = count(array_filter($devices, function($device) {
-    return $device['status'] === 'online';
-}));
-$offlineDevices = $totalDevices - $onlineDevices;
+    // Calculate device statistics
+    $totalDevices = count($devices);
+    $onlineDevices = count(array_filter($devices, function($device) {
+        return $device['status'] === 'online';
+    }));
+    $offlineDevices = $totalDevices - $onlineDevices;
+
+    error_log("Statistics calculated - Total: $totalDevices, Online: $onlineDevices, Offline: $offlineDevices");
+} catch (Exception $e) {
+    error_log("Error in main logic: " . $e->getMessage());
+    error_log("Stack trace: " . $e->getTraceAsString());
+    die("An error occurred: " . $e->getMessage());
+}
 ?>
 
 <!DOCTYPE html>

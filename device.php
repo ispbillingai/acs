@@ -1,77 +1,99 @@
 
 <?php
+// Enable error reporting
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
 require_once __DIR__ . '/backend/config/database.php';
 
-// Initialize database connection
-$database = new Database();
-$db = $database->getConnection();
+try {
+    // Initialize database connection
+    $database = new Database();
+    $db = $database->getConnection();
+    error_log("Database connection successful in device.php");
 
-// Get device ID from URL
-$deviceId = isset($_GET['id']) ? $_GET['id'] : null;
+    // Get device ID from URL
+    $deviceId = isset($_GET['id']) ? $_GET['id'] : null;
+    error_log("Requested device ID: " . $deviceId);
 
-if (!$deviceId) {
-    header('Location: index.php');
-    exit;
-}
+    if (!$deviceId) {
+        error_log("No device ID provided, redirecting to index");
+        header('Location: index.php');
+        exit;
+    }
 
-// Fetch device details
-function getDevice($db, $id) {
-    try {
-        $sql = "SELECT 
-                d.*,
-                p.param_name,
-                p.param_value,
-                p.param_type 
-                FROM devices d 
-                LEFT JOIN parameters p ON d.id = p.device_id 
-                WHERE d.id = :id";
-        
-        $stmt = $db->prepare($sql);
-        $stmt->execute([':id' => $id]);
-        
-        $device = null;
-        $parameters = [];
-        
-        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            if (!$device) {
-                $device = [
-                    'id' => $row['id'],
-                    'serialNumber' => $row['serial_number'],
-                    'manufacturer' => $row['manufacturer'],
-                    'model' => $row['model_name'],
-                    'status' => $row['status'],
-                    'lastContact' => $row['last_contact'],
-                    'ipAddress' => $row['ip_address'],
-                    'softwareVersion' => $row['software_version'],
-                    'hardwareVersion' => $row['hardware_version']
-                ];
+    // Fetch device details
+    function getDevice($db, $id) {
+        try {
+            $sql = "SELECT 
+                    d.*,
+                    p.param_name,
+                    p.param_value,
+                    p.param_type 
+                    FROM devices d 
+                    LEFT JOIN parameters p ON d.id = p.device_id 
+                    WHERE d.id = :id";
+            
+            error_log("Executing device query: " . $sql . " with ID: " . $id);
+            
+            $stmt = $db->prepare($sql);
+            $stmt->execute([':id' => $id]);
+            
+            $device = null;
+            $parameters = [];
+            
+            while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                error_log("Found row: " . print_r($row, true));
+                
+                if (!$device) {
+                    $device = [
+                        'id' => $row['id'],
+                        'serialNumber' => $row['serial_number'],
+                        'manufacturer' => $row['manufacturer'],
+                        'model' => $row['model_name'],
+                        'status' => $row['status'],
+                        'lastContact' => $row['last_contact'],
+                        'ipAddress' => $row['ip_address'],
+                        'softwareVersion' => $row['software_version'],
+                        'hardwareVersion' => $row['hardware_version']
+                    ];
+                    error_log("Device details: " . print_r($device, true));
+                }
+                
+                if ($row['param_name']) {
+                    $parameters[] = [
+                        'name' => $row['param_name'],
+                        'value' => $row['param_value'],
+                        'type' => $row['param_type']
+                    ];
+                }
             }
             
-            if ($row['param_name']) {
-                $parameters[] = [
-                    'name' => $row['param_name'],
-                    'value' => $row['param_value'],
-                    'type' => $row['param_type']
-                ];
+            if ($device) {
+                $device['parameters'] = $parameters;
+                error_log("Parameters found: " . count($parameters));
             }
+            
+            return $device;
+        } catch (PDOException $e) {
+            error_log("Database error in getDevice: " . $e->getMessage());
+            error_log("SQL State: " . $e->getCode());
+            return null;
         }
-        
-        if ($device) {
-            $device['parameters'] = $parameters;
-        }
-        
-        return $device;
-    } catch (PDOException $e) {
-        error_log("Database error in getDevice: " . $e->getMessage());
-        return null;
     }
-}
 
-$device = getDevice($db, $deviceId);
+    $device = getDevice($db, $deviceId);
+    error_log("Device retrieval result: " . ($device ? "success" : "failed"));
 
-if (!$device) {
-    header('Location: index.php');
-    exit;
+    if (!$device) {
+        error_log("Device not found, redirecting to index");
+        header('Location: index.php');
+        exit;
+    }
+} catch (Exception $e) {
+    error_log("Critical error in device.php: " . $e->getMessage());
+    error_log("Stack trace: " . $e->getTraceAsString());
+    die("An error occurred: " . $e->getMessage());
 }
 ?>
 
