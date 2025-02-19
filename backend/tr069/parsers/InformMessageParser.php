@@ -32,6 +32,8 @@ class InformMessageParser {
                 throw new Exception("Empty request received");
             }
 
+            error_log("Request content: " . print_r($request, true));
+
             $deviceInfo = [
                 'manufacturer' => '',
                 'modelName' => '',
@@ -50,14 +52,29 @@ class InformMessageParser {
 
             // Extract DeviceId information
             if (isset($request->DeviceId)) {
+                error_log("Found DeviceId section");
                 $deviceId = $request->DeviceId;
-                $deviceInfo['manufacturer'] = (string)($deviceId->Manufacturer ?? '');
-                $deviceInfo['modelName'] = (string)($deviceId->ProductClass ?? '');
-                $deviceInfo['serialNumber'] = (string)($deviceId->SerialNumber ?? '');
                 
-                // If no serial number but has OUI, generate one
+                // Check each field individually and log it
+                if (isset($deviceId->Manufacturer)) {
+                    $deviceInfo['manufacturer'] = (string)$deviceId->Manufacturer;
+                    error_log("Found Manufacturer: " . $deviceInfo['manufacturer']);
+                }
+                
+                if (isset($deviceId->ProductClass)) {
+                    $deviceInfo['modelName'] = (string)$deviceId->ProductClass;
+                    error_log("Found ProductClass: " . $deviceInfo['modelName']);
+                }
+                
+                if (isset($deviceId->SerialNumber)) {
+                    $deviceInfo['serialNumber'] = (string)$deviceId->SerialNumber;
+                    error_log("Found SerialNumber: " . $deviceInfo['serialNumber']);
+                }
+                
+                // Generate serial number from OUI if needed
                 if (empty($deviceInfo['serialNumber']) && isset($deviceId->OUI)) {
-                    $deviceInfo['serialNumber'] = (string)$deviceId->OUI;
+                    $deviceInfo['serialNumber'] = (string)$deviceId->OUI . '_' . time();
+                    error_log("Generated SerialNumber from OUI: " . $deviceInfo['serialNumber']);
                 }
             }
 
@@ -90,6 +107,7 @@ class InformMessageParser {
 
             // Validate required fields
             if (empty($deviceInfo['serialNumber'])) {
+                error_log("Serial number is empty after parsing");
                 throw new Exception("Missing required field: serialNumber");
             }
 
