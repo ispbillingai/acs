@@ -47,18 +47,16 @@ class DeviceManager {
                     ':hardware_version' => $deviceInfo['hardwareVersion'] ?: null,
                     ':ssid' => $deviceInfo['ssid'] ?: null,
                     ':ssid_password' => $deviceInfo['ssidPassword'] ?: null,
-                    ':uptime' => $deviceInfo['uptime'] ?: 0,
+                    ':uptime' => $deviceInfo['uptime'],
                     ':local_admin_password' => $deviceInfo['localAdminPassword'] ?: null,
                     ':tr069_password' => $deviceInfo['tr069Password'] ?: null,
-                    ':connected_clients' => count($deviceInfo['connectedClients']),
+                    ':connected_clients' => $deviceInfo['connectedClients'], // Fixed: using the integer directly
                     ':serial_number' => $deviceInfo['serialNumber']
                 ];
                 
-                error_log("Updating device with params: " . print_r($params, true));
                 $stmt = $this->db->prepare($sql);
                 $stmt->execute($params);
 
-                $this->updateConnectedClients($existingId, $deviceInfo['connectedClients'] ?? []);
                 return $existingId;
             } else {
                 // Insert new device
@@ -82,54 +80,19 @@ class DeviceManager {
                     ':hardware_version' => $deviceInfo['hardwareVersion'] ?: null,
                     ':ssid' => $deviceInfo['ssid'] ?: null,
                     ':ssid_password' => $deviceInfo['ssidPassword'] ?: null,
-                    ':uptime' => $deviceInfo['uptime'] ?: 0,
+                    ':uptime' => $deviceInfo['uptime'],
                     ':local_admin_password' => $deviceInfo['localAdminPassword'] ?: null,
                     ':tr069_password' => $deviceInfo['tr069Password'] ?: null,
-                    ':connected_clients' => count($deviceInfo['connectedClients'])
+                    ':connected_clients' => $deviceInfo['connectedClients'] // Fixed: using the integer directly
                 ];
 
-                error_log("Inserting new device with params: " . print_r($params, true));
                 $stmt = $this->db->prepare($sql);
                 $stmt->execute($params);
 
-                $newId = $this->db->lastInsertId();
-                $this->updateConnectedClients($newId, $deviceInfo['connectedClients'] ?? []);
-                return $newId;
+                return $this->db->lastInsertId();
             }
         } catch (PDOException $e) {
             error_log("Database error in updateDevice: " . $e->getMessage());
-            throw $e;
-        }
-    }
-
-    private function updateConnectedClients($deviceId, $clients) {
-        try {
-            // First, remove old clients
-            $stmt = $this->db->prepare("DELETE FROM connected_clients WHERE device_id = ?");
-            $stmt->execute([$deviceId]);
-
-            if (empty($clients)) {
-                return;
-            }
-
-            // Insert new clients
-            $sql = "INSERT INTO connected_clients 
-                    (device_id, mac_address, ip_address, hostname, signal_strength, connected_since, last_seen) 
-                    VALUES 
-                    (?, ?, ?, ?, ?, NOW(), NOW())";
-            $stmt = $this->db->prepare($sql);
-
-            foreach ($clients as $client) {
-                $stmt->execute([
-                    $deviceId,
-                    $client['macAddress'],
-                    $client['ipAddress'] ?? null,
-                    $client['hostname'] ?? null,
-                    $client['signalStrength'] ?? null
-                ]);
-            }
-        } catch (PDOException $e) {
-            error_log("Error updating connected clients: " . $e->getMessage());
             throw $e;
         }
     }

@@ -1,3 +1,4 @@
+
 <?php
 class InformMessageParser {
     private $parameterMap = [
@@ -34,6 +35,7 @@ class InformMessageParser {
                 'hardwareVersion' => '',
                 'ssid' => '',
                 'ssidPassword' => '',
+                'securityMode' => '', // Added missing securityMode field
                 'uptime' => 0,
                 'tr069Password' => '',
                 'connectedClients' => 0,
@@ -89,8 +91,6 @@ class InformMessageParser {
                             $key = $this->parameterMap[$name];
                             switch ($key) {
                                 case 'uptime':
-                                    $deviceInfo[$key] = empty($value) ? 0 : (int)$value;
-                                    break;
                                 case 'connectedClients':
                                     $deviceInfo[$key] = empty($value) ? 0 : (int)$value;
                                     break;
