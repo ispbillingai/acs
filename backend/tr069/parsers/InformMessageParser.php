@@ -16,10 +16,6 @@ class InformMessageParser {
         'InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.MACAddress' => 'macAddress',
         'Device.Ethernet.Interface.1.MACAddress' => 'macAddress',
         'Device.Interface.ether1.MACAddress' => 'macAddress',
-        'Device.WiFi.SSID.1.SSID' => 'ssid',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID' => 'ssid',
-        'Device.WiFi.AccessPoint.1.Security.KeyPassphrase' => 'ssidPassword',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase' => 'ssidPassword',
         'Device.DeviceInfo.UpTime' => 'uptime'
     ];
 
@@ -33,9 +29,6 @@ class InformMessageParser {
                 'macAddress' => '',
                 'softwareVersion' => '',
                 'hardwareVersion' => '',
-                'ssid' => '',
-                'ssidPassword' => '',
-                'securityMode' => '', // Added missing securityMode field
                 'uptime' => 0,
                 'tr069Password' => '',
                 'connectedClients' => 0,
@@ -79,9 +72,7 @@ class InformMessageParser {
                         $value = (string)$param->Value;
 
                         // Only log specific parameters we're interested in
-                        if (strpos($name, 'Device.WiFi.SSID') !== false ||
-                            strpos($name, 'Device.WiFi.AccessPoint') !== false ||
-                            strpos($name, 'Device.DeviceInfo.UpTime') !== false ||
+                        if (strpos($name, 'Device.DeviceInfo.UpTime') !== false ||
                             strpos($name, 'Device.Ethernet.Interface.1.MACAddress') !== false) {
                             error_log("TR-069 Parameter - $name: $value");
                         }
@@ -89,13 +80,10 @@ class InformMessageParser {
                         // Map parameters
                         if (isset($this->parameterMap[$name])) {
                             $key = $this->parameterMap[$name];
-                            switch ($key) {
-                                case 'uptime':
-                                case 'connectedClients':
-                                    $deviceInfo[$key] = empty($value) ? 0 : (int)$value;
-                                    break;
-                                default:
-                                    $deviceInfo[$key] = $value;
+                            if ($key === 'uptime') {
+                                $deviceInfo[$key] = empty($value) ? 0 : (int)$value;
+                            } else {
+                                $deviceInfo[$key] = $value;
                             }
                         }
                     }
@@ -103,11 +91,9 @@ class InformMessageParser {
 
                 // Log only the specific parameters we're tracking
                 error_log("TR-069 Device Parameters Summary:");
-                error_log("- SSID: " . ($deviceInfo['ssid'] ?: 'Not provided'));
-                error_log("- Security Mode: " . ($deviceInfo['securityMode'] ?: 'Not provided'));
-                error_log("- Uptime: " . $deviceInfo['uptime'] . " seconds");
+                error_log("- Device Model: " . $deviceInfo['modelName']);
                 error_log("- MAC Address: " . ($deviceInfo['macAddress'] ?: 'Not provided'));
-                error_log("- Connected Clients: " . $deviceInfo['connectedClients']);
+                error_log("- Uptime: " . $deviceInfo['uptime'] . " seconds");
             }
 
             if (empty($deviceInfo['serialNumber'])) {
