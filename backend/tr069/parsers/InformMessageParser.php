@@ -1,4 +1,3 @@
-
 <?php
 class InformMessageParser {
     private $parameterMap = [
@@ -20,8 +19,7 @@ class InformMessageParser {
         'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID' => 'ssid',
         'Device.WiFi.AccessPoint.1.Security.KeyPassphrase' => 'ssidPassword',
         'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase' => 'ssidPassword',
-        'Device.DeviceInfo.UpTime' => 'uptime',
-        'InternetGatewayDevice.DeviceInfo.UpTime' => 'uptime'
+        'Device.DeviceInfo.UpTime' => 'uptime'
     ];
 
     public function parseInform($request) {
@@ -32,7 +30,6 @@ class InformMessageParser {
                 throw new Exception("Empty request received");
             }
 
-            // Initialize deviceInfo array
             $deviceInfo = [
                 'manufacturer' => '',
                 'modelName' => '',
@@ -42,10 +39,13 @@ class InformMessageParser {
                 'softwareVersion' => '',
                 'hardwareVersion' => '',
                 'ssid' => '',
+                'ssid2' => '',
+                'ssidStatus' => '',
+                'securityMode' => '',
                 'ssidPassword' => '',
                 'uptime' => 0,
                 'tr069Password' => '',
-                'connectedClients' => [],
+                'connectedClients' => 0,
                 'localAdminPassword' => ''
             ];
 
@@ -59,28 +59,26 @@ class InformMessageParser {
                 $request->registerXPathNamespace($prefix, $ns);
             }
 
-            // Use XPath to get Inform section
+            // Get Inform section
             $inform = $request->xpath('//cwmp:Inform');
-            error_log("Found Inform section: " . print_r($inform, true));
+            error_log("Parsing Inform message structure: " . print_r($inform, true));
 
             if (!empty($inform)) {
                 $inform = $inform[0];
 
-                // Extract DeviceId information using xpath
+                // Extract DeviceId information
                 $deviceId = $inform->xpath('.//DeviceId')[0];
-                error_log("Found DeviceId section: " . print_r($deviceId, true));
+                error_log("Processing DeviceId: " . print_r($deviceId, true));
 
                 if ($deviceId) {
                     $deviceInfo['manufacturer'] = (string)$deviceId->Manufacturer;
                     $deviceInfo['modelName'] = (string)$deviceId->ProductClass;
                     $deviceInfo['serialNumber'] = (string)$deviceId->SerialNumber;
-
-                    error_log("Extracted device info - Manufacturer: {$deviceInfo['manufacturer']}, Model: {$deviceInfo['modelName']}, Serial: {$deviceInfo['serialNumber']}");
                 }
 
-                // Extract parameters using xpath
+                // Extract parameters
                 $parameters = $inform->xpath('.//ParameterList/ParameterValueStruct');
-                error_log("Found parameters: " . print_r($parameters, true));
+                error_log("Processing parameters: " . print_r($parameters, true));
 
                 if ($parameters) {
                     foreach ($parameters as $param) {
@@ -88,30 +86,36 @@ class InformMessageParser {
                         $value = (string)$param->Value;
                         error_log("Processing parameter: $name = $value");
 
-                        // Direct parameter mappings
-                        if ($name === 'Device.DeviceInfo.HardwareVersion') {
-                            $deviceInfo['hardwareVersion'] = $value;
-                        } elseif ($name === 'Device.DeviceInfo.SoftwareVersion') {
-                            $deviceInfo['softwareVersion'] = $value;
-                        }
-
-                        // Map other parameters
+                        // Map parameters
                         if (isset($this->parameterMap[$name])) {
                             $key = $this->parameterMap[$name];
-                            if ($key === 'uptime') {
-                                $deviceInfo[$key] = empty($value) ? 0 : (int)$value;
-                            } else {
-                                $deviceInfo[$key] = $value;
+                            
+                            // Special handling for different types
+                            switch ($key) {
+                                case 'uptime':
+                                    $deviceInfo[$key] = empty($value) ? 0 : (int)$value;
+                                    break;
+                                case 'connectedClients':
+                                    $deviceInfo[$key] = empty($value) ? 0 : (int)$value;
+                                    break;
+                                default:
+                                    $deviceInfo[$key] = $value;
                             }
+                            
                             error_log("Mapped $name to $key: " . $deviceInfo[$key]);
                         }
                     }
                 }
+
+                // Log successful parameter extractions
+                error_log("SSID: " . ($deviceInfo['ssid'] ?: 'Not found'));
+                error_log("MAC Address: " . ($deviceInfo['macAddress'] ?: 'Not found'));
+                error_log("Uptime: " . $deviceInfo['uptime']);
+                error_log("Connected Clients: " . $deviceInfo['connectedClients']);
             }
 
             // Validate required fields
             if (empty($deviceInfo['serialNumber'])) {
-                error_log("Serial number is empty after parsing");
                 throw new Exception("Missing required field: serialNumber");
             }
 
