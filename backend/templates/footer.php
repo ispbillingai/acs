@@ -1,7 +1,7 @@
 
-        <footer class="bg-white border-t mt-auto">
+        <footer class="bg-gray-800 border-t border-gray-700 mt-auto">
             <div class="mx-auto px-6 py-4">
-                <p class="text-center text-sm text-gray-600">
+                <p class="text-center text-sm text-gray-400">
                     © <?php echo date('Y'); ?> ACS Dashboard. All rights reserved.
                 </p>
             </div>

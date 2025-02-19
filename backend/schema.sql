@@ -1,4 +1,3 @@
-
 -- Simplified Devices table with additional Mikrotik parameters
 CREATE TABLE IF NOT EXISTS devices (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -52,7 +51,9 @@ CREATE TABLE IF NOT EXISTS users (
     role ENUM('admin', 'user') DEFAULT 'user',
     last_login DATETIME,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    timezone VARCHAR(64) DEFAULT 'Africa/Nairobi',
+    display_name VARCHAR(64)
 );
 
 -- Insert default admin user with plain password 'admin'
@@ -66,3 +67,5 @@ CREATE INDEX idx_device_status ON devices(status);
 CREATE INDEX idx_device_last_contact ON devices(last_contact);
 CREATE INDEX idx_device_mac ON devices(mac_address);
 CREATE INDEX idx_username ON users(username);
+CREATE INDEX idx_user_timezone ON users(timezone);
+CREATE INDEX idx_user_display_name ON users(display_name);
