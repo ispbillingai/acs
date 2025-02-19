@@ -2,6 +2,7 @@
 <?php
 class InformMessageParser {
     private $parameterMap = [
+        // Standard Device Info Parameters 
         'Device.DeviceInfo.Manufacturer' => 'manufacturer',
         'InternetGatewayDevice.DeviceInfo.Manufacturer' => 'manufacturer',
         'Device.DeviceInfo.ModelName' => 'modelName',
@@ -12,15 +13,39 @@ class InformMessageParser {
         'InternetGatewayDevice.DeviceInfo.HardwareVersion' => 'hardwareVersion',
         'Device.DeviceInfo.SoftwareVersion' => 'softwareVersion',
         'InternetGatewayDevice.DeviceInfo.SoftwareVersion' => 'softwareVersion',
+        'Device.DeviceInfo.ProductClass' => 'productClass',
+        'Device.DeviceInfo.Description' => 'description',
+        'Device.DeviceInfo.ManufacturerOUI' => 'manufacturerOUI',
+        
+        // MikroTik Specific Parameters
+        'Device.DeviceInfo.X_MIKROTIK_SystemIdentity' => 'systemIdentity',
+        'Device.DeviceInfo.X_MIKROTIK_ArchName' => 'archName',
+        
+        // Network Interfaces
         'Device.LAN.MACAddress' => 'macAddress',
-        'InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.MACAddress' => 'macAddress',
         'Device.Ethernet.Interface.1.MACAddress' => 'macAddress',
         'Device.Interface.ether1.MACAddress' => 'macAddress',
+        'InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.MACAddress' => 'macAddress',
+        
+        // IP Configuration
+        'Device.DHCPv4.Client.1.IPAddress' => 'dhcpIpAddress',
+        'Device.IP.Interface.1.IPv4Address.1.IPAddress' => 'ipAddress',
+        
+        // System Stats
         'Device.DeviceInfo.UpTime' => 'uptime',
-        'Device.WiFi.SSID.1.SSID' => 'ssid',
-        'Device.WiFi.AccessPoint.1.Security.KeyPassphrase' => 'ssidPassword',
-        'Device.WiFi.AccessPoint.1.Security.ModeEnabled' => 'securityMode',
-        'Device.WiFi.AccessPoint.1.AssociatedDeviceNumberOfEntries' => 'connectedClients'
+        'Device.Hosts.HostNumberOfEntries' => 'dhcpHostCount',
+        
+        // WiFi Parameters (may be null for non-WiFi models)
+        'Device.WiFi.SSID.1.SSID' => 'ssid1',
+        'Device.WiFi.SSID.2.SSID' => 'ssid2',
+        'Device.WiFi.SSID.1.MACAddress' => 'wifiMac1',
+        'Device.WiFi.SSID.2.MACAddress' => 'wifiMac2',
+        'Device.WiFi.AccessPoint.1.Security.KeyPassphrase' => 'ssidPassword1',
+        'Device.WiFi.AccessPoint.2.Security.KeyPassphrase' => 'ssidPassword2',
+        'Device.WiFi.AccessPoint.1.Security.ModeEnabled' => 'securityMode1',
+        'Device.WiFi.AccessPoint.2.Security.ModeEnabled' => 'securityMode2',
+        'Device.WiFi.AccessPoint.1.AssociatedDeviceNumberOfEntries' => 'connectedClients1',
+        'Device.WiFi.AccessPoint.2.AssociatedDeviceNumberOfEntries' => 'connectedClients2'
     ];
 
     public function parseInform($request) {
@@ -33,12 +58,26 @@ class InformMessageParser {
                 'macAddress' => '',
                 'softwareVersion' => '',
                 'hardwareVersion' => '',
-                'ssid' => null,
-                'ssidPassword' => null,
-                'securityMode' => null,
+                'productClass' => '',
+                'description' => '',
+                'manufacturerOUI' => '',
+                'systemIdentity' => '',
+                'archName' => '',
+                'dhcpIpAddress' => '',
+                'ipAddress' => '',
                 'uptime' => 0,
+                'dhcpHostCount' => 0,
+                'ssid1' => null,
+                'ssid2' => null,
+                'wifiMac1' => null,
+                'wifiMac2' => null,
+                'ssidPassword1' => null,
+                'ssidPassword2' => null,
+                'securityMode1' => null,
+                'securityMode2' => null,
+                'connectedClients1' => 0,
+                'connectedClients2' => 0,
                 'tr069Password' => '',
-                'connectedClients' => 0,
                 'localAdminPassword' => ''
             ];
 
@@ -78,11 +117,13 @@ class InformMessageParser {
                         $name = (string)$param->Name;
                         $value = (string)$param->Value;
 
-                        // Log all important parameters
-                        if (strpos($name, 'Device.DeviceInfo.UpTime') !== false ||
-                            strpos($name, 'Device.Ethernet.Interface.1.MACAddress') !== false ||
-                            strpos($name, 'Device.WiFi.SSID') !== false ||
-                            strpos($name, 'Device.WiFi.AccessPoint') !== false) {
+                        // Enhanced parameter logging
+                        if (strpos($name, 'Device.DeviceInfo') !== false ||
+                            strpos($name, 'Device.Ethernet') !== false ||
+                            strpos($name, 'Device.WiFi') !== false ||
+                            strpos($name, 'Device.IP') !== false ||
+                            strpos($name, 'Device.DHCPv4') !== false ||
+                            strpos($name, 'Device.Hosts') !== false) {
                             error_log("TR-069 Parameter - $name: $value");
                         }
 
@@ -91,7 +132,9 @@ class InformMessageParser {
                             $key = $this->parameterMap[$name];
                             switch ($key) {
                                 case 'uptime':
-                                case 'connectedClients':
+                                case 'connectedClients1':
+                                case 'connectedClients2':
+                                case 'dhcpHostCount':
                                     $deviceInfo[$key] = empty($value) ? 0 : (int)$value;
                                     break;
                                 default:
@@ -101,14 +144,20 @@ class InformMessageParser {
                     }
                 }
 
-                // Log device parameters summary
+                // Enhanced logging
                 error_log("TR-069 Device Parameters Summary:");
-                error_log("- Device Model: " . $deviceInfo['modelName']);
+                error_log("- Device Identity: " . ($deviceInfo['systemIdentity'] ?: 'Not provided'));
+                error_log("- Model: " . $deviceInfo['modelName']);
+                error_log("- Product Class: " . ($deviceInfo['productClass'] ?: 'Not provided'));
                 error_log("- MAC Address: " . ($deviceInfo['macAddress'] ?: 'Not provided'));
+                error_log("- IP Address: " . ($deviceInfo['ipAddress'] ?: 'Not provided'));
+                error_log("- DHCP IP: " . ($deviceInfo['dhcpIpAddress'] ?: 'Not provided'));
                 error_log("- Uptime: " . $deviceInfo['uptime'] . " seconds");
-                error_log("- SSID: " . ($deviceInfo['ssid'] ?: 'Not provided'));
-                error_log("- Security Mode: " . ($deviceInfo['securityMode'] ?: 'Not provided'));
-                error_log("- Connected Clients: " . $deviceInfo['connectedClients']);
+                error_log("- SSID 1: " . ($deviceInfo['ssid1'] ?: 'Not provided'));
+                error_log("- SSID 2: " . ($deviceInfo['ssid2'] ?: 'Not provided'));
+                error_log("- WiFi Clients 1: " . $deviceInfo['connectedClients1']);
+                error_log("- WiFi Clients 2: " . $deviceInfo['connectedClients2']);
+                error_log("- DHCP Hosts: " . $deviceInfo['dhcpHostCount']);
             }
 
             if (empty($deviceInfo['serialNumber'])) {
