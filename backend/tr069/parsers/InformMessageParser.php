@@ -32,7 +32,19 @@ class InformMessageParser {
                 throw new Exception("Empty request received");
             }
 
-            error_log("Request content: " . print_r($request, true));
+            // Get all namespaces
+            $namespaces = $request->getNamespaces(true);
+            error_log("Namespaces: " . print_r($namespaces, true));
+
+            // Get the SOAP body using the correct namespace
+            $soapenvNS = isset($namespaces['soapenv']) ? $namespaces['soapenv'] : 'http://schemas.xmlsoap.org/soap/envelope/';
+            $cwmpNS = isset($namespaces['cwmp']) ? $namespaces['cwmp'] : 'urn:dslforum-org:cwmp-1-0';
+
+            $body = $request->children($soapenvNS)->Body;
+            $inform = $body->children($cwmpNS)->Inform;
+
+            error_log("SOAP Body content: " . print_r($body, true));
+            error_log("Inform content: " . print_r($inform, true));
 
             $deviceInfo = [
                 'manufacturer' => '',
@@ -51,49 +63,34 @@ class InformMessageParser {
             ];
 
             // Extract DeviceId information
-            if (isset($request->DeviceId)) {
-                error_log("Found DeviceId section");
-                $deviceId = $request->DeviceId;
+            if (isset($inform->DeviceId)) {
+                error_log("Found DeviceId section: " . print_r($inform->DeviceId, true));
+                $deviceId = $inform->DeviceId;
                 
-                // Check each field individually and log it
                 if (isset($deviceId->Manufacturer)) {
                     $deviceInfo['manufacturer'] = (string)$deviceId->Manufacturer;
-                    error_log("Found Manufacturer: " . $deviceInfo['manufacturer']);
+                    error_log("Manufacturer: " . $deviceInfo['manufacturer']);
                 }
                 
                 if (isset($deviceId->ProductClass)) {
                     $deviceInfo['modelName'] = (string)$deviceId->ProductClass;
-                    error_log("Found ProductClass: " . $deviceInfo['modelName']);
+                    error_log("ProductClass: " . $deviceInfo['modelName']);
                 }
                 
                 if (isset($deviceId->SerialNumber)) {
                     $deviceInfo['serialNumber'] = (string)$deviceId->SerialNumber;
-                    error_log("Found SerialNumber: " . $deviceInfo['serialNumber']);
-                }
-                
-                // Generate serial number from OUI if needed
-                if (empty($deviceInfo['serialNumber']) && isset($deviceId->OUI)) {
-                    $deviceInfo['serialNumber'] = (string)$deviceId->OUI . '_' . time();
-                    error_log("Generated SerialNumber from OUI: " . $deviceInfo['serialNumber']);
+                    error_log("SerialNumber: " . $deviceInfo['serialNumber']);
                 }
             }
 
             // Extract Parameters
-            if (isset($request->ParameterList) && isset($request->ParameterList->ParameterValueStruct)) {
-                foreach ($request->ParameterList->ParameterValueStruct as $param) {
-                    $name = (string)($param->Name ?? '');
-                    $value = (string)($param->Value ?? '');
-
+            if (isset($inform->ParameterList)) {
+                foreach ($inform->ParameterList->children() as $param) {
+                    $name = (string)$param->Name;
+                    $value = (string)$param->Value;
                     error_log("Processing parameter: $name = $value");
 
-                    // Direct parameter mappings
-                    if ($name === 'Device.DeviceInfo.HardwareVersion') {
-                        $deviceInfo['hardwareVersion'] = $value;
-                    } elseif ($name === 'Device.DeviceInfo.SoftwareVersion') {
-                        $deviceInfo['softwareVersion'] = $value;
-                    }
-
-                    // Map other parameters
+                    // Map parameters
                     if (isset($this->parameterMap[$name])) {
                         $key = $this->parameterMap[$name];
                         if ($key === 'uptime') {
@@ -101,6 +98,7 @@ class InformMessageParser {
                         } else {
                             $deviceInfo[$key] = $value;
                         }
+                        error_log("Mapped $name to $key: " . $deviceInfo[$key]);
                     }
                 }
             }
