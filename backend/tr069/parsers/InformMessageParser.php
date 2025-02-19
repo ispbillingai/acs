@@ -42,12 +42,12 @@ class InformMessageParser {
                 'hardwareVersion' => '',
                 'ssid' => '',
                 'ssidPassword' => '',
-                'uptime' => '',
+                'uptime' => 0, // Set default integer value
                 'tr069Password' => '',
                 'connectedClients' => []
             ];
 
-            // Extract DeviceId information
+            // Extract DeviceId information from the SOAP message
             if (isset($request->DeviceId)) {
                 $deviceId = $request->DeviceId;
                 $deviceInfo['manufacturer'] = (string)$deviceId->Manufacturer;
@@ -59,15 +59,25 @@ class InformMessageParser {
                 }
             }
 
-            // Extract Parameters
+            // Extract Parameters from ParameterList
             if (isset($request->ParameterList) && isset($request->ParameterList->ParameterValueStruct)) {
                 foreach ($request->ParameterList->ParameterValueStruct as $param) {
                     $name = (string)$param->Name;
                     $value = (string)$param->Value;
 
+                    error_log("Processing parameter: $name = $value");
+
                     if (isset($this->parameterMap[$name])) {
                         $key = $this->parameterMap[$name];
-                        $deviceInfo[$key] = $value;
+                        
+                        // Special handling for uptime to ensure it's an integer
+                        if ($key === 'uptime') {
+                            $deviceInfo[$key] = empty($value) ? 0 : (int)$value;
+                        } else {
+                            $deviceInfo[$key] = $value;
+                        }
+                        
+                        error_log("Mapped $name to $key: " . $deviceInfo[$key]);
                     }
                 }
             }

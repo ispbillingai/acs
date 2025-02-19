@@ -31,16 +31,16 @@ class DeviceManager {
                         WHERE id = :id";
 
                 $params = [
-                    ':manufacturer' => $deviceInfo['manufacturer'],
-                    ':model_name' => $deviceInfo['modelName'],
-                    ':mac_address' => $deviceInfo['macAddress'] ?? null,
+                    ':manufacturer' => $deviceInfo['manufacturer'] ?: null,
+                    ':model_name' => $deviceInfo['modelName'] ?: null,
+                    ':mac_address' => $deviceInfo['macAddress'] ?: null,
                     ':status' => $deviceInfo['status'],
                     ':ip_address' => $_SERVER['REMOTE_ADDR'],
-                    ':software_version' => $deviceInfo['softwareVersion'] ?? null,
-                    ':hardware_version' => $deviceInfo['hardwareVersion'] ?? null,
-                    ':ssid' => $deviceInfo['ssid'] ?? null,
-                    ':uptime' => $deviceInfo['uptime'] ?? null,
-                    ':tr069_password' => $deviceInfo['tr069Password'] ?? null,
+                    ':software_version' => $deviceInfo['softwareVersion'] ?: null,
+                    ':hardware_version' => $deviceInfo['hardwareVersion'] ?: null,
+                    ':ssid' => $deviceInfo['ssid'] ?: null,
+                    ':uptime' => $deviceInfo['uptime'] ?: 0,
+                    ':tr069_password' => $deviceInfo['tr069Password'] ?: null,
                     ':id' => $existingId
                 ];
                 
@@ -63,16 +63,16 @@ class DeviceManager {
 
                 $params = [
                     ':serial_number' => $deviceInfo['serialNumber'],
-                    ':manufacturer' => $deviceInfo['manufacturer'],
-                    ':model_name' => $deviceInfo['modelName'],
-                    ':mac_address' => $deviceInfo['macAddress'] ?? null,
+                    ':manufacturer' => $deviceInfo['manufacturer'] ?: null,
+                    ':model_name' => $deviceInfo['modelName'] ?: null,
+                    ':mac_address' => $deviceInfo['macAddress'] ?: null,
                     ':status' => $deviceInfo['status'],
                     ':ip_address' => $_SERVER['REMOTE_ADDR'],
-                    ':software_version' => $deviceInfo['softwareVersion'] ?? null,
-                    ':hardware_version' => $deviceInfo['hardwareVersion'] ?? null,
-                    ':ssid' => $deviceInfo['ssid'] ?? null,
-                    ':uptime' => $deviceInfo['uptime'] ?? null,
-                    ':tr069_password' => $deviceInfo['tr069Password'] ?? null
+                    ':software_version' => $deviceInfo['softwareVersion'] ?: null,
+                    ':hardware_version' => $deviceInfo['hardwareVersion'] ?: null,
+                    ':ssid' => $deviceInfo['ssid'] ?: null,
+                    ':uptime' => $deviceInfo['uptime'] ?: 0,
+                    ':tr069_password' => $deviceInfo['tr069Password'] ?: null
                 ];
 
                 error_log("Inserting new device with params: " . print_r($params, true));
