@@ -26,62 +26,38 @@ try {
     // Fetch device details
     function getDevice($db, $id) {
         try {
-            $sql = "SELECT 
-                    d.*,
-                    p.param_name,
-                    p.param_value,
-                    p.param_type 
-                    FROM devices d 
-                    LEFT JOIN parameters p ON d.id = p.device_id 
-                    WHERE d.id = :id";
+            $sql = "SELECT * FROM devices WHERE id = :id";
             
             error_log("Executing device query: " . $sql . " with ID: " . $id);
             
             $stmt = $db->prepare($sql);
             $stmt->execute([':id' => $id]);
             
-            $device = null;
-            $parameters = [];
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
             
-            while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-                error_log("Found row: " . print_r($row, true));
-                
-                if (!$device) {
-                    $device = [
-                        'id' => $row['id'],
-                        'serialNumber' => $row['serial_number'],
-                        'manufacturer' => $row['manufacturer'],
-                        'model' => $row['model_name'],
-                        'status' => $row['status'],
-                        'lastContact' => $row['last_contact'],
-                        'ipAddress' => $row['ip_address'],
-                        'softwareVersion' => $row['software_version'],
-                        'hardwareVersion' => $row['hardware_version'],
-                        'ssid' => $row['ssid'],
-                        'ssidPassword' => $row['ssid_password'],
-                        'uptime' => $row['uptime'],
-                        'localAdminPassword' => $row['local_admin_password'],
-                        'tr069Password' => $row['tr069_password'],
-                        'connectedClients' => $row['connected_clients']
-                    ];
-                    error_log("Device details: " . print_r($device, true));
-                }
-                
-                if ($row['param_name']) {
-                    $parameters[] = [
-                        'name' => $row['param_name'],
-                        'value' => $row['param_value'],
-                        'type' => $row['param_type']
-                    ];
-                }
+            if ($row) {
+                $device = [
+                    'id' => $row['id'],
+                    'serialNumber' => $row['serial_number'],
+                    'manufacturer' => $row['manufacturer'],
+                    'model' => $row['model_name'],
+                    'status' => $row['status'],
+                    'lastContact' => $row['last_contact'],
+                    'ipAddress' => $row['ip_address'],
+                    'softwareVersion' => $row['software_version'],
+                    'hardwareVersion' => $row['hardware_version'],
+                    'ssid' => $row['ssid'],
+                    'ssidPassword' => $row['ssid_password'],
+                    'uptime' => $row['uptime'],
+                    'localAdminPassword' => $row['local_admin_password'],
+                    'tr069Password' => $row['tr069_password'],
+                    'connectedClients' => $row['connected_clients']
+                ];
+                error_log("Device details: " . print_r($device, true));
+                return $device;
             }
             
-            if ($device) {
-                $device['parameters'] = $parameters;
-                error_log("Parameters found: " . count($parameters));
-            }
-            
-            return $device;
+            return null;
         } catch (PDOException $e) {
             error_log("Database error in getDevice: " . $e->getMessage());
             error_log("SQL State: " . $e->getCode());
@@ -183,22 +159,6 @@ try {
                     </div>
                 </div>
             </div>
-
-            <!-- Device Parameters -->
-            <?php if (!empty($device['parameters'])): ?>
-            <div class="bg-white rounded-lg shadow p-6">
-                <h2 class="text-xl font-semibold mb-4">Device Parameters</h2>
-                <div class="grid grid-cols-1 gap-2">
-                    <?php foreach ($device['parameters'] as $param): ?>
-                        <div class="p-3 bg-gray-50 rounded">
-                            <p class="text-sm font-medium"><?php echo htmlspecialchars($param['name']); ?></p>
-                            <p class="text-sm text-gray-600"><?php echo htmlspecialchars($param['value']); ?></p>
-                            <p class="text-xs text-gray-500">Type: <?php echo htmlspecialchars($param['type']); ?></p>
-                        </div>
-                    <?php endforeach; ?>
-                </div>
-            </div>
-            <?php endif; ?>
         </div>
     </div>
 </body>
