@@ -44,8 +44,25 @@ CREATE TABLE IF NOT EXISTS sessions (
     FOREIGN KEY (device_serial) REFERENCES devices(serial_number)
 );
 
+-- New Users table for ACS authentication
+CREATE TABLE IF NOT EXISTS users (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    username VARCHAR(64) UNIQUE NOT NULL,
+    password VARCHAR(255) NOT NULL,
+    role ENUM('admin', 'user') DEFAULT 'user',
+    last_login DATETIME,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- Insert default admin user (password: admin)
+INSERT INTO users (username, password, role) 
+VALUES ('admin', '$2y$10$92O8.ej9F0ltpVbRGvOTOuWmF.ZFCC1ku0zGHXBaQA5mGqJM5fVGS', 'admin')
+ON DUPLICATE KEY UPDATE username=username;
+
 -- Create indexes
 CREATE INDEX idx_device_serial ON devices(serial_number);
 CREATE INDEX idx_device_status ON devices(status);
 CREATE INDEX idx_device_last_contact ON devices(last_contact);
 CREATE INDEX idx_device_mac ON devices(mac_address);
+CREATE INDEX idx_username ON users(username);
