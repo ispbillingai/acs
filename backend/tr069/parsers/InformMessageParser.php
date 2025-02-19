@@ -32,20 +32,7 @@ class InformMessageParser {
                 throw new Exception("Empty request received");
             }
 
-            // Get all namespaces
-            $namespaces = $request->getNamespaces(true);
-            error_log("Namespaces: " . print_r($namespaces, true));
-
-            // Get the SOAP body using the correct namespace
-            $soapenvNS = isset($namespaces['soapenv']) ? $namespaces['soapenv'] : 'http://schemas.xmlsoap.org/soap/envelope/';
-            $cwmpNS = isset($namespaces['cwmp']) ? $namespaces['cwmp'] : 'urn:dslforum-org:cwmp-1-0';
-
-            $body = $request->children($soapenvNS)->Body;
-            $inform = $body->children($cwmpNS)->Inform;
-
-            error_log("SOAP Body content: " . print_r($body, true));
-            error_log("Inform content: " . print_r($inform, true));
-
+            // Initialize deviceInfo array
             $deviceInfo = [
                 'manufacturer' => '',
                 'modelName' => '',
@@ -62,43 +49,62 @@ class InformMessageParser {
                 'localAdminPassword' => ''
             ];
 
-            // Extract DeviceId information
-            if (isset($inform->DeviceId)) {
-                error_log("Found DeviceId section: " . print_r($inform->DeviceId, true));
-                $deviceId = $inform->DeviceId;
-                
-                if (isset($deviceId->Manufacturer)) {
-                    $deviceInfo['manufacturer'] = (string)$deviceId->Manufacturer;
-                    error_log("Manufacturer: " . $deviceInfo['manufacturer']);
-                }
-                
-                if (isset($deviceId->ProductClass)) {
-                    $deviceInfo['modelName'] = (string)$deviceId->ProductClass;
-                    error_log("ProductClass: " . $deviceInfo['modelName']);
-                }
-                
-                if (isset($deviceId->SerialNumber)) {
-                    $deviceInfo['serialNumber'] = (string)$deviceId->SerialNumber;
-                    error_log("SerialNumber: " . $deviceInfo['serialNumber']);
-                }
+            // Register namespaces
+            $namespaces = [
+                'soapenv' => 'http://schemas.xmlsoap.org/soap/envelope/',
+                'cwmp' => 'urn:dslforum-org:cwmp-1-0'
+            ];
+
+            foreach ($namespaces as $prefix => $ns) {
+                $request->registerXPathNamespace($prefix, $ns);
             }
 
-            // Extract Parameters
-            if (isset($inform->ParameterList)) {
-                foreach ($inform->ParameterList->children() as $param) {
-                    $name = (string)$param->Name;
-                    $value = (string)$param->Value;
-                    error_log("Processing parameter: $name = $value");
+            // Use XPath to get Inform section
+            $inform = $request->xpath('//cwmp:Inform');
+            error_log("Found Inform section: " . print_r($inform, true));
 
-                    // Map parameters
-                    if (isset($this->parameterMap[$name])) {
-                        $key = $this->parameterMap[$name];
-                        if ($key === 'uptime') {
-                            $deviceInfo[$key] = empty($value) ? 0 : (int)$value;
-                        } else {
-                            $deviceInfo[$key] = $value;
+            if (!empty($inform)) {
+                $inform = $inform[0];
+
+                // Extract DeviceId information using xpath
+                $deviceId = $inform->xpath('.//DeviceId')[0];
+                error_log("Found DeviceId section: " . print_r($deviceId, true));
+
+                if ($deviceId) {
+                    $deviceInfo['manufacturer'] = (string)$deviceId->Manufacturer;
+                    $deviceInfo['modelName'] = (string)$deviceId->ProductClass;
+                    $deviceInfo['serialNumber'] = (string)$deviceId->SerialNumber;
+
+                    error_log("Extracted device info - Manufacturer: {$deviceInfo['manufacturer']}, Model: {$deviceInfo['modelName']}, Serial: {$deviceInfo['serialNumber']}");
+                }
+
+                // Extract parameters using xpath
+                $parameters = $inform->xpath('.//ParameterList/ParameterValueStruct');
+                error_log("Found parameters: " . print_r($parameters, true));
+
+                if ($parameters) {
+                    foreach ($parameters as $param) {
+                        $name = (string)$param->Name;
+                        $value = (string)$param->Value;
+                        error_log("Processing parameter: $name = $value");
+
+                        // Direct parameter mappings
+                        if ($name === 'Device.DeviceInfo.HardwareVersion') {
+                            $deviceInfo['hardwareVersion'] = $value;
+                        } elseif ($name === 'Device.DeviceInfo.SoftwareVersion') {
+                            $deviceInfo['softwareVersion'] = $value;
                         }
-                        error_log("Mapped $name to $key: " . $deviceInfo[$key]);
+
+                        // Map other parameters
+                        if (isset($this->parameterMap[$name])) {
+                            $key = $this->parameterMap[$name];
+                            if ($key === 'uptime') {
+                                $deviceInfo[$key] = empty($value) ? 0 : (int)$value;
+                            } else {
+                                $deviceInfo[$key] = $value;
+                            }
+                            error_log("Mapped $name to $key: " . $deviceInfo[$key]);
+                        }
                     }
                 }
             }
