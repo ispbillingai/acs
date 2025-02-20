@@ -5,6 +5,7 @@ class Database {
     private $db_name = "acs";
     private $username = "acs";
     private $password = "acs";
+    private $app_url = "http://acs.ispledger.com";
     public $conn;
 
     public function getConnection() {
@@ -25,5 +26,13 @@ class Database {
             error_log("Connection details: host={$this->host}, db={$this->db_name}, user={$this->username}");
             throw $e;
         }
+    }
+
+    public function getAppUrl() {
+        return $this->app_url;
+    }
+
+    public function getTr069Url() {
+        return $this->app_url . "/tr069.php";
     }
 }
