@@ -57,9 +57,24 @@ CREATE TABLE IF NOT EXISTS users (
     display_name VARCHAR(64)
 );
 
+-- TR069 Configuration table
+CREATE TABLE IF NOT EXISTS tr069_config (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    username VARCHAR(64) NOT NULL DEFAULT 'admin',
+    password VARCHAR(255) NOT NULL DEFAULT 'admin',
+    inform_interval INT NOT NULL DEFAULT 300,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
 -- Insert default admin user with plain password 'admin'
 INSERT INTO users (username, password, role) 
 VALUES ('admin', 'admin', 'admin')
+ON DUPLICATE KEY UPDATE username=username;
+
+-- Insert default TR069 configuration
+INSERT INTO tr069_config (username, password, inform_interval)
+VALUES ('admin', 'admin', 300)
 ON DUPLICATE KEY UPDATE username=username;
 
 -- Create indexes
