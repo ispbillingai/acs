@@ -3,8 +3,9 @@
 require_once __DIR__ . '/backend/config/database.php';
 require_once __DIR__ . '/backend/auth/login.php';
 
-// Initialize login handler
+// Initialize login handler and database
 $loginHandler = new LoginHandler();
+$database = new Database();
 
 // Check if user is logged in
 if (!$loginHandler->isLoggedIn()) {
@@ -15,7 +16,6 @@ if (!$loginHandler->isLoggedIn()) {
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
-        $database = new Database();
         $db = $database->getConnection();
         
         // Update TR069 configuration
@@ -40,7 +40,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // Get current TR069 configuration
 try {
-    $database = new Database();
     $db = $database->getConnection();
     $stmt = $db->prepare("SELECT username, password, inform_interval FROM tr069_config LIMIT 1");
     $stmt->execute();
@@ -87,16 +86,16 @@ include __DIR__ . '/backend/templates/header.php';
                 <div class="space-y-4">
                     <div class="p-4 bg-gray-50 rounded-lg">
                         <p class="text-sm text-gray-600 mb-2">TR069 URL:</p>
-                        <p class="text-md font-mono bg-white p-2 rounded border">http://acs.ispledger.com/tr069.php</p>
+                        <p class="text-md font-mono bg-white p-2 rounded border"><?php echo htmlspecialchars($database->getTr069Url()); ?></p>
                     </div>
                     <div class="p-4 bg-gray-50 rounded-lg">
                         <p class="text-sm text-gray-600 mb-2">Default Credentials:</p>
-                        <p class="text-md">Username: <span class="font-mono bg-white px-2 py-1 rounded border">admin</span></p>
-                        <p class="text-md mt-2">Password: <span class="font-mono bg-white px-2 py-1 rounded border">admin</span></p>
+                        <p class="text-md">Username: <span class="font-mono bg-white px-2 py-1 rounded border"><?php echo htmlspecialchars($config['username']); ?></span></p>
+                        <p class="text-md mt-2">Password: <span class="font-mono bg-white px-2 py-1 rounded border"><?php echo htmlspecialchars($config['password']); ?></span></p>
                     </div>
                     <div class="p-4 bg-gray-50 rounded-lg">
                         <p class="text-sm text-gray-600 mb-2">Inform Interval:</p>
-                        <p class="text-md">300 seconds (5 minutes)</p>
+                        <p class="text-md"><?php echo htmlspecialchars($config['inform_interval']); ?> seconds (<?php echo round($config['inform_interval'] / 60); ?> minutes)</p>
                     </div>
                 </div>
             </div>
