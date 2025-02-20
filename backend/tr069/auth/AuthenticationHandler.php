@@ -1,12 +1,13 @@
 
 <?php
-class AuthenticationHandler {
-    private $validUsername;
-    private $validPassword;
+require_once __DIR__ . '/../../config/database.php';
 
-    public function __construct($username = "admin", $password = "admin") {
-        $this->validUsername = $username;
-        $this->validPassword = $password;
+class AuthenticationHandler {
+    private $db;
+    
+    public function __construct() {
+        $database = new Database();
+        $this->db = $database->getConnection();
     }
 
     public function authenticate() {
@@ -17,6 +18,18 @@ class AuthenticationHandler {
         $username = $_SERVER['PHP_AUTH_USER'];
         $password = $_SERVER['PHP_AUTH_PW'];
         
-        return ($username === $this->validUsername && $password === $this->validPassword);
+        try {
+            $stmt = $this->db->prepare("SELECT username, password FROM tr069_config LIMIT 1");
+            $stmt->execute();
+            $config = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if ($config && $username === $config['username'] && $password === $config['password']) {
+                return true;
+            }
+        } catch (Exception $e) {
+            error_log("TR069 Authentication Error: " . $e->getMessage());
+        }
+        
+        return false;
     }
 }
