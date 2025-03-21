@@ -21,11 +21,17 @@ logWithTimestamp("=== NEW TR-069 REQUEST ===");
 logWithTimestamp("Client IP: " . $_SERVER['REMOTE_ADDR']);
 logWithTimestamp("Device User-Agent: " . $_SERVER['HTTP_USER_AGENT']);
 
-// Check for Huawei device based on User-Agent
+// Enhanced Huawei device detection based on User-Agent
 $isHuawei = false;
-if (isset($_SERVER['HTTP_USER_AGENT']) && (stripos($_SERVER['HTTP_USER_AGENT'], 'huawei') !== false)) {
-    $isHuawei = true;
-    logWithTimestamp("DETECTED HUAWEI DEVICE");
+if (isset($_SERVER['HTTP_USER_AGENT'])) {
+    $userAgent = $_SERVER['HTTP_USER_AGENT'];
+    // Check for any Huawei-specific strings in User-Agent
+    if (stripos($userAgent, 'huawei') !== false || 
+        stripos($userAgent, 'hw_') !== false ||
+        stripos($userAgent, 'hg8') !== false) {
+        $isHuawei = true;
+        logWithTimestamp("DETECTED HUAWEI DEVICE: " . $userAgent);
+    }
 }
 
 // Request Headers (only important ones)
@@ -55,6 +61,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 try {
     require_once __DIR__ . '/backend/tr069/server.php';
     $server = new TR069Server();
+    // Pass the Huawei detection flag to the server
+    $server->setHuaweiDetection($isHuawei);
     $server->handleRequest();
 } catch (Exception $e) {
     logWithTimestamp("ERROR: " . $e->getMessage());

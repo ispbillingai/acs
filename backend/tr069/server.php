@@ -31,10 +31,21 @@ class TR069Server {
         $this->responseGenerator = new InformResponseGenerator();
         $this->authHandler = new AuthenticationHandler();
         
-        // Check if this is a Huawei device
-        if (isset($_SERVER['HTTP_USER_AGENT']) && (stripos($_SERVER['HTTP_USER_AGENT'], 'huawei') !== false)) {
+        // Check if this is a Huawei device (basic check, will be updated by setHuaweiDetection)
+        if (isset($_SERVER['HTTP_USER_AGENT']) && (
+            stripos($_SERVER['HTTP_USER_AGENT'], 'huawei') !== false || 
+            stripos($_SERVER['HTTP_USER_AGENT'], 'hw_') !== false ||
+            stripos($_SERVER['HTTP_USER_AGENT'], 'hg8') !== false)) {
             $this->isHuaweiDevice = true;
-            error_log("TR069Server: Detected Huawei device");
+            error_log("TR069Server: Detected Huawei device from User-Agent");
+        }
+    }
+    
+    // Allow setting the Huawei detection flag from outside
+    public function setHuaweiDetection($isHuawei) {
+        $this->isHuaweiDevice = $isHuawei;
+        if ($isHuawei) {
+            error_log("TR069Server: External Huawei device detection confirmed");
         }
     }
 
@@ -76,7 +87,7 @@ class TR069Server {
         try {
             libxml_use_internal_errors(true);
             $xml = new SimpleXMLElement($rawPost);
-            $this->processRequest($xml);
+            $this->processRequest($xml, $rawPost);
         } catch (Exception $e) {
             error_log("TR069Server Error: " . $e->getMessage());
             error_log("Stack trace: " . $e->getTraceAsString());
@@ -118,7 +129,7 @@ class TR069Server {
         exit('Method Not Allowed');
     }
 
-    private function processRequest($xml) {
+    private function processRequest($xml, $rawXml = '') {
         $namespace = $xml->getNamespaces(true);
         $soapEnv = isset($namespace['soapenv']) ? $namespace['soapenv'] : 'http://schemas.xmlsoap.org/soap/envelope/';
         $cwmp = isset($namespace['cwmp']) ? $namespace['cwmp'] : 'urn:dslforum-org:cwmp-1-0';
@@ -138,7 +149,7 @@ class TR069Server {
 
         switch ($requestName) {
             case 'Inform':
-                $this->handleInform($request);
+                $this->handleInform($request, $rawXml);
                 break;
             default:
                 error_log("TR069Server: Unknown request type: " . $requestName);
@@ -146,19 +157,44 @@ class TR069Server {
         }
     }
 
-    private function handleInform($request) {
+    private function handleInform($request, $rawXml = '') {
         try {
+            // Look for Huawei-specific indicators in the XML
+            if (stripos($rawXml, 'HG8') !== false || 
+                stripos($rawXml, 'Huawei') !== false || 
+                $this->isHuaweiDevice) {
+                
+                error_log("TR069Server: Confirmed Huawei device from XML content or previous detection");
+                $this->isHuaweiDevice = true;
+            }
+            
             // Get manufacturer from the DeviceId section first
             $deviceId = $request->DeviceID;
             $manufacturer = (string)$deviceId->Manufacturer;
             
             error_log("TR069Server: Detected device manufacturer: " . $manufacturer);
             
-            // Select appropriate parser based on manufacturer
+            // If manufacturer contains 'huawei', set the flag
+            if (stripos($manufacturer, 'huawei') !== false) {
+                $this->isHuaweiDevice = true;
+                error_log("TR069Server: Confirmed Huawei device from manufacturer name");
+            }
+            
+            // Select appropriate parser based on device detection
             $deviceInfo = null;
-            if (stripos($manufacturer, 'huawei') !== false || $this->isHuaweiDevice) {
+            if ($this->isHuaweiDevice) {
                 error_log("TR069Server: Using Huawei parser for device");
                 $deviceInfo = $this->huaweiInformParser->parseInform($request);
+                
+                // Ensure required fields for device_manager.php are set
+                $deviceInfo['ssid'] = $deviceInfo['ssid1'] ?? null;
+                $deviceInfo['ssidPassword'] = $deviceInfo['ssidPassword1'] ?? null;
+                $deviceInfo['connectedClients'] = ($deviceInfo['connectedClients1'] ?? 0) + ($deviceInfo['connectedClients2'] ?? 0);
+                
+                // Log the enhanced information
+                error_log("TR069Server: Huawei device details - Model: " . $deviceInfo['modelName'] . 
+                          ", Serial: " . $deviceInfo['serialNumber'] . 
+                          ", SSID: " . ($deviceInfo['ssid'] ?? 'Not provided'));
             } else {
                 error_log("TR069Server: Using default/MikroTik parser for device");
                 $deviceInfo = $this->informParser->parseInform($request);

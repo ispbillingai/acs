@@ -12,6 +12,22 @@ class DeviceManager {
             if (empty($deviceInfo['serialNumber'])) {
                 throw new Exception("Cannot update device: missing serial number");
             }
+            
+            // Make sure all required keys exist with default values if not provided
+            $deviceInfo = array_merge([
+                'manufacturer' => null,
+                'modelName' => null,
+                'macAddress' => null,
+                'status' => 'online',
+                'softwareVersion' => null,
+                'hardwareVersion' => null,
+                'ssid' => null,
+                'ssidPassword' => null,
+                'uptime' => 0,
+                'localAdminPassword' => null,
+                'tr069Password' => null,
+                'connectedClients' => 0
+            ], $deviceInfo);
 
             // First check if device exists
             $stmt = $this->db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
@@ -38,19 +54,19 @@ class DeviceManager {
                         WHERE serial_number = :serial_number";
 
                 $params = [
-                    ':manufacturer' => $deviceInfo['manufacturer'] ?: null,
-                    ':model_name' => $deviceInfo['modelName'] ?: null,
-                    ':mac_address' => $deviceInfo['macAddress'] ?: null,
+                    ':manufacturer' => $deviceInfo['manufacturer'],
+                    ':model_name' => $deviceInfo['modelName'],
+                    ':mac_address' => $deviceInfo['macAddress'],
                     ':status' => $deviceInfo['status'],
                     ':ip_address' => $_SERVER['REMOTE_ADDR'],
-                    ':software_version' => $deviceInfo['softwareVersion'] ?: null,
-                    ':hardware_version' => $deviceInfo['hardwareVersion'] ?: null,
-                    ':ssid' => $deviceInfo['ssid'] ?: null,
-                    ':ssid_password' => $deviceInfo['ssidPassword'] ?: null,
+                    ':software_version' => $deviceInfo['softwareVersion'],
+                    ':hardware_version' => $deviceInfo['hardwareVersion'],
+                    ':ssid' => $deviceInfo['ssid'],
+                    ':ssid_password' => $deviceInfo['ssidPassword'],
                     ':uptime' => $deviceInfo['uptime'],
-                    ':local_admin_password' => $deviceInfo['localAdminPassword'] ?: null,
-                    ':tr069_password' => $deviceInfo['tr069Password'] ?: null,
-                    ':connected_clients' => $deviceInfo['connectedClients'], // Fixed: using the integer directly
+                    ':local_admin_password' => $deviceInfo['localAdminPassword'],
+                    ':tr069_password' => $deviceInfo['tr069Password'],
+                    ':connected_clients' => $deviceInfo['connectedClients'],
                     ':serial_number' => $deviceInfo['serialNumber']
                 ];
                 
@@ -71,19 +87,19 @@ class DeviceManager {
 
                 $params = [
                     ':serial_number' => $deviceInfo['serialNumber'],
-                    ':manufacturer' => $deviceInfo['manufacturer'] ?: null,
-                    ':model_name' => $deviceInfo['modelName'] ?: null,
-                    ':mac_address' => $deviceInfo['macAddress'] ?: null,
+                    ':manufacturer' => $deviceInfo['manufacturer'],
+                    ':model_name' => $deviceInfo['modelName'],
+                    ':mac_address' => $deviceInfo['macAddress'],
                     ':status' => $deviceInfo['status'],
                     ':ip_address' => $_SERVER['REMOTE_ADDR'],
-                    ':software_version' => $deviceInfo['softwareVersion'] ?: null,
-                    ':hardware_version' => $deviceInfo['hardwareVersion'] ?: null,
-                    ':ssid' => $deviceInfo['ssid'] ?: null,
-                    ':ssid_password' => $deviceInfo['ssidPassword'] ?: null,
+                    ':software_version' => $deviceInfo['softwareVersion'],
+                    ':hardware_version' => $deviceInfo['hardwareVersion'],
+                    ':ssid' => $deviceInfo['ssid'],
+                    ':ssid_password' => $deviceInfo['ssidPassword'],
                     ':uptime' => $deviceInfo['uptime'],
-                    ':local_admin_password' => $deviceInfo['localAdminPassword'] ?: null,
-                    ':tr069_password' => $deviceInfo['tr069Password'] ?: null,
-                    ':connected_clients' => $deviceInfo['connectedClients'] // Fixed: using the integer directly
+                    ':local_admin_password' => $deviceInfo['localAdminPassword'],
+                    ':tr069_password' => $deviceInfo['tr069Password'],
+                    ':connected_clients' => $deviceInfo['connectedClients']
                 ];
 
                 $stmt = $this->db->prepare($sql);
