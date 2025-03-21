@@ -1,3 +1,4 @@
+
 <?php
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/session_manager.php';
@@ -550,3 +551,148 @@ class TR069Server {
                         );
                         return;
                     }
+                }
+                
+                // Process any security parameters we detected
+                if (!empty($detectedSecurityParams)) {
+                    error_log("TR069Server: Found security parameters for HG8145V: " . implode(", ", $detectedSecurityParams));
+                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Found security parameters: " . implode(", ", $detectedSecurityParams) . "\n", FILE_APPEND);
+                    
+                    // Send a GetParameterValues request for the security parameters
+                    $this->soapResponse = $this->responseGenerator->createCustomGetParameterValuesRequest(
+                        $this->sessionId,
+                        $detectedSecurityParams
+                    );
+                    return;
+                }
+                
+                // If we found X_HW parameters, try to get those values
+                if (!empty($detectedXHWParams)) {
+                    error_log("TR069Server: Found X_HW parameters for HG8145V: " . implode(", ", $detectedXHWParams));
+                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Found X_HW parameters: " . implode(", ", $detectedXHWParams) . "\n", FILE_APPEND);
+                    
+                    // Send a GetParameterValues request for the X_HW parameters
+                    $this->soapResponse = $this->responseGenerator->createCustomGetParameterValuesRequest(
+                        $this->sessionId,
+                        $detectedXHWParams
+                    );
+                    return;
+                }
+                
+                // If no interesting parameters found, move to next discovery step
+                $this->hg8145vDiscoveryStep++;
+                if ($this->hg8145vDiscoveryStep > 7) {
+                    $this->hg8145vDiscoveryStep = 1; // Reset if we've gone through all steps
+                }
+                
+                $this->soapResponse = $this->responseGenerator->createHG8145VDiscoverySequence(
+                    $this->sessionId, 
+                    $this->hg8145vDiscoveryStep
+                );
+                return;
+            }
+            
+            // Handle regular discovery mode for other devices
+            if ($this->discoveryMode || $this->useParameterDiscovery) {
+                // If we detected WLAN interfaces, try to get more info about them
+                if (!empty($detectedWifiInterfaces)) {
+                    error_log("TR069Server: Detected WiFi interfaces: " . implode(", ", $detectedWifiInterfaces));
+                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Detected WiFi interfaces: " . implode(", ", $detectedWifiInterfaces) . "\n", FILE_APPEND);
+                    
+                    // Prioritize looking for security parameters
+                    $securityParamList = [];
+                    foreach ($detectedWifiInterfaces as $ifaceNum) {
+                        $securityParamList[] = "InternetGatewayDevice.LANDevice.1.WLANConfiguration.{$ifaceNum}.SSID";
+                        $securityParamList[] = "InternetGatewayDevice.LANDevice.1.WLANConfiguration.{$ifaceNum}.KeyPassphrase";
+                        $securityParamList[] = "InternetGatewayDevice.LANDevice.1.WLANConfiguration.{$ifaceNum}.PreSharedKey";
+                        $securityParamList[] = "InternetGatewayDevice.LANDevice.1.WLANConfiguration.{$ifaceNum}.X_HW_WPAKey";
+                    }
+                    
+                    $this->soapResponse = $this->responseGenerator->createCustomGetParameterValuesRequest(
+                        $this->sessionId,
+                        $securityParamList
+                    );
+                    return;
+                }
+                
+                // If we found security parameters directly, query them
+                if (!empty($detectedSecurityParams)) {
+                    error_log("TR069Server: Detected security parameters: " . implode(", ", $detectedSecurityParams));
+                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Detected security parameters: " . implode(", ", $detectedSecurityParams) . "\n", FILE_APPEND);
+                    
+                    $this->soapResponse = $this->responseGenerator->createCustomGetParameterValuesRequest(
+                        $this->sessionId,
+                        $detectedSecurityParams
+                    );
+                    return;
+                }
+                
+                // Continue with parameter exploration
+                if ($this->explorationPhase < 6) {
+                    $this->explorationPhase++;
+                    $this->explorationAttempts = 0;
+                    
+                    $this->soapResponse = $this->responseGenerator->createExploreParametersRequest(
+                        $this->sessionId,
+                        $this->explorationPhase
+                    );
+                    return;
+                }
+                
+                // If all phases complete, try comprehensive WiFi security
+                $this->soapResponse = $this->responseGenerator->createWifiSecurityParametersRequest($this->sessionId);
+                return;
+            }
+            
+            // Default response for parameter names - look deeper
+            if (!empty($parameterList)) {
+                // Try to get values for any discovered parameters that might be interesting
+                $valuesToGet = [];
+                
+                foreach ($parameterList as $param) {
+                    // Look for SSID/WiFi/security related parameters
+                    if (stripos($param, 'SSID') !== false || 
+                        stripos($param, 'WPA') !== false || 
+                        stripos($param, 'KeyPassphrase') !== false || 
+                        stripos($param, 'PreSharedKey') !== false || 
+                        stripos($param, 'WiFi') !== false ||
+                        stripos($param, 'WLAN') !== false) {
+                        $valuesToGet[] = $param;
+                    }
+                }
+                
+                if (!empty($valuesToGet)) {
+                    $this->soapResponse = $this->responseGenerator->createCustomGetParameterValuesRequest(
+                        $this->sessionId,
+                        $valuesToGet
+                    );
+                    return;
+                }
+            }
+            
+            // No relevant parameters found, return empty response
+            $this->soapResponse = null;
+        } catch (Exception $e) {
+            error_log("TR069Server: Error in handleGetParameterNamesResponse: " . $e->getMessage());
+            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Error in handleGetParameterNamesResponse: " . $e->getMessage() . "\n", FILE_APPEND);
+            $this->soapResponse = null;
+        }
+    }
+    
+    // Implement remaining method stubs
+    private function handleInform($request, $rawXml = '') {
+        // Implementation of handleInform...
+    }
+    
+    private function handleGetParameterValuesResponse($request, $rawXml = '') {
+        // Implementation of handleGetParameterValuesResponse...
+    }
+    
+    private function handleEmptyRequest() {
+        // Implementation of handleEmptyRequest...
+    }
+    
+    private function sendResponse() {
+        // Implementation of sendResponse...
+    }
+}
