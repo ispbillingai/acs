@@ -20,6 +20,7 @@ class TR069Server {
     private $deviceId;
     private $sessionId;
     private $isHuaweiDevice = false;
+    private $shouldSendGetParameterValues = false;
 
     public function __construct() {
         $database = new Database();
@@ -71,12 +72,19 @@ class TR069Server {
         }
         
         if (empty($rawPost)) {
-            // If empty POST, send GetParameterValues request
+            // If empty POST, send GetParameterValues request if flag is set
             if (isset($_SERVER['HTTP_COOKIE']) && strpos($_SERVER['HTTP_COOKIE'], 'session_id=') !== false) {
                 preg_match('/session_id=([^;]+)/', $_SERVER['HTTP_COOKIE'], $matches);
                 $this->sessionId = $matches[1];
                 error_log("TR069Server: Session ID from cookie: " . $this->sessionId);
-                $this->soapResponse = $this->responseGenerator->createGetParameterValuesRequest($this->sessionId);
+                
+                if ($this->isHuaweiDevice) {
+                    error_log("TR069Server: Sending Huawei GetParameterValues request");
+                    $this->soapResponse = $this->responseGenerator->createHuaweiGetParameterValuesRequest($this->sessionId);
+                } else {
+                    error_log("TR069Server: Sending standard GetParameterValues request");
+                    $this->soapResponse = $this->responseGenerator->createGetParameterValuesRequest($this->sessionId);
+                }
             } else {
                 error_log("TR069Server: No session ID found, handling as empty request");
                 $this->handleEmptyRequest();
@@ -150,6 +158,16 @@ class TR069Server {
         switch ($requestName) {
             case 'Inform':
                 $this->handleInform($request, $rawXml);
+                // Set flag to send GetParameterValues on the next empty POST
+                if ($this->isHuaweiDevice) {
+                    error_log("TR069Server: Setting flag to send Huawei GetParameterValues on next request");
+                    $this->shouldSendGetParameterValues = true;
+                    // Set a cookie to identify this session later
+                    setcookie('session_id', $this->sessionId, 0, '/');
+                }
+                break;
+            case 'GetParameterValuesResponse':
+                $this->handleGetParameterValuesResponse($request, $rawXml);
                 break;
             default:
                 error_log("TR069Server: Unknown request type: " . $requestName);
@@ -207,6 +225,84 @@ class TR069Server {
             error_log("TR069Server: Inform handled successfully. Device ID: " . $this->deviceId . ", Session ID: " . $this->sessionId);
         } catch (Exception $e) {
             error_log("TR069Server: Error in handleInform: " . $e->getMessage());
+            error_log("Stack trace: " . $e->getTraceAsString());
+            throw $e;
+        }
+    }
+
+    private function handleGetParameterValuesResponse($request, $rawXml = '') {
+        try {
+            error_log("TR069Server: Processing GetParameterValuesResponse");
+            
+            // Log the raw XML for debugging
+            if ($this->isHuaweiDevice) {
+                error_log("=== HUAWEI GetParameterValuesResponse XML START ===");
+                error_log($request->asXML());
+                error_log("=== HUAWEI GetParameterValuesResponse XML END ===");
+            }
+            
+            // Process the parameters in the response
+            $parameters = $request->ParameterList->ParameterValueStruct;
+            if (empty($parameters)) {
+                error_log("TR069Server: No parameters found in GetParameterValuesResponse");
+                return;
+            }
+            
+            error_log("TR069Server: Found " . count($parameters) . " parameters in GetParameterValuesResponse");
+            
+            // Extract parameters of interest
+            $deviceInfo = [];
+            foreach ($parameters as $param) {
+                $name = (string)$param->Name;
+                $value = (string)$param->Value;
+                
+                error_log("TR069Server: Parameter in GetParameterValuesResponse - " . $name . " = " . $value);
+                
+                // Extract key parameters that we're interested in
+                if (stripos($name, 'SSID') !== false) {
+                    if (stripos($name, 'WLANConfiguration.1') !== false) {
+                        $deviceInfo['ssid1'] = $value;
+                        $deviceInfo['ssid'] = $value; // Main SSID
+                    } elseif (stripos($name, 'WLANConfiguration.2') !== false) {
+                        $deviceInfo['ssid2'] = $value;
+                    }
+                } elseif (stripos($name, 'KeyPassphrase') !== false) {
+                    if (stripos($name, 'WLANConfiguration.1') !== false) {
+                        $deviceInfo['ssidPassword1'] = $value;
+                        $deviceInfo['ssidPassword'] = $value; // Main password
+                    } elseif (stripos($name, 'WLANConfiguration.2') !== false) {
+                        $deviceInfo['ssidPassword2'] = $value;
+                    }
+                } elseif (stripos($name, 'TxPower') !== false) {
+                    $deviceInfo['ponTxPower'] = $value;
+                } elseif (stripos($name, 'RxPower') !== false) {
+                    $deviceInfo['ponRxPower'] = $value;
+                } elseif (stripos($name, 'MACAddress') !== false) {
+                    $deviceInfo['macAddress'] = $value;
+                } elseif (stripos($name, 'ExternalIPAddress') !== false) {
+                    $deviceInfo['ipAddress'] = $value;
+                } elseif (stripos($name, 'SerialNumber') !== false) {
+                    $deviceInfo['serialNumber'] = $value;
+                } elseif (stripos($name, 'UpTime') !== false) {
+                    $deviceInfo['uptime'] = (int)$value;
+                }
+            }
+            
+            // Log what we found
+            error_log("TR069Server: GetParameterValuesResponse extracted data: " . json_encode($deviceInfo));
+            
+            // Update device with new information
+            if (!empty($deviceInfo) && isset($deviceInfo['serialNumber'])) {
+                $deviceInfo['status'] = 'online';
+                $deviceId = $this->deviceManager->updateDevice($deviceInfo);
+                error_log("TR069Server: Updated device ID: " . $deviceId . " with GetParameterValuesResponse data");
+            }
+            
+            // For Huawei devices, we don't need to send a response after GetParameterValuesResponse
+            $this->soapResponse = null;
+            
+        } catch (Exception $e) {
+            error_log("TR069Server: Error in handleGetParameterValuesResponse: " . $e->getMessage());
             error_log("Stack trace: " . $e->getTraceAsString());
             throw $e;
         }
