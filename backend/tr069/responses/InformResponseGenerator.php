@@ -17,11 +17,12 @@ class InformResponseGenerator {
             </SOAP-ENV:Body>
         </SOAP-ENV:Envelope>';
 
+        error_log("InformResponseGenerator: Created InformResponse for session ID: " . $sessionId);
         return $informResponse;
     }
 
     public function createGetParameterValuesRequest($sessionId) {
-        return '<?xml version="1.0" encoding="UTF-8"?>
+        $request = '<?xml version="1.0" encoding="UTF-8"?>
         <SOAP-ENV:Envelope
             xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
             xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
@@ -37,10 +38,14 @@ class InformResponseGenerator {
                 </cwmp:GetParameterValues>
             </SOAP-ENV:Body>
         </SOAP-ENV:Envelope>';
+        
+        error_log("InformResponseGenerator: Created Standard GetParameterValues request for session ID: " . $sessionId);
+        file_put_contents(__DIR__ . '/../../../get.log', date('Y-m-d H:i:s') . " Standard GetParameterValues request sent: " . $request . "\n", FILE_APPEND);
+        return $request;
     }
     
     public function createHuaweiGetParameterValuesRequest($sessionId) {
-        return '<?xml version="1.0" encoding="UTF-8"?>
+        $request = '<?xml version="1.0" encoding="UTF-8"?>
         <SOAP-ENV:Envelope
             xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
             xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
@@ -68,5 +73,9 @@ class InformResponseGenerator {
                 </cwmp:GetParameterValues>
             </SOAP-ENV:Body>
         </SOAP-ENV:Envelope>';
+        
+        error_log("InformResponseGenerator: Created Huawei GetParameterValues request for session ID: " . $sessionId);
+        file_put_contents(__DIR__ . '/../../../get.log', date('Y-m-d H:i:s') . " Huawei GetParameterValues request sent: " . $request . "\n", FILE_APPEND);
+        return $request;
     }
 }

@@ -20,6 +20,7 @@ set_time_limit(0);
 logWithTimestamp("=== NEW TR-069 REQUEST ===");
 logWithTimestamp("Client IP: " . $_SERVER['REMOTE_ADDR']);
 logWithTimestamp("Device User-Agent: " . $_SERVER['HTTP_USER_AGENT']);
+logWithTimestamp("Request Method: " . $_SERVER['REQUEST_METHOD']);
 
 // Enhanced Huawei device detection based on User-Agent and XML content
 $isHuawei = false;
@@ -53,6 +54,11 @@ if (isset($headers['Authorization'])) {
     logWithTimestamp("Auth Header Present: Yes");
 }
 
+// Check for cookies - important for session tracking
+if (isset($_SERVER['HTTP_COOKIE'])) {
+    logWithTimestamp("Cookies Present: " . $_SERVER['HTTP_COOKIE']);
+}
+
 // POST Data for debugging
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $raw_post = file_get_contents('php://input');
@@ -69,6 +75,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             logWithTimestamp("=== HUAWEI RAW XML START ===");
             logWithTimestamp($sanitized_xml);
             logWithTimestamp("=== HUAWEI RAW XML END ===");
+        }
+    } else {
+        logWithTimestamp("EMPTY POST RECEIVED - This should trigger GetParameterValues if in session");
+        // Log cookie info again specifically for empty POSTs
+        if (isset($_SERVER['HTTP_COOKIE'])) {
+            logWithTimestamp("Session Cookie for empty POST: " . $_SERVER['HTTP_COOKIE']);
+            
+            // Also log to get.log
+            file_put_contents(__DIR__ . '/get.log', date('Y-m-d H:i:s') . " Empty POST received with cookie: " . $_SERVER['HTTP_COOKIE'] . "\n", FILE_APPEND);
+        } else {
+            logWithTimestamp("WARNING: Empty POST with no session cookie");
+            file_put_contents(__DIR__ . '/get.log', date('Y-m-d H:i:s') . " Empty POST received with NO cookie\n", FILE_APPEND);
         }
     }
 }
