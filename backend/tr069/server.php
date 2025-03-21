@@ -636,4 +636,256 @@ class TR069Server {
     private function handleGetParameterValuesResponse($request, $rawXml = '') {
         try {
             error_log("TR069Server: Processing GetParameterValuesResponse");
-            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Get
+            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " GetParameterValuesResponse received\n", FILE_APPEND);
+            
+            // For Huawei devices, process the parameter values differently
+            if ($this->isHuaweiDevice) {
+                error_log("TR069Server: Processing Huawei GetParameterValuesResponse");
+                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Processing Huawei GetParameterValuesResponse\n", FILE_APPEND);
+                
+                // Log the raw XML for debugging
+                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Raw response XML: " . $rawXml . "\n", FILE_APPEND);
+                
+                // Parse out values from the XML response
+                $parameterValues = [];
+                
+                // Try to extract values using various XML parsing methods
+                try {
+                    // First try with SimpleXML
+                    $xml = simplexml_load_string($rawXml);
+                    $namespace = $xml->getNamespaces(true);
+                    
+                    // Try different approaches to find ParameterList
+                    $parameterList = null;
+                    $body = $xml->children($namespace['SOAP-ENV'] ?? 'http://schemas.xmlsoap.org/soap/envelope/')->Body;
+                    
+                    // Log debug info about what we found in Body
+                    foreach ($body->children() as $child) {
+                        error_log("TR069Server: Found child in Body: " . $child->getName());
+                    }
+                    
+                    // Check for GetParameterValuesResponse in different namespaces
+                    foreach ($namespace as $prefix => $uri) {
+                        $response = $body->children($uri);
+                        if (isset($response->GetParameterValuesResponse)) {
+                            $parameterList = $response->GetParameterValuesResponse->ParameterList;
+                            error_log("TR069Server: Found ParameterList in namespace: " . $uri);
+                            break;
+                        }
+                    }
+                    
+                    // If still not found, try direct XML parsing
+                    if (empty($parameterList)) {
+                        error_log("TR069Server: ParameterList not found via SimpleXML, trying DOM");
+                        $dom = new DOMDocument();
+                        $dom->loadXML($rawXml);
+                        $xpath = new DOMXPath($dom);
+                        
+                        // Register all namespaces from document
+                        $namespaces = [];
+                        foreach ($dom->documentElement->attributes as $attr) {
+                            if (strpos($attr->nodeName, 'xmlns:') === 0) {
+                                $prefix = substr($attr->nodeName, 6);
+                                $uri = $attr->nodeValue;
+                                $xpath->registerNamespace($prefix, $uri);
+                                $namespaces[$prefix] = $uri;
+                            }
+                        }
+                        
+                        // Try multiple XPath expressions to find parameters
+                        $paramNodes = [];
+                        $xpathExpressions = [
+                            '//ParameterValueStruct',
+                            '//cwmp:ParameterValueStruct',
+                            '//ParameterList/ParameterValueStruct',
+                            '//cwmp:ParameterList/cwmp:ParameterValueStruct'
+                        ];
+                        
+                        foreach ($xpathExpressions as $expr) {
+                            $nodes = $xpath->query($expr);
+                            if ($nodes && $nodes->length > 0) {
+                                error_log("TR069Server: Found parameter nodes with XPath: " . $expr . ", count: " . $nodes->length);
+                                
+                                foreach ($nodes as $node) {
+                                    $nameNode = $xpath->query('.//Name', $node)->item(0);
+                                    $valueNode = $xpath->query('.//Value', $node)->item(0);
+                                    
+                                    if ($nameNode && $valueNode) {
+                                        $name = $nameNode->textContent;
+                                        $value = $valueNode->textContent;
+                                        
+                                        error_log("TR069Server: Found parameter: " . $name . " = " . $value);
+                                        $parameterValues[$name] = $value;
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    } else {
+                        // Process ParameterList found via SimpleXML
+                        foreach ($parameterList->children() as $param) {
+                            $name = (string)$param->Name;
+                            $value = (string)$param->Value;
+                            $parameterValues[$name] = $value;
+                        }
+                    }
+                } catch (Exception $e) {
+                    error_log("TR069Server: Error parsing GetParameterValuesResponse: " . $e->getMessage());
+                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Error parsing response: " . $e->getMessage() . "\n", FILE_APPEND);
+                }
+                
+                // Log what parameters we found
+                if (!empty($parameterValues)) {
+                    error_log("TR069Server: Extracted " . count($parameterValues) . " parameters from response");
+                    foreach ($parameterValues as $name => $value) {
+                        error_log("TR069Server: Parameter: " . $name . " = " . $value);
+                        file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Parameter: " . $name . " = " . $value . "\n", FILE_APPEND);
+                    }
+                    
+                    // Update device info in database with the new values
+                    if (!empty($this->serialNumber)) {
+                        // Look for specific parameters we're interested in
+                        $deviceUpdates = [];
+                        
+                        // WiFi parameters - different devices use different parameter names
+                        foreach ($parameterValues as $name => $value) {
+                            // SSID detection for 2.4GHz and 5GHz
+                            if (strpos($name, 'WLANConfiguration.1.SSID') !== false) {
+                                $deviceUpdates['ssid1'] = $value;
+                            } else if (strpos($name, 'WLANConfiguration.2.SSID') !== false) {
+                                $deviceUpdates['ssid2'] = $value;
+                            } else if (strpos($name, 'WLANConfiguration.5.SSID') !== false) {
+                                $deviceUpdates['ssid2'] = $value;
+                            }
+                            
+                            // WiFi password detection - different possible parameter names
+                            if (strpos($name, 'WLANConfiguration.1.KeyPassphrase') !== false || 
+                                strpos($name, 'WLANConfiguration.1.PreSharedKey') !== false) {
+                                $deviceUpdates['ssidPassword1'] = $value;
+                            } else if (strpos($name, 'WLANConfiguration.2.KeyPassphrase') !== false || 
+                                       strpos($name, 'WLANConfiguration.2.PreSharedKey') !== false) {
+                                $deviceUpdates['ssidPassword2'] = $value;
+                            } else if (strpos($name, 'WLANConfiguration.5.KeyPassphrase') !== false || 
+                                       strpos($name, 'WLANConfiguration.5.PreSharedKey') !== false) {
+                                $deviceUpdates['ssidPassword2'] = $value;
+                            }
+                        }
+                        
+                        // Only update if we found any parameters to update
+                        if (!empty($deviceUpdates)) {
+                            error_log("TR069Server: Updating device with new values: " . json_encode($deviceUpdates));
+                            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Updating device with values: " . json_encode($deviceUpdates) . "\n", FILE_APPEND);
+                            
+                            $deviceInfo = [
+                                'serialNumber' => $this->serialNumber,
+                            ];
+                            
+                            // Merge the updates into deviceInfo
+                            foreach ($deviceUpdates as $key => $value) {
+                                $deviceInfo[$key] = $value;
+                            }
+                            
+                            // Update the device in database
+                            $this->deviceManager->updateDevice($deviceInfo);
+                        } else {
+                            error_log("TR069Server: No WiFi parameters found to update");
+                            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " No WiFi parameters found to update\n", FILE_APPEND);
+                        }
+                    } else {
+                        error_log("TR069Server: Cannot update device - no serial number available");
+                        file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Cannot update device - no serial number\n", FILE_APPEND);
+                    }
+                } else {
+                    error_log("TR069Server: No parameters found in GetParameterValuesResponse");
+                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " No parameters found in response\n", FILE_APPEND);
+                }
+            }
+            
+            // No response needed for GetParameterValuesResponse
+            $this->soapResponse = null;
+        } catch (Exception $e) {
+            error_log("TR069Server: Error in handleGetParameterValuesResponse: " . $e->getMessage());
+            error_log("Stack trace: " . $e->getTraceAsString());
+            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " ERROR: " . $e->getMessage() . "\n", FILE_APPEND);
+            
+            // For Huawei devices, try to continue even with errors
+            if ($this->isHuaweiDevice) {
+                $this->soapResponse = null;
+                return;
+            }
+            
+            throw $e;
+        }
+    }
+
+    private function handleEmptyRequest() {
+        error_log("TR069Server: Handling empty request");
+        
+        // For empty request with a session ID, send GetParameterValues if flag is set
+        if (!empty($this->sessionId) && $this->shouldSendGetParameterValues) {
+            error_log("TR069Server: Session ID exists and should send GetParameterValues");
+            
+            // Check if this is a Huawei device - use appropriate request
+            if ($this->isHuaweiDevice) {
+                error_log("TR069Server: Sending Huawei GetParameterValues");
+                
+                // If we are in discovery mode, we use different logic
+                if ($this->discoveryMode) {
+                    error_log("TR069Server: In discovery mode, stage: " . $this->parameterDiscoveryStage);
+                    
+                    if ($this->parameterDiscoveryStage == 'wlanconfig') {
+                        $this->soapResponse = $this->responseGenerator->createHuaweiWifiDiscoveryRequest($this->sessionId);
+                    } else if ($this->parameterDiscoveryStage == 'parameters') {
+                        // We are discovering parameters, request will be built based on discovered info
+                        $this->soapResponse = $this->responseGenerator->createGetParameterNamesRequest(
+                            $this->sessionId, 
+                            "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.", 
+                            1
+                        );
+                    } else {
+                        // Default case - use standard Huawei WiFi request
+                        $this->soapResponse = $this->responseGenerator->createHuaweiGetParameterValuesRequest($this->sessionId);
+                    }
+                } else if ($this->useParameterDiscovery) {
+                    // Start discovery sequence
+                    $this->discoveryMode = true;
+                    $this->parameterDiscoveryStage = 'wlanconfig';
+                    $this->soapResponse = $this->responseGenerator->createHuaweiWifiDiscoveryRequest($this->sessionId);
+                } else {
+                    // Use standard request if not in discovery mode
+                    $this->soapResponse = $this->responseGenerator->createHuaweiGetParameterValuesRequest($this->sessionId);
+                }
+            } else {
+                // Standard GetParameterValues for non-Huawei devices
+                $this->soapResponse = $this->responseGenerator->createGetParameterValuesRequest($this->sessionId);
+            }
+            
+            // Reset the flag
+            $this->shouldSendGetParameterValues = false;
+        } else {
+            error_log("TR069Server: Empty request with no valid session or no GetParameterValues needed");
+            $this->soapResponse = null;
+        }
+    }
+
+    private function sendResponse() {
+        if (!empty($this->soapResponse)) {
+            error_log("TR069Server: Sending SOAP response, length: " . strlen($this->soapResponse));
+            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Sending response, length: " . strlen($this->soapResponse) . "\n", FILE_APPEND);
+            
+            // Set appropriate headers
+            header('Content-Type: text/xml; charset=utf-8');
+            header('Content-Length: ' . strlen($this->soapResponse));
+            
+            // Output the response
+            echo $this->soapResponse;
+        } else {
+            error_log("TR069Server: No response to send (empty response)");
+            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " No response to send\n", FILE_APPEND);
+            
+            // Send empty 204 response
+            header('HTTP/1.1 204 No Content');
+        }
+    }
+}
+
