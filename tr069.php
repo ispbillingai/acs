@@ -6,11 +6,19 @@ ini_set('display_errors', 0);
 ini_set('log_errors', 1);
 ini_set('error_log', __DIR__ . '/tr069_error.log');
 
-// Function to log with timestamp
+// Function to log with timestamp - only log WiFi-related info
 function logWithTimestamp($message) {
     $timestamp = date('Y-m-d H:i:s');
     error_log("[$timestamp] $message");
-    file_put_contents(__DIR__ . '/tr069_error.log', "[$timestamp] $message\n", FILE_APPEND);
+    
+    // Only write WiFi-related messages to special log
+    if (strpos($message, 'WLAN') !== false || 
+        strpos($message, 'WiFi') !== false || 
+        strpos($message, 'SSID') !== false || 
+        strpos($message, 'WPA') !== false ||
+        strpos($message, '9005') !== false) {
+        file_put_contents(__DIR__ . '/wifi_discovery.log', "[$timestamp] $message\n", FILE_APPEND);
+    }
 }
 
 // Set unlimited execution time for long-running sessions
@@ -20,9 +28,8 @@ set_time_limit(0);
 logWithTimestamp("=== NEW TR-069 REQUEST ===");
 logWithTimestamp("Client IP: " . $_SERVER['REMOTE_ADDR']);
 logWithTimestamp("Device User-Agent: " . $_SERVER['HTTP_USER_AGENT']);
-logWithTimestamp("Request Method: " . $_SERVER['REQUEST_METHOD']);
 
-// Enhanced Huawei device detection based on User-Agent and XML content
+// Enhanced Huawei device detection based on User-Agent
 $isHuawei = false;
 $modelHint = '';
 
@@ -48,70 +55,40 @@ if (!$isHuawei && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $raw_post = file_get_contents('php://input');
     if (!empty($raw_post)) {
         if (stripos($raw_post, 'huawei') !== false || 
-            stripos($raw_post, 'hg8') !== false ||
-            stripos($raw_post, '00259e') !== false) {  // Common Huawei OUI
+            stripos($raw_post, 'hg8') !== false) {
             $isHuawei = true;
             logWithTimestamp("DETECTED HUAWEI DEVICE FROM XML CONTENT");
-            
-            // Try to determine model from XML content
-            if (stripos($raw_post, 'HG8145V') !== false) {
-                $modelHint = 'HG8145V';
-                logWithTimestamp("DETECTED SPECIFIC MODEL FROM XML: " . $modelHint);
-            }
         }
     }
 }
 
-// Request Headers (only important ones)
-$headers = getallheaders();
-if (isset($headers['Authorization'])) {
-    logWithTimestamp("Auth Header Present: Yes");
-}
-
-// Check for cookies - important for session tracking
-if (isset($_SERVER['HTTP_COOKIE'])) {
-    logWithTimestamp("Cookies Present: " . $_SERVER['HTTP_COOKIE']);
-}
-
-// POST Data for debugging
+// POST Data for debugging WiFi information
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $raw_post = file_get_contents('php://input');
     if (!empty($raw_post)) {
-        logWithTimestamp("Received TR-069 message, length: " . strlen($raw_post));
-        
-        // For Huawei devices, log the full XML (but remove sensitive data)
-        if ($isHuawei) {
-            // Simple sanitization to hide passwords and connection URLs
-            $sanitized_xml = preg_replace('/<Value(.*?)>([^<]{8,})<\/Value>/i', '<Value$1>[REDACTED]</Value>', $raw_post);
-            $sanitized_xml = preg_replace('/(<Name>.*?Password.*?<\/Name>\s*<Value.*?>).*?(<\/Value>)/is', '$1[REDACTED]$2', $sanitized_xml);
-            $sanitized_xml = preg_replace('/(<Name>.*?ConnectionRequestURL.*?<\/Name>\s*<Value.*?>).*?(<\/Value>)/is', '$1[REDACTED]$2', $sanitized_xml);
-            $sanitized_xml = preg_replace('/(<Name>.*?ExternalIPAddress.*?<\/Name>\s*<Value.*?>).*?(<\/Value>)/is', '$1[REDACTED]$2', $sanitized_xml);
-            $sanitized_xml = preg_replace('/(<Name>.*?DeviceSummary.*?<\/Name>\s*<Value.*?>).*?(<\/Value>)/is', '$1[REDACTED]$2', $sanitized_xml);
-            $sanitized_xml = preg_replace('/(<Name>.*?SoftwareVersion.*?<\/Name>\s*<Value.*?>).*?(<\/Value>)/is', '$1[REDACTED]$2', $sanitized_xml);
+        // Log WiFi-related information only
+        if (stripos($raw_post, 'WLAN') !== false || 
+            stripos($raw_post, 'WiFi') !== false || 
+            stripos($raw_post, 'SSID') !== false || 
+            stripos($raw_post, 'X_HW_') !== false) {
             
-            logWithTimestamp("=== HUAWEI RAW XML START ===");
-            logWithTimestamp($sanitized_xml);
-            logWithTimestamp("=== HUAWEI RAW XML END ===");
+            logWithTimestamp("=== WIFI RELATED XML START ===");
+            logWithTimestamp($raw_post);
+            logWithTimestamp("=== WIFI RELATED XML END ===");
+            
+            file_put_contents(__DIR__ . '/wifi_discovery.log', date('Y-m-d H:i:s') . " Received WiFi-related XML: " . $raw_post . "\n", FILE_APPEND);
+        }
+        
+        // Log any fault codes
+        if (stripos($raw_post, '<FaultCode>') !== false) {
+            preg_match('/<FaultCode>(.*?)<\/FaultCode>/', $raw_post, $matches);
+            if (isset($matches[1])) {
+                logWithTimestamp("FAULT CODE DETECTED: " . $matches[1]);
+                file_put_contents(__DIR__ . '/wifi_discovery.log', date('Y-m-d H:i:s') . " FAULT: " . $matches[1] . " in response\n", FILE_APPEND);
+            }
         }
     } else {
-        logWithTimestamp("EMPTY POST RECEIVED - This should trigger GetParameterValues if in session");
-        
-        // Create get.log with timestamp if it doesn't exist
-        if (!file_exists(__DIR__ . '/get.log')) {
-            file_put_contents(__DIR__ . '/get.log', date('Y-m-d H:i:s') . " GetParameterValues log initialized\n", FILE_APPEND);
-        }
-        
-        // Also log empty POST to get.log
-        file_put_contents(__DIR__ . '/get.log', date('Y-m-d H:i:s') . " Empty POST received from " . $_SERVER['REMOTE_ADDR'] . " with UA: " . $_SERVER['HTTP_USER_AGENT'] . "\n", FILE_APPEND);
-        
-        // Log cookie info again specifically for empty POSTs
-        if (isset($_SERVER['HTTP_COOKIE'])) {
-            logWithTimestamp("Session Cookie for empty POST: " . $_SERVER['HTTP_COOKIE']);
-            file_put_contents(__DIR__ . '/get.log', date('Y-m-d H:i:s') . " Empty POST received with cookie: " . $_SERVER['HTTP_COOKIE'] . "\n", FILE_APPEND);
-        } else {
-            logWithTimestamp("WARNING: Empty POST with no session cookie");
-            file_put_contents(__DIR__ . '/get.log', date('Y-m-d H:i:s') . " Empty POST received with NO cookie\n", FILE_APPEND);
-        }
+        logWithTimestamp("EMPTY POST RECEIVED - This should trigger parameter discovery");
     }
 }
 
@@ -131,7 +108,7 @@ try {
 } catch (Exception $e) {
     logWithTimestamp("ERROR: " . $e->getMessage());
     logWithTimestamp("Stack trace: " . $e->getTraceAsString());
-    file_put_contents(__DIR__ . '/get.log', date('Y-m-d H:i:s') . " ERROR: " . $e->getMessage() . "\n", FILE_APPEND);
+    file_put_contents(__DIR__ . '/wifi_discovery.log', date('Y-m-d H:i:s') . " ERROR: " . $e->getMessage() . "\n", FILE_APPEND);
     header('HTTP/1.1 500 Internal Server Error');
     echo "Internal Server Error";
 }
