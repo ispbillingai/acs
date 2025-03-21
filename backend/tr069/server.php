@@ -1,4 +1,3 @@
-
 <?php
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/session_manager.php';
@@ -22,6 +21,9 @@ class TR069Server {
     private $isHuaweiDevice = false;
     private $shouldSendGetParameterValues = false;
     private $serialNumber = null;
+    private $useParameterDiscovery = false;
+    private $discoveryMode = false;
+    private $parameterDiscoveryStage = 'none'; // none, wlanconfig, parameters
 
     public function __construct() {
         $database = new Database();
@@ -67,6 +69,12 @@ class TR069Server {
         }
     }
 
+    // New method to control parameter discovery
+    public function setUseParameterDiscovery($useDiscovery) {
+        $this->useParameterDiscovery = $useDiscovery;
+        error_log("TR069Server: Parameter discovery " . ($useDiscovery ? "enabled" : "disabled"));
+    }
+    
     public function handleRequest() {
         error_log("TR069Server: Beginning request handling");
         error_log("TR-069 Request received: " . date('Y-m-d H:i:s'));
@@ -150,42 +158,7 @@ class TR069Server {
         }
     }
 
-    private function handleEmptyRequest() {
-        if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-            error_log("TR069Server: Handling GET request with HTML response");
-            header('Content-Type: text/html; charset=utf-8');
-            echo "TR-069 ACS Server";
-            return;
-        }
-        
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            // For Huawei devices, always send GetParameterValues on empty POST
-            if ($this->isHuaweiDevice) {
-                // Use a generated session ID if we don't have one
-                if (empty($this->sessionId)) {
-                    $this->sessionId = bin2hex(random_bytes(16));
-                    error_log("TR069Server: Generated new session ID for empty POST in handleEmptyRequest: " . $this->sessionId);
-                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Generated new session ID in handleEmptyRequest: " . $this->sessionId . "\n", FILE_APPEND);
-                }
-                
-                error_log("TR069Server: Sending Huawei GetParameterValues on empty POST with session ID: " . $this->sessionId);
-                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Sending GetParameterValues from handleEmptyRequest\n", FILE_APPEND);
-                $this->soapResponse = $this->responseGenerator->createHuaweiGetParameterValuesRequest($this->sessionId);
-                $this->sendResponse();
-                return;
-            }
-            
-            error_log("TR069Server: Handling empty POST request with 204 response for non-Huawei device");
-            header('HTTP/1.1 204 No Content');
-            return;
-        }
-        
-        error_log("TR069Server: Received unsupported method: " . $_SERVER['REQUEST_METHOD']);
-        header('HTTP/1.1 405 Method Not Allowed');
-        header('Allow: GET, POST');
-        exit('Method Not Allowed');
-    }
-
+    // When processing SOAP Fault, check for specific fault codes
     private function processRequest($xml, $rawXml = '') {
         try {
             // Log the full raw XML for debugging GetParameterValuesResponse issues
@@ -238,16 +211,19 @@ class TR069Server {
                         // Record the fault in our session manager
                         $this->sessionManager->recordFault($this->sessionId, $cwmpFaultCode, $cwmpFaultString);
                         
-                        // If this is an invalid parameter fault, we need to adjust our parameter requests
-                        if ($cwmpFaultCode == '9005' && $this->isHuaweiDevice) {
-                            error_log("TR069Server: Invalid parameter fault received from Huawei device");
-                            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Invalid parameter fault - Huawei device may need different parameter set\n", FILE_APPEND);
+                        // If this is an invalid parameter fault (9005), we should try discovery
+                        if ($cwmpFaultCode == '9005' && $this->isHuaweiDevice && $this->useParameterDiscovery) {
+                            error_log("TR069Server: Invalid parameter fault (9005) received - Initiating parameter discovery");
+                            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Invalid parameter (9005) - Initiating parameter discovery\n", FILE_APPEND);
                             
-                            // For future requests, we'll need to use a simpler parameter set
-                            // No action needed here - the response is already set to null
+                            // Set discovery mode and prepare discovery request
+                            $this->discoveryMode = true;
+                            $this->parameterDiscoveryStage = 'wlanconfig';
+                            $this->soapResponse = $this->responseGenerator->createHuaweiWifiDiscoveryRequest($this->sessionId);
+                            return;
                         }
                         
-                        // For fault responses, we don't send a reply
+                        // For other fault responses, we don't send a reply
                         $this->soapResponse = null;
                         return;
                     }
@@ -276,30 +252,34 @@ class TR069Server {
                 }
             }
             
-            // If not found, try to look for GetParameterValuesResponse differently
+            // If not found, try to look for GetParameterValuesResponse/GetParameterNamesResponse differently
             if (!$foundRequestType && $this->isHuaweiDevice) {
-                // Huawei devices might use a different namespace or structure for responses
-                // Try direct detection of GetParameterValuesResponse
+                // Try direct detection via string search in body XML
                 $bodyXml = $body->asXML();
                 if (strpos($bodyXml, 'GetParameterValuesResponse') !== false) {
                     $requestName = 'GetParameterValuesResponse';
                     $foundRequestType = true;
                     error_log("TR069Server: Detected GetParameterValuesResponse in body via string search");
                     file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Detected GetParameterValuesResponse via string search\n", FILE_APPEND);
+                } else if (strpos($bodyXml, 'GetParameterNamesResponse') !== false) {
+                    $requestName = 'GetParameterNamesResponse';
+                    $foundRequestType = true;
+                    error_log("TR069Server: Detected GetParameterNamesResponse in body via string search");
+                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Detected GetParameterNamesResponse via string search\n", FILE_APPEND);
                 }
                 
-                // Try all potential namespaces for GetParameterValuesResponse
+                // Try all potential namespaces for response types
                 if (!$foundRequestType) {
                     foreach ($namespace as $prefix => $uri) {
                         $testRequest = $body->children($uri);
                         if (count($testRequest) > 0) {
                             $testName = $testRequest->getName();
-                            if ($testName == 'GetParameterValuesResponse') {
+                            if ($testName == 'GetParameterValuesResponse' || $testName == 'GetParameterNamesResponse') {
                                 $request = $testRequest;
                                 $requestName = $testName;
                                 $foundRequestType = true;
-                                error_log("TR069Server: Found GetParameterValuesResponse in namespace: " . $uri);
-                                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Found GetParameterValuesResponse in namespace: " . $uri . "\n", FILE_APPEND);
+                                error_log("TR069Server: Found {$requestName} in namespace: " . $uri);
+                                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Found {$requestName} in namespace: " . $uri . "\n", FILE_APPEND);
                                 break;
                             }
                         }
@@ -346,6 +326,9 @@ class TR069Server {
                 case 'GetParameterValuesResponse':
                     $this->handleGetParameterValuesResponse($request, $rawXml);
                     break;
+                case 'GetParameterNamesResponse':
+                    $this->handleGetParameterNamesResponse($request, $rawXml);
+                    break;
                 default:
                     error_log("TR069Server: Unknown request type: " . $requestName);
                     file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Unknown request type: " . $requestName . "\n", FILE_APPEND);
@@ -360,6 +343,217 @@ class TR069Server {
         } catch (Exception $e) {
             error_log("TR069Server: Error in processRequest: " . $e->getMessage());
             file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Error in processRequest: " . $e->getMessage() . "\n", FILE_APPEND);
+            throw $e;
+        }
+    }
+
+    // Add a new handler for GetParameterNamesResponse
+    private function handleGetParameterNamesResponse($request, $rawXml = '') {
+        try {
+            error_log("TR069Server: Processing GetParameterNamesResponse");
+            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " GetParameterNamesResponse received\n", FILE_APPEND);
+            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Raw GetParameterNamesResponse: " . $rawXml . "\n", FILE_APPEND);
+            
+            // Log the discovery stage we're in
+            error_log("TR069Server: Parameter discovery stage: " . $this->parameterDiscoveryStage);
+            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Parameter discovery stage: " . $this->parameterDiscoveryStage . "\n", FILE_APPEND);
+            
+            // Extract parameter names from the response
+            $parameterList = [];
+            $detectedWifiInterfaces = [];
+            $detectedSecurityParams = [];
+            
+            // Create a new XML parser just for the parameter extraction
+            libxml_use_internal_errors(true);
+            $xmlDoc = new DOMDocument();
+            $xmlDoc->loadXML($rawXml);
+            $xpath = new DOMXPath($xmlDoc);
+            
+            // Register all namespaces from the document
+            foreach ($xmlDoc->documentElement->getAttributesNS() as $attrName => $attrNode) {
+                if (preg_match('/^xmlns:(.+)$/', $attrName, $matches)) {
+                    $prefix = $matches[1];
+                    $uri = $attrNode->nodeValue;
+                    $xpath->registerNamespace($prefix, $uri);
+                }
+            }
+            
+            // Try multiple XPath expressions to find parameters
+            $paramNodes = [];
+            $xpathExpressions = [
+                '//ParameterInfoStruct/Name',
+                '//cwmp:ParameterInfoStruct/cwmp:Name',
+                '//ParameterList/ParameterInfoStruct/Name',
+                '//cwmp:ParameterList/cwmp:ParameterInfoStruct/cwmp:Name'
+            ];
+            
+            foreach ($xpathExpressions as $expr) {
+                $nodes = $xpath->query($expr);
+                if ($nodes && $nodes->length > 0) {
+                    $paramNodes = $nodes;
+                    break;
+                }
+            }
+            
+            // Process the discovered parameters
+            if (count($paramNodes) > 0) {
+                foreach ($paramNodes as $paramNode) {
+                    $paramName = $paramNode->textContent;
+                    $parameterList[] = $paramName;
+                    
+                    error_log("TR069Server: Discovered parameter: " . $paramName);
+                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Discovered parameter: " . $paramName . "\n", FILE_APPEND);
+                    
+                    // Detect WiFi interfaces
+                    if (preg_match('/WLANConfiguration\.(\d+)$/', $paramName, $matches)) {
+                        $detectedWifiInterfaces[] = $matches[1];
+                    }
+                    
+                    // Try to identify WiFi security parameter names
+                    if (stripos($paramName, 'KeyPassphrase') !== false || 
+                        stripos($paramName, 'PreSharedKey') !== false || 
+                        stripos($paramName, 'WPAKey') !== false || 
+                        stripos($paramName, 'Password') !== false) {
+                        $detectedSecurityParams[] = $paramName;
+                    }
+                }
+            }
+            
+            if (empty($parameterList)) {
+                error_log("TR069Server: No parameters found in GetParameterNamesResponse");
+                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " No parameters found in GetParameterNamesResponse\n", FILE_APPEND);
+                
+                // If we're in the discovery mode for WLANConfiguration, try again with a different path
+                if ($this->parameterDiscoveryStage == 'wlanconfig') {
+                    error_log("TR069Server: No WLANConfiguration found, trying Device.WiFi path");
+                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Trying Device.WiFi path\n", FILE_APPEND);
+                    
+                    $this->soapResponse = $this->responseGenerator->createGetParameterNamesRequest(
+                        $this->sessionId, 
+                        "Device.WiFi.", 
+                        1
+                    );
+                    return;
+                }
+                
+                // If nothing found, fallback to basic parameters
+                $this->soapResponse = null;
+                return;
+            }
+            
+            // WLAN Configuration discovery phase - find the WiFi interfaces
+            if ($this->parameterDiscoveryStage == 'wlanconfig') {
+                if (!empty($detectedWifiInterfaces)) {
+                    error_log("TR069Server: Detected WiFi interfaces: " . implode(", ", $detectedWifiInterfaces));
+                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Detected WiFi interfaces: " . implode(", ", $detectedWifiInterfaces) . "\n", FILE_APPEND);
+                    
+                    // Next, discover parameters for the first interface
+                    if (count($detectedWifiInterfaces) > 0) {
+                        $interface = $detectedWifiInterfaces[0];
+                        $paramPath = "InternetGatewayDevice.LANDevice.1.WLANConfiguration." . $interface . ".";
+                        
+                        $this->parameterDiscoveryStage = 'parameters';
+                        $this->soapResponse = $this->responseGenerator->createGetParameterNamesRequest(
+                            $this->sessionId, 
+                            $paramPath, 
+                            1
+                        );
+                        return;
+                    }
+                }
+                
+                // If no interfaces found, try a direct GetParameterValues with default names
+                $this->soapResponse = $this->responseGenerator->createHuaweiGetParameterValuesRequest($this->sessionId);
+                return;
+            }
+            
+            // Parameter discovery phase - find the actual parameters we need (SSID, password)
+            if ($this->parameterDiscoveryStage == 'parameters') {
+                // Check if we found security parameters
+                $discoveredSSID = false;
+                $discoveredKey = false;
+                $ssidParam = "";
+                $keyParam = "";
+                
+                foreach ($parameterList as $param) {
+                    if (stripos($param, 'SSID') !== false && !$discoveredSSID) {
+                        $ssidParam = $param;
+                        $discoveredSSID = true;
+                    }
+                    
+                    // Look for password parameters with different possible names
+                    if ((stripos($param, 'Key') !== false || 
+                         stripos($param, 'Password') !== false || 
+                         stripos($param, 'PreSharedKey') !== false) && 
+                        !$discoveredKey) {
+                        $keyParam = $param;
+                        $discoveredKey = true;
+                    }
+                }
+                
+                // Build custom GetParameterValues based on discovered parameters
+                if ($discoveredSSID || $discoveredKey) {
+                    error_log("TR069Server: Discovered SSID param: " . $ssidParam . ", Key param: " . $keyParam);
+                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Discovered SSID param: " . $ssidParam . ", Key param: " . $keyParam . "\n", FILE_APPEND);
+                    
+                    // Build a custom GetParameterValues request with only the discovered parameters
+                    $paramCount = 0;
+                    $paramXml = "";
+                    
+                    if ($discoveredSSID) {
+                        $paramXml .= "<string>" . $ssidParam . "</string>\n                        ";
+                        $paramCount++;
+                    }
+                    
+                    if ($discoveredKey) {
+                        $paramXml .= "<string>" . $keyParam . "</string>\n                        ";
+                        $paramCount++;
+                    }
+                    
+                    $request = '<?xml version="1.0" encoding="UTF-8"?>
+                    <SOAP-ENV:Envelope
+                        xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
+                        xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+                        xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+                        xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/">
+                        <SOAP-ENV:Header>
+                            <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $this->sessionId . '</cwmp:ID>
+                        </SOAP-ENV:Header>
+                        <SOAP-ENV:Body>
+                            <cwmp:GetParameterValues>
+                                <ParameterNames SOAP-ENC:arrayType="xsd:string[' . $paramCount . ']">
+                                    ' . $paramXml . '
+                                </ParameterNames>
+                            </cwmp:GetParameterValues>
+                        </SOAP-ENV:Body>
+                    </SOAP-ENV:Envelope>';
+                    
+                    error_log("TR069Server: Created custom GetParameterValues request with discovered parameters");
+                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Custom GetParameterValues request: " . $request . "\n", FILE_APPEND);
+                    
+                    $this->soapResponse = $request;
+                    return;
+                }
+                
+                // If no specific parameters found, try default ones
+                $this->soapResponse = $this->responseGenerator->createHuaweiGetParameterValuesRequest($this->sessionId);
+                return;
+            }
+            
+            // Default - no specific action
+            $this->soapResponse = null;
+            
+        } catch (Exception $e) {
+            error_log("TR069Server: Error in handleGetParameterNamesResponse: " . $e->getMessage());
+            error_log("Stack trace: " . $e->getTraceAsString());
+            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " ERROR: " . $e->getMessage() . "\n", FILE_APPEND);
+            
+            // For Huawei devices, try to continue even with errors
+            if ($this->isHuaweiDevice) {
+                $this->soapResponse = null;
+                return;
+            }
+            
             throw $e;
         }
     }
@@ -442,208 +636,4 @@ class TR069Server {
     private function handleGetParameterValuesResponse($request, $rawXml = '') {
         try {
             error_log("TR069Server: Processing GetParameterValuesResponse");
-            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " GetParameterValuesResponse received\n", FILE_APPEND);
-            
-            // Log the raw XML for debugging
-            if ($this->isHuaweiDevice) {
-                error_log("=== HUAWEI GetParameterValuesResponse XML START ===");
-                error_log($rawXml);
-                error_log("=== HUAWEI GetParameterValuesResponse XML END ===");
-                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Raw GetParameterValuesResponse: " . $rawXml . "\n", FILE_APPEND);
-            }
-            
-            // Process the parameters in the response
-            $parameterList = null;
-            $parameters = [];
-            
-            // Try to find parameter list in various ways
-            if (isset($request->ParameterList) && isset($request->ParameterList->ParameterValueStruct)) {
-                $parameters = $request->ParameterList->ParameterValueStruct;
-            } else {
-                // Try alternative ways to get parameters based on XML structure
-                $bodyXml = $rawXml;
-                
-                // Create a new XML parser just for the parameter extraction
-                libxml_use_internal_errors(true);
-                $xmlDoc = new DOMDocument();
-                $xmlDoc->loadXML($bodyXml);
-                $xpath = new DOMXPath($xmlDoc);
-                
-                // Register all namespaces from the document
-                foreach ($xmlDoc->documentElement->getAttributesNS() as $attrName => $attrNode) {
-                    if (preg_match('/^xmlns:(.+)$/', $attrName, $matches)) {
-                        $prefix = $matches[1];
-                        $uri = $attrNode->nodeValue;
-                        $xpath->registerNamespace($prefix, $uri);
-                    }
-                }
-                
-                // Try multiple XPath expressions to find parameters
-                $paramNodes = [];
-                $xpathExpressions = [
-                    '//ParameterValueStruct',
-                    '//cwmp:ParameterValueStruct',
-                    '//ParameterList/ParameterValueStruct',
-                    '//cwmp:ParameterList/cwmp:ParameterValueStruct',
-                    '//SOAP-ENV:Body//ParameterValueStruct',
-                ];
-                
-                foreach ($xpathExpressions as $expr) {
-                    $nodes = $xpath->query($expr);
-                    if ($nodes && $nodes->length > 0) {
-                        $paramNodes = $nodes;
-                        break;
-                    }
-                }
-                
-                if (count($paramNodes) > 0) {
-                    // Manually extract parameter name-value pairs
-                    foreach ($paramNodes as $paramNode) {
-                        $nameNode = $xpath->query('.//Name', $paramNode)->item(0);
-                        $valueNode = $xpath->query('.//Value', $paramNode)->item(0);
-                        
-                        if ($nameNode && $valueNode) {
-                            $name = $nameNode->textContent;
-                            $value = $valueNode->textContent;
-                            
-                            error_log("TR069Server: Extracted parameter via XPath - " . $name . " = " . $value);
-                            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Extracted parameter via XPath: " . $name . " = " . $value . "\n", FILE_APPEND);
-                            
-                            // Add to device info based on parameter name
-                            $this->processParameterValue($name, $value);
-                        }
-                    }
-                    
-                    // Mark that we've processed parameters
-                    $parameters = true;
-                }
-            }
-            
-            if (empty($parameters)) {
-                error_log("TR069Server: No parameters found in GetParameterValuesResponse");
-                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " No parameters found in GetParameterValuesResponse\n", FILE_APPEND);
-                return;
-            }
-            
-            // If we got a SimpleXML object with parameters
-            if (is_object($parameters)) {
-                error_log("TR069Server: Found " . count($parameters) . " parameters in GetParameterValuesResponse");
-                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Found " . count($parameters) . " parameters in GetParameterValuesResponse\n", FILE_APPEND);
-                
-                // Extract parameters of interest
-                $deviceInfo = [];
-                foreach ($parameters as $param) {
-                    $name = (string)$param->Name;
-                    $value = (string)$param->Value;
-                    
-                    error_log("TR069Server: Parameter in GetParameterValuesResponse - " . $name . " = " . $value);
-                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Parameter: " . $name . " = " . $value . "\n", FILE_APPEND);
-                    
-                    // Process this parameter value
-                    $this->processParameterValue($name, $value);
-                }
-            }
-            
-            // For Huawei devices, we don't need to send a response after GetParameterValuesResponse
-            $this->soapResponse = null;
-            
-        } catch (Exception $e) {
-            error_log("TR069Server: Error in handleGetParameterValuesResponse: " . $e->getMessage());
-            error_log("Stack trace: " . $e->getTraceAsString());
-            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " ERROR: " . $e->getMessage() . "\n", FILE_APPEND);
-            
-            // For Huawei devices, try to continue even with errors
-            if ($this->isHuaweiDevice) {
-                $this->soapResponse = null;
-                return;
-            }
-            
-            throw $e;
-        }
-    }
-    
-    private function processParameterValue($name, $value) {
-        // Extract key parameters that we're interested in
-        $deviceInfo = [];
-        
-        if (stripos($name, 'SSID') !== false) {
-            if (stripos($name, 'WLANConfiguration.1') !== false) {
-                $deviceInfo['ssid1'] = $value;
-                $deviceInfo['ssid'] = $value; // Main SSID
-            } elseif (stripos($name, 'WLANConfiguration.2') !== false) {
-                $deviceInfo['ssid2'] = $value;
-            }
-        } elseif (stripos($name, 'KeyPassphrase') !== false) {
-            if (stripos($name, 'WLANConfiguration.1') !== false) {
-                $deviceInfo['ssidPassword1'] = $value;
-                $deviceInfo['ssidPassword'] = $value; // Main password
-            } elseif (stripos($name, 'WLANConfiguration.2') !== false) {
-                $deviceInfo['ssidPassword2'] = $value;
-            }
-        } elseif (stripos($name, 'TxPower') !== false) {
-            $deviceInfo['ponTxPower'] = $value;
-        } elseif (stripos($name, 'RxPower') !== false) {
-            $deviceInfo['ponRxPower'] = $value;
-        } elseif (stripos($name, 'MACAddress') !== false) {
-            $deviceInfo['macAddress'] = $value;
-        } elseif (stripos($name, 'ExternalIPAddress') !== false) {
-            $deviceInfo['ipAddress'] = $value;
-        } elseif (stripos($name, 'SerialNumber') !== false) {
-            $deviceInfo['serialNumber'] = $value;
-            $this->serialNumber = $value; // Save for session management
-        } elseif (stripos($name, 'UpTime') !== false) {
-            $deviceInfo['uptime'] = (int)$value;
-        }
-        
-        // If we have extracted any device info, update the device
-        if (!empty($deviceInfo)) {
-            $deviceInfo['status'] = 'online';
-            
-            // If we have a serial number, use it to update the device
-            if (isset($deviceInfo['serialNumber'])) {
-                $deviceId = $this->deviceManager->updateDevice($deviceInfo);
-                error_log("TR069Server: Updated device ID: " . $deviceId . " with parameter: " . $name);
-                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Updated device with parameter: " . $name . "\n", FILE_APPEND);
-            } 
-            // If we don't have a serial number but have a session ID, try to find the device from the session
-            else if (!empty($this->sessionId)) {
-                $session = $this->sessionManager->validateSession($this->sessionId);
-                if ($session) {
-                    $deviceInfo['serialNumber'] = $session['device_serial'];
-                    $deviceId = $this->deviceManager->updateDevice($deviceInfo);
-                    error_log("TR069Server: Updated device using session serial number: " . $deviceInfo['serialNumber']);
-                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Updated device using session serial: " . $deviceInfo['serialNumber'] . "\n", FILE_APPEND);
-                } else {
-                    error_log("TR069Server: No valid session found for ID: " . $this->sessionId);
-                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " No valid session for ID: " . $this->sessionId . "\n", FILE_APPEND);
-                }
-            }
-        }
-    }
-
-    private function sendResponse() {
-        if ($this->soapResponse) {
-            header('Content-Type: text/xml; charset=utf-8');
-            
-            // Log response before sending
-            if ($this->isHuaweiDevice) {
-                error_log("TR069Server: Sending response to Huawei device");
-                error_log("=== HUAWEI RESPONSE XML START ===");
-                error_log($this->soapResponse);
-                error_log("=== HUAWEI RESPONSE XML END ===");
-                
-                // Log to get.log if it's a GetParameterValues request
-                if (strpos($this->soapResponse, 'GetParameterValues') !== false) {
-                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Sending GetParameterValues: " . $this->soapResponse . "\n", FILE_APPEND);
-                }
-            } else {
-                error_log("TR069Server: Sending response, length: " . strlen($this->soapResponse));
-            }
-            
-            echo $this->soapResponse;
-        } else {
-            error_log("TR069Server: No response generated to send");
-            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " No response generated to send\n", FILE_APPEND);
-        }
-    }
-}
+            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Get

@@ -118,6 +118,8 @@ try {
     $server = new TR069Server();
     // Pass the Huawei detection flag to the server
     $server->setHuaweiDetection($isHuawei);
+    // Add flag to indicate that we want to use parameter discovery
+    $server->setUseParameterDiscovery(true);
     $server->handleRequest();
 } catch (Exception $e) {
     logWithTimestamp("ERROR: " . $e->getMessage());
