@@ -21,7 +21,7 @@ logWithTimestamp("=== NEW TR-069 REQUEST ===");
 logWithTimestamp("Client IP: " . $_SERVER['REMOTE_ADDR']);
 logWithTimestamp("Device User-Agent: " . $_SERVER['HTTP_USER_AGENT']);
 
-// Enhanced Huawei device detection based on User-Agent
+// Enhanced Huawei device detection based on User-Agent and XML content
 $isHuawei = false;
 if (isset($_SERVER['HTTP_USER_AGENT'])) {
     $userAgent = $_SERVER['HTTP_USER_AGENT'];
@@ -31,6 +31,19 @@ if (isset($_SERVER['HTTP_USER_AGENT'])) {
         stripos($userAgent, 'hg8') !== false) {
         $isHuawei = true;
         logWithTimestamp("DETECTED HUAWEI DEVICE: " . $userAgent);
+    }
+}
+
+// Additional check in raw POST data for Huawei identifiers
+if (!$isHuawei && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $raw_post = file_get_contents('php://input');
+    if (!empty($raw_post)) {
+        if (stripos($raw_post, 'huawei') !== false || 
+            stripos($raw_post, 'hg8') !== false ||
+            stripos($raw_post, '00259e') !== false) {  // Common Huawei OUI
+            $isHuawei = true;
+            logWithTimestamp("DETECTED HUAWEI DEVICE FROM XML CONTENT");
+        }
     }
 }
 
@@ -48,8 +61,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         // For Huawei devices, log the full XML (but remove sensitive data)
         if ($isHuawei) {
-            // Simple sanitization to hide passwords
+            // Simple sanitization to hide passwords and connection URLs
             $sanitized_xml = preg_replace('/<Value(.*?)>([^<]{8,})<\/Value>/i', '<Value$1>[REDACTED]</Value>', $raw_post);
+            $sanitized_xml = preg_replace('/(<Name>.*?Password.*?<\/Name>\s*<Value.*?>).*?(<\/Value>)/is', '$1[REDACTED]$2', $sanitized_xml);
+            $sanitized_xml = preg_replace('/(<Name>.*?ConnectionRequestURL.*?<\/Name>\s*<Value.*?>).*?(<\/Value>)/is', '$1[REDACTED]$2', $sanitized_xml);
+            
             logWithTimestamp("=== HUAWEI RAW XML START ===");
             logWithTimestamp($sanitized_xml);
             logWithTimestamp("=== HUAWEI RAW XML END ===");

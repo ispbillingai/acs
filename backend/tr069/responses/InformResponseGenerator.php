@@ -38,4 +38,29 @@ class InformResponseGenerator {
             </SOAP-ENV:Body>
         </SOAP-ENV:Envelope>';
     }
+    
+    public function createHuaweiGetParameterValuesRequest($sessionId) {
+        return '<?xml version="1.0" encoding="UTF-8"?>
+        <SOAP-ENV:Envelope
+            xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+            <SOAP-ENV:Header>
+                <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $sessionId . '</cwmp:ID>
+            </SOAP-ENV:Header>
+            <SOAP-ENV:Body>
+                <cwmp:GetParameterValues>
+                    <ParameterNames SOAP-ENV:arrayType="xsd:string[8]">
+                        <string>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID</string>
+                        <string>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase</string>
+                        <string>InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.SSID</string>
+                        <string>InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.KeyPassphrase</string>
+                        <string>InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.MACAddress</string>
+                        <string>InternetGatewayDevice.X_HW_PON.1.OpticalTransceiverMonitoring.TxPower</string>
+                        <string>InternetGatewayDevice.X_HW_PON.1.OpticalTransceiverMonitoring.RxPower</string>
+                        <string>InternetGatewayDevice.DeviceInfo.UpTime</string>
+                    </ParameterNames>
+                </cwmp:GetParameterValues>
+            </SOAP-ENV:Body>
+        </SOAP-ENV:Envelope>';
+    }
 }

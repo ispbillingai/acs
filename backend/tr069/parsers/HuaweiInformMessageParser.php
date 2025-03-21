@@ -24,6 +24,17 @@ class HuaweiInformMessageParser {
         'Device.LAN.MACAddress' => 'macAddress',
         'InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.MACAddress' => 'macAddress',
         
+        // IP Address
+        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress' => 'ipAddress',
+        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANIPConnection.1.ExternalIPAddress' => 'ipAddress',
+        'Device.IP.Interface.1.IPv4Address.1.IPAddress' => 'ipAddress',
+        
+        // Management Server Parameters
+        'Device.ManagementServer.ConnectionRequestURL' => 'connectionRequestURL',
+        'InternetGatewayDevice.ManagementServer.ConnectionRequestURL' => 'connectionRequestURL',
+        'Device.ManagementServer.ParameterKey' => 'parameterKey',
+        'InternetGatewayDevice.ManagementServer.ParameterKey' => 'parameterKey',
+        
         // PON Specific Parameters
         'Device.X_HW_PON.1.OpticalTransceiverMonitoring.TxPower' => 'ponTxPower',
         'InternetGatewayDevice.X_HW_PON.1.OpticalTransceiverMonitoring.TxPower' => 'ponTxPower',
@@ -47,6 +58,10 @@ class HuaweiInformMessageParser {
         'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.KeyPassphrase' => 'ssidPassword2',
         'Device.WiFi.Radio.2.Channel' => 'channel2',
         'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.Channel' => 'channel2',
+        
+        // Device Summary
+        'Device.DeviceSummary' => 'deviceSummary',
+        'InternetGatewayDevice.DeviceSummary' => 'deviceSummary',
         
         // Management Server Parameters
         'Device.ManagementServer.EnableCWMP' => 'cwmpEnabled',
@@ -82,6 +97,10 @@ class HuaweiInformMessageParser {
                 'uptime' => 0,
                 'status' => 'online',
                 'macAddress' => '',
+                'ipAddress' => '',
+                'deviceSummary' => '',
+                'connectionRequestURL' => '',
+                'parameterKey' => '',
                 // PON specific fields
                 'ponTxPower' => null,
                 'ponRxPower' => null,
@@ -224,6 +243,12 @@ class HuaweiInformMessageParser {
                                     $deviceInfo[$key] = empty($value) ? null : $value;
                             }
                         }
+                        
+                        // Special handling for IP address from ExternalIPAddress
+                        if (strpos($name, 'ExternalIPAddress') !== false && !empty($value)) {
+                            $deviceInfo['ipAddress'] = $value;
+                            error_log("Found IP address: " . $value);
+                        }
                     }
                 } else {
                     error_log("WARNING: No parameters found in Huawei Inform message");
@@ -235,6 +260,8 @@ class HuaweiInformMessageParser {
                 error_log("- Serial Number: " . ($deviceInfo['serialNumber'] ?: "Unknown"));
                 error_log("- Hardware Version: " . ($deviceInfo['hardwareVersion'] ?: "Not provided"));
                 error_log("- Software Version: " . ($deviceInfo['softwareVersion'] ?: "Not provided"));
+                error_log("- IP Address: " . ($deviceInfo['ipAddress'] ?: "Not provided"));
+                error_log("- Connection Request URL: " . ($deviceInfo['connectionRequestURL'] ?: "Not provided"));
                 error_log("- PON Tx Power: " . ($deviceInfo['ponTxPower'] !== null ? $deviceInfo['ponTxPower'] . " dBm" : "Not provided"));
                 error_log("- PON Rx Power: " . ($deviceInfo['ponRxPower'] !== null ? $deviceInfo['ponRxPower'] . " dBm" : "Not provided"));
                 error_log("- Laser State: " . ($deviceInfo['laserState'] ?: "Not provided"));

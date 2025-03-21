@@ -26,7 +26,8 @@ class DeviceManager {
                 'uptime' => 0,
                 'localAdminPassword' => null,
                 'tr069Password' => null,
-                'connectedClients' => 0
+                'connectedClients' => 0,
+                'ipAddress' => $_SERVER['REMOTE_ADDR'] // Default to client's IP address
             ], $deviceInfo);
 
             // First check if device exists
@@ -58,7 +59,7 @@ class DeviceManager {
                     ':model_name' => $deviceInfo['modelName'],
                     ':mac_address' => $deviceInfo['macAddress'],
                     ':status' => $deviceInfo['status'],
-                    ':ip_address' => $_SERVER['REMOTE_ADDR'],
+                    ':ip_address' => $deviceInfo['ipAddress'] ?: $_SERVER['REMOTE_ADDR'],
                     ':software_version' => $deviceInfo['softwareVersion'],
                     ':hardware_version' => $deviceInfo['hardwareVersion'],
                     ':ssid' => $deviceInfo['ssid'],
@@ -91,7 +92,7 @@ class DeviceManager {
                     ':model_name' => $deviceInfo['modelName'],
                     ':mac_address' => $deviceInfo['macAddress'],
                     ':status' => $deviceInfo['status'],
-                    ':ip_address' => $_SERVER['REMOTE_ADDR'],
+                    ':ip_address' => $deviceInfo['ipAddress'] ?: $_SERVER['REMOTE_ADDR'],
                     ':software_version' => $deviceInfo['softwareVersion'],
                     ':hardware_version' => $deviceInfo['hardwareVersion'],
                     ':ssid' => $deviceInfo['ssid'],
