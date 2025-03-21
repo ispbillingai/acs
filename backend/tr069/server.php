@@ -21,6 +21,7 @@ class TR069Server {
     private $sessionId;
     private $isHuaweiDevice = false;
     private $shouldSendGetParameterValues = false;
+    private $serialNumber = null;
 
     public function __construct() {
         $database = new Database();
@@ -39,6 +40,22 @@ class TR069Server {
             stripos($_SERVER['HTTP_USER_AGENT'], 'hg8') !== false)) {
             $this->isHuaweiDevice = true;
             error_log("TR069Server: Detected Huawei device from User-Agent");
+        }
+        
+        // Check for session ID in URL for continued sessions
+        if (isset($_GET['session_id'])) {
+            $this->sessionId = $_GET['session_id'];
+            error_log("TR069Server: Found session ID in URL: " . $this->sessionId);
+            
+            // If valid session, get serial number
+            $session = $this->sessionManager->validateSession($this->sessionId);
+            if ($session) {
+                $this->serialNumber = $session['device_serial'];
+                error_log("TR069Server: Valid session with serial number: " . $this->serialNumber);
+            } else {
+                error_log("TR069Server: Invalid session ID in URL");
+                $this->sessionId = null;
+            }
         }
     }
     
@@ -69,26 +86,38 @@ class TR069Server {
             error_log("Raw POST data (first {$logLength} chars): " . substr($rawPost, 0, $logLength) . (strlen($rawPost) > $logLength ? "..." : ""));
         } else {
             error_log("TR069Server: Empty POST received");
+            // Write to get.log when we receive an empty POST
+            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Empty POST received in TR069Server from " . $_SERVER['REMOTE_ADDR'] . "\n", FILE_APPEND);
         }
         
-        // For Huawei devices, we need to always send GetParameterValues after InformResponse
-        // Check if we need to send a GetParameterValues request
+        // If this is an empty POST with a Huawei device, always send GetParameterValues
         if ($this->isHuaweiDevice && empty($rawPost)) {
-            error_log("TR069Server: Empty POST from Huawei device detected - will send GetParameterValues");
+            error_log("TR069Server: Empty POST from Huawei device detected - sending GetParameterValues");
+            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Huawei empty POST detected, will send GetParameterValues\n", FILE_APPEND);
             
             // Generate a session ID if we don't have one already
             if (empty($this->sessionId)) {
                 $this->sessionId = bin2hex(random_bytes(16));
-                error_log("TR069Server: Generated new session ID: " . $this->sessionId);
+                error_log("TR069Server: Generated new session ID for empty POST: " . $this->sessionId);
+                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Generated new session ID: " . $this->sessionId . "\n", FILE_APPEND);
+                
+                // If we have a serial number from a previous inform, save the session
+                if (!empty($this->serialNumber)) {
+                    $this->sessionManager->createSession($this->serialNumber, $this->sessionId);
+                    error_log("TR069Server: Created session with existing serial number: " . $this->serialNumber);
+                } else {
+                    error_log("TR069Server: No serial number available for session creation");
+                }
             }
             
             // Always send the GetParameterValues for Huawei devices on empty POST
             $this->soapResponse = $this->responseGenerator->createHuaweiGetParameterValuesRequest($this->sessionId);
+            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Sending Huawei GetParameterValues with session ID: " . $this->sessionId . "\n", FILE_APPEND);
             $this->sendResponse();
             return;
         }
 
-        // Handle non-empty POST data
+        // Handle non-empty POST data - this is either an Inform or a GetParameterValuesResponse
         if (!empty($rawPost)) {
             try {
                 libxml_use_internal_errors(true);
@@ -108,6 +137,8 @@ class TR069Server {
                     libxml_clear_errors();
                 }
                 
+                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " ERROR parsing XML: " . $e->getMessage() . "\n", FILE_APPEND);
+                
                 header('HTTP/1.1 500 Internal Server Error');
                 echo "Internal Server Error: " . $e->getMessage();
                 exit;
@@ -126,15 +157,17 @@ class TR069Server {
         }
         
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            // For Huawei devices, we'll send GetParameterValues on empty POST
+            // For Huawei devices, always send GetParameterValues on empty POST
             if ($this->isHuaweiDevice) {
                 // Use a generated session ID if we don't have one
                 if (empty($this->sessionId)) {
                     $this->sessionId = bin2hex(random_bytes(16));
-                    error_log("TR069Server: Generated new session ID for empty POST: " . $this->sessionId);
+                    error_log("TR069Server: Generated new session ID for empty POST in handleEmptyRequest: " . $this->sessionId);
+                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Generated new session ID in handleEmptyRequest: " . $this->sessionId . "\n", FILE_APPEND);
                 }
                 
                 error_log("TR069Server: Sending Huawei GetParameterValues on empty POST with session ID: " . $this->sessionId);
+                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Sending GetParameterValues from handleEmptyRequest\n", FILE_APPEND);
                 $this->soapResponse = $this->responseGenerator->createHuaweiGetParameterValuesRequest($this->sessionId);
                 $this->sendResponse();
                 return;
@@ -158,6 +191,18 @@ class TR069Server {
 
         error_log("TR069Server: Detected namespaces - SOAP: {$soapEnv}, CWMP: {$cwmp}");
 
+        // Extract SOAP Header ID if present for session tracking
+        $header = $xml->children($soapEnv)->Header;
+        if ($header) {
+            $soapId = $header->children($cwmp)->ID;
+            if ($soapId) {
+                error_log("TR069Server: Found SOAP ID in header: " . (string)$soapId);
+                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Found SOAP ID in header: " . (string)$soapId . "\n", FILE_APPEND);
+                // Use this ID for session correlation
+                $this->sessionId = (string)$soapId;
+            }
+        }
+
         $body = $xml->children($soapEnv)->Body;
         if (empty($body)) {
             error_log("TR069Server: Empty SOAP Body received");
@@ -168,6 +213,7 @@ class TR069Server {
         $requestName = $request->getName();
 
         error_log("TR069Server: Processing request type: " . $requestName);
+        file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Processing request: " . $requestName . "\n", FILE_APPEND);
 
         switch ($requestName) {
             case 'Inform':
@@ -178,6 +224,7 @@ class TR069Server {
                 break;
             default:
                 error_log("TR069Server: Unknown request type: " . $requestName);
+                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Unknown request type: " . $requestName . "\n", FILE_APPEND);
                 throw new Exception("Unknown request type: $requestName");
         }
     }
@@ -211,6 +258,9 @@ class TR069Server {
                 error_log("TR069Server: Using Huawei parser for device");
                 $deviceInfo = $this->huaweiInformParser->parseInform($request);
                 
+                // Save serial number for session management
+                $this->serialNumber = $deviceInfo['serialNumber'];
+                
                 // Ensure required fields for device_manager.php are set
                 $deviceInfo['ssid'] = $deviceInfo['ssid1'] ?? null;
                 $deviceInfo['ssidPassword'] = $deviceInfo['ssidPassword1'] ?? null;
@@ -226,7 +276,15 @@ class TR069Server {
             }
             
             $this->deviceId = $this->deviceManager->updateDevice($deviceInfo);
-            $this->sessionId = $this->sessionManager->createSession($deviceInfo['serialNumber']);
+            
+            // Use existing session ID if available, otherwise create new
+            if (empty($this->sessionId)) {
+                $this->sessionId = $this->sessionManager->createSession($deviceInfo['serialNumber']);
+            } else {
+                // Ensure we have a valid session with this ID
+                $this->sessionManager->updateOrCreateSession($deviceInfo['serialNumber'], $this->sessionId);
+            }
+            
             $this->soapResponse = $this->responseGenerator->createResponse($this->sessionId);
             
             error_log("TR069Server: Inform handled successfully. Device ID: " . $this->deviceId . ", Session ID: " . $this->sessionId);
@@ -236,11 +294,12 @@ class TR069Server {
             if ($this->isHuaweiDevice) {
                 $this->shouldSendGetParameterValues = true;
                 error_log("TR069Server: Flag set to send Huawei GetParameterValues on next empty POST");
-                // We don't need to set a cookie as we're handling it directly in the handleEmptyRequest method
+                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Set flag for GetParameterValues on next empty POST, session: " . $this->sessionId . "\n", FILE_APPEND);
             }
         } catch (Exception $e) {
             error_log("TR069Server: Error in handleInform: " . $e->getMessage());
             error_log("Stack trace: " . $e->getTraceAsString());
+            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Error in handleInform: " . $e->getMessage() . "\n", FILE_APPEND);
             throw $e;
         }
     }
@@ -303,6 +362,7 @@ class TR069Server {
                     $deviceInfo['ipAddress'] = $value;
                 } elseif (stripos($name, 'SerialNumber') !== false) {
                     $deviceInfo['serialNumber'] = $value;
+                    $this->serialNumber = $value; // Save for session management
                 } elseif (stripos($name, 'UpTime') !== false) {
                     $deviceInfo['uptime'] = (int)$value;
                 }
@@ -313,11 +373,28 @@ class TR069Server {
             file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Extracted data: " . json_encode($deviceInfo) . "\n", FILE_APPEND);
             
             // Update device with new information
-            if (!empty($deviceInfo) && isset($deviceInfo['serialNumber'])) {
+            if (!empty($deviceInfo)) {
                 $deviceInfo['status'] = 'online';
-                $deviceId = $this->deviceManager->updateDevice($deviceInfo);
-                error_log("TR069Server: Updated device ID: " . $deviceId . " with GetParameterValuesResponse data");
-                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Updated device ID: " . $deviceId . " with GetParameterValuesResponse data\n", FILE_APPEND);
+                
+                // If we have a serial number, use it to update the device
+                if (isset($deviceInfo['serialNumber'])) {
+                    $deviceId = $this->deviceManager->updateDevice($deviceInfo);
+                    error_log("TR069Server: Updated device ID: " . $deviceId . " with GetParameterValuesResponse data");
+                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Updated device ID: " . $deviceId . " with GetParameterValuesResponse data\n", FILE_APPEND);
+                } 
+                // If we don't have a serial number but have a session ID, try to find the device from the session
+                else if (!empty($this->sessionId)) {
+                    $session = $this->sessionManager->validateSession($this->sessionId);
+                    if ($session) {
+                        $deviceInfo['serialNumber'] = $session['device_serial'];
+                        $deviceId = $this->deviceManager->updateDevice($deviceInfo);
+                        error_log("TR069Server: Updated device ID: " . $deviceId . " using session serial number: " . $deviceInfo['serialNumber']);
+                        file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Updated device using session serial: " . $deviceInfo['serialNumber'] . "\n", FILE_APPEND);
+                    } else {
+                        error_log("TR069Server: No valid session found for ID: " . $this->sessionId);
+                        file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " No valid session for ID: " . $this->sessionId . "\n", FILE_APPEND);
+                    }
+                }
             }
             
             // For Huawei devices, we don't need to send a response after GetParameterValuesResponse
@@ -353,6 +430,7 @@ class TR069Server {
             echo $this->soapResponse;
         } else {
             error_log("TR069Server: No response generated to send");
+            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " No response generated to send\n", FILE_APPEND);
         }
     }
 }

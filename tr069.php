@@ -59,6 +59,20 @@ if (isset($_SERVER['HTTP_COOKIE'])) {
     logWithTimestamp("Cookies Present: " . $_SERVER['HTTP_COOKIE']);
 }
 
+// Check if we have the ID in the SOAP header for empty POST correlation
+$soapID = null;
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty(file_get_contents('php://input'))) {
+    // Try to extract the SOAP ID from headers
+    if (isset($headers['SOAPACTION']) || isset($headers['SOAPAction'])) {
+        $soapAction = isset($headers['SOAPACTION']) ? $headers['SOAPACTION'] : $headers['SOAPAction'];
+        logWithTimestamp("SOAP Action header found: " . $soapAction);
+    }
+    // Extract session from URL if present
+    if (isset($_GET['session'])) {
+        logWithTimestamp("Session parameter found in URL: " . $_GET['session']);
+    }
+}
+
 // POST Data for debugging
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $raw_post = file_get_contents('php://input');
@@ -78,22 +92,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } else {
         logWithTimestamp("EMPTY POST RECEIVED - This should trigger GetParameterValues if in session");
+        
+        // Create get.log with timestamp if it doesn't exist
+        if (!file_exists(__DIR__ . '/get.log')) {
+            file_put_contents(__DIR__ . '/get.log', date('Y-m-d H:i:s') . " GetParameterValues log initialized\n", FILE_APPEND);
+        }
+        
+        // Also log empty POST to get.log
+        file_put_contents(__DIR__ . '/get.log', date('Y-m-d H:i:s') . " Empty POST received from " . $_SERVER['REMOTE_ADDR'] . " with UA: " . $_SERVER['HTTP_USER_AGENT'] . "\n", FILE_APPEND);
+        
         // Log cookie info again specifically for empty POSTs
         if (isset($_SERVER['HTTP_COOKIE'])) {
             logWithTimestamp("Session Cookie for empty POST: " . $_SERVER['HTTP_COOKIE']);
-            
-            // Also log to get.log
             file_put_contents(__DIR__ . '/get.log', date('Y-m-d H:i:s') . " Empty POST received with cookie: " . $_SERVER['HTTP_COOKIE'] . "\n", FILE_APPEND);
         } else {
             logWithTimestamp("WARNING: Empty POST with no session cookie");
             file_put_contents(__DIR__ . '/get.log', date('Y-m-d H:i:s') . " Empty POST received with NO cookie\n", FILE_APPEND);
         }
     }
-}
-
-// Create get.log if it doesn't exist
-if (!file_exists(__DIR__ . '/get.log')) {
-    file_put_contents(__DIR__ . '/get.log', date('Y-m-d H:i:s') . " GetParameterValues log initialized\n", FILE_APPEND);
 }
 
 // Initialize and run the TR-069 server
@@ -106,6 +122,7 @@ try {
 } catch (Exception $e) {
     logWithTimestamp("ERROR: " . $e->getMessage());
     logWithTimestamp("Stack trace: " . $e->getTraceAsString());
+    file_put_contents(__DIR__ . '/get.log', date('Y-m-d H:i:s') . " ERROR: " . $e->getMessage() . "\n", FILE_APPEND);
     header('HTTP/1.1 500 Internal Server Error');
     echo "Internal Server Error";
 }
