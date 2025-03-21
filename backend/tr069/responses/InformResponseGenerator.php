@@ -1,4 +1,3 @@
-
 <?php
 class InformResponseGenerator {
     public function createResponse($sessionId) {
@@ -45,8 +44,7 @@ class InformResponseGenerator {
     }
     
     public function createHuaweiGetParameterValuesRequest($sessionId) {
-        // Updated with a more conservative set of parameters that are likely to be supported
-        // by most Huawei devices, including the HG8145V
+        // Updated to focus only on WiFi parameters
         $request = '<?xml version="1.0" encoding="UTF-8"?>
         <SOAP-ENV:Envelope
             xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
@@ -58,19 +56,18 @@ class InformResponseGenerator {
             </SOAP-ENV:Header>
             <SOAP-ENV:Body>
                 <cwmp:GetParameterValues>
-                    <ParameterNames SOAP-ENC:arrayType="xsd:string[5]">
-                        <string>InternetGatewayDevice.DeviceInfo.SerialNumber</string>
-                        <string>InternetGatewayDevice.DeviceInfo.HardwareVersion</string>
-                        <string>InternetGatewayDevice.DeviceInfo.SoftwareVersion</string>
-                        <string>InternetGatewayDevice.DeviceInfo.UpTime</string>
-                        <string>InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANIPConnection.1.ExternalIPAddress</string>
+                    <ParameterNames SOAP-ENC:arrayType="xsd:string[4]">
+                        <string>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID</string>
+                        <string>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase</string>
+                        <string>InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.SSID</string>
+                        <string>InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.KeyPassphrase</string>
                     </ParameterNames>
                 </cwmp:GetParameterValues>
             </SOAP-ENV:Body>
         </SOAP-ENV:Envelope>';
         
-        error_log("InformResponseGenerator: Created Huawei GetParameterValues request for session ID: " . $sessionId);
-        file_put_contents(__DIR__ . '/../../../get.log', date('Y-m-d H:i:s') . " Huawei GetParameterValues request sent: " . $request . "\n", FILE_APPEND);
+        error_log("InformResponseGenerator: Created Huawei WiFi-only GetParameterValues request for session ID: " . $sessionId);
+        file_put_contents(__DIR__ . '/../../../get.log', date('Y-m-d H:i:s') . " Huawei WiFi-only GetParameterValues request sent: " . $request . "\n", FILE_APPEND);
         return $request;
     }
 }
