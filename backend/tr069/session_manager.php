@@ -1,3 +1,4 @@
+
 <?php
 class SessionManager {
     private $db;
@@ -194,5 +195,19 @@ class SessionManager {
 
     private function generateSessionId() {
         return bin2hex(random_bytes(16));
+    }
+    
+    // New method to record SOAP fault response
+    public function recordFault($sessionId, $faultCode, $faultString) {
+        try {
+            error_log("Recording SOAP fault for session $sessionId: $faultCode - $faultString");
+            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " SOAP Fault for session $sessionId: $faultCode - $faultString\n", FILE_APPEND);
+            
+            // We could also store this in the database if needed
+            return true;
+        } catch (Exception $e) {
+            error_log("Error recording fault: " . $e->getMessage());
+            return false;
+        }
     }
 }

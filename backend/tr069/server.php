@@ -218,6 +218,49 @@ class TR069Server {
                 throw new Exception("Empty SOAP Body");
             }
 
+            // Check for SOAP Fault
+            $fault = $body->children($soapEnv)->Fault;
+            if (!empty($fault)) {
+                $faultCode = (string)$fault->faultcode;
+                $faultString = (string)$fault->faultstring;
+                
+                // Look for cwmp:Fault in detail
+                $detail = $fault->detail;
+                if ($detail) {
+                    $cwmpFault = $detail->children($cwmp)->Fault;
+                    if ($cwmpFault) {
+                        $cwmpFaultCode = (string)$cwmpFault->FaultCode;
+                        $cwmpFaultString = (string)$cwmpFault->FaultString;
+                        
+                        error_log("TR069Server: CWMP Fault received - Code: {$cwmpFaultCode}, String: {$cwmpFaultString}");
+                        file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " CWMP Fault - Code: {$cwmpFaultCode}, String: {$cwmpFaultString}\n", FILE_APPEND);
+                        
+                        // Record the fault in our session manager
+                        $this->sessionManager->recordFault($this->sessionId, $cwmpFaultCode, $cwmpFaultString);
+                        
+                        // If this is an invalid parameter fault, we need to adjust our parameter requests
+                        if ($cwmpFaultCode == '9005' && $this->isHuaweiDevice) {
+                            error_log("TR069Server: Invalid parameter fault received from Huawei device");
+                            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Invalid parameter fault - Huawei device may need different parameter set\n", FILE_APPEND);
+                            
+                            // For future requests, we'll need to use a simpler parameter set
+                            // No action needed here - the response is already set to null
+                        }
+                        
+                        // For fault responses, we don't send a reply
+                        $this->soapResponse = null;
+                        return;
+                    }
+                }
+                
+                error_log("TR069Server: SOAP Fault received - Code: {$faultCode}, String: {$faultString}");
+                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " SOAP Fault - Code: {$faultCode}, String: {$faultString}\n", FILE_APPEND);
+                
+                // For fault responses, we don't send a reply
+                $this->soapResponse = null;
+                return;
+            }
+
             // Get all namespaced children - for detecting different request types
             $foundRequestType = false;
             $request = null;
