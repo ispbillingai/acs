@@ -24,6 +24,8 @@ logWithTimestamp("Request Method: " . $_SERVER['REQUEST_METHOD']);
 
 // Enhanced Huawei device detection based on User-Agent and XML content
 $isHuawei = false;
+$modelHint = '';
+
 if (isset($_SERVER['HTTP_USER_AGENT'])) {
     $userAgent = $_SERVER['HTTP_USER_AGENT'];
     // Check for any Huawei-specific strings in User-Agent
@@ -32,6 +34,12 @@ if (isset($_SERVER['HTTP_USER_AGENT'])) {
         stripos($userAgent, 'hg8') !== false) {
         $isHuawei = true;
         logWithTimestamp("DETECTED HUAWEI DEVICE: " . $userAgent);
+        
+        // Try to determine model from user agent
+        if (stripos($userAgent, 'hg8145') !== false) {
+            $modelHint = 'HG8145V';
+            logWithTimestamp("DETECTED SPECIFIC MODEL: " . $modelHint);
+        }
     }
 }
 
@@ -44,6 +52,12 @@ if (!$isHuawei && $_SERVER['REQUEST_METHOD'] === 'POST') {
             stripos($raw_post, '00259e') !== false) {  // Common Huawei OUI
             $isHuawei = true;
             logWithTimestamp("DETECTED HUAWEI DEVICE FROM XML CONTENT");
+            
+            // Try to determine model from XML content
+            if (stripos($raw_post, 'HG8145V') !== false) {
+                $modelHint = 'HG8145V';
+                logWithTimestamp("DETECTED SPECIFIC MODEL FROM XML: " . $modelHint);
+            }
         }
     }
 }
@@ -107,6 +121,10 @@ try {
     $server = new TR069Server();
     // Pass the Huawei detection flag to the server
     $server->setHuaweiDetection($isHuawei);
+    // If we have a model hint, pass it as well
+    if (!empty($modelHint)) {
+        $server->setModelHint($modelHint);
+    }
     // Add flag to indicate that we want to use parameter discovery
     $server->setUseParameterDiscovery(true);
     $server->handleRequest();
