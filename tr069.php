@@ -59,20 +59,6 @@ if (isset($_SERVER['HTTP_COOKIE'])) {
     logWithTimestamp("Cookies Present: " . $_SERVER['HTTP_COOKIE']);
 }
 
-// Check if we have the ID in the SOAP header for empty POST correlation
-$soapID = null;
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty(file_get_contents('php://input'))) {
-    // Try to extract the SOAP ID from headers
-    if (isset($headers['SOAPACTION']) || isset($headers['SOAPAction'])) {
-        $soapAction = isset($headers['SOAPACTION']) ? $headers['SOAPACTION'] : $headers['SOAPAction'];
-        logWithTimestamp("SOAP Action header found: " . $soapAction);
-    }
-    // Extract session from URL if present
-    if (isset($_GET['session'])) {
-        logWithTimestamp("Session parameter found in URL: " . $_GET['session']);
-    }
-}
-
 // POST Data for debugging
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $raw_post = file_get_contents('php://input');
@@ -85,6 +71,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $sanitized_xml = preg_replace('/<Value(.*?)>([^<]{8,})<\/Value>/i', '<Value$1>[REDACTED]</Value>', $raw_post);
             $sanitized_xml = preg_replace('/(<Name>.*?Password.*?<\/Name>\s*<Value.*?>).*?(<\/Value>)/is', '$1[REDACTED]$2', $sanitized_xml);
             $sanitized_xml = preg_replace('/(<Name>.*?ConnectionRequestURL.*?<\/Name>\s*<Value.*?>).*?(<\/Value>)/is', '$1[REDACTED]$2', $sanitized_xml);
+            $sanitized_xml = preg_replace('/(<Name>.*?ExternalIPAddress.*?<\/Name>\s*<Value.*?>).*?(<\/Value>)/is', '$1[REDACTED]$2', $sanitized_xml);
+            $sanitized_xml = preg_replace('/(<Name>.*?DeviceSummary.*?<\/Name>\s*<Value.*?>).*?(<\/Value>)/is', '$1[REDACTED]$2', $sanitized_xml);
+            $sanitized_xml = preg_replace('/(<Name>.*?SoftwareVersion.*?<\/Name>\s*<Value.*?>).*?(<\/Value>)/is', '$1[REDACTED]$2', $sanitized_xml);
             
             logWithTimestamp("=== HUAWEI RAW XML START ===");
             logWithTimestamp($sanitized_xml);

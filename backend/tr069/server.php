@@ -24,6 +24,8 @@ class TR069Server {
     private $useParameterDiscovery = false;
     private $discoveryMode = false;
     private $parameterDiscoveryStage = 'none'; // none, wlanconfig, parameters
+    private $explorationPhase = 1; // Track what phase of parameter exploration we're in
+    private $explorationAttempts = 0; // Count of attempts in current exploration phase
 
     public function __construct() {
         $database = new Database();
@@ -211,15 +213,37 @@ class TR069Server {
                         // Record the fault in our session manager
                         $this->sessionManager->recordFault($this->sessionId, $cwmpFaultCode, $cwmpFaultString);
                         
-                        // If this is an invalid parameter fault (9005), we should try discovery
+                        // If this is an invalid parameter fault (9005), we should initiate deeper parameter exploration
                         if ($cwmpFaultCode == '9005' && $this->isHuaweiDevice && $this->useParameterDiscovery) {
-                            error_log("TR069Server: Invalid parameter fault (9005) received - Initiating parameter discovery");
-                            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Invalid parameter (9005) - Initiating parameter discovery\n", FILE_APPEND);
+                            error_log("TR069Server: Invalid parameter fault (9005) received - Starting parameter exploration phase {$this->explorationPhase}");
+                            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Invalid parameter (9005) - Starting exploration phase {$this->explorationPhase}\n", FILE_APPEND);
                             
                             // Set discovery mode and prepare discovery request
                             $this->discoveryMode = true;
-                            $this->parameterDiscoveryStage = 'wlanconfig';
-                            $this->soapResponse = $this->responseGenerator->createHuaweiWifiDiscoveryRequest($this->sessionId);
+                            
+                            // Increment attempts for current phase
+                            $this->explorationAttempts++;
+                            
+                            // If we've tried this phase too many times, move to next phase
+                            if ($this->explorationAttempts >= 2) {
+                                $this->explorationPhase++;
+                                $this->explorationAttempts = 0;
+                                error_log("TR069Server: Moving to exploration phase {$this->explorationPhase}");
+                                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Moving to exploration phase {$this->explorationPhase}\n", FILE_APPEND);
+                            }
+                            
+                            // If we've gone through all phases, try the comprehensive security parameters request
+                            if ($this->explorationPhase > 6) {
+                                error_log("TR069Server: Trying comprehensive WiFi security parameters after exhausting exploration phases");
+                                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Trying comprehensive WiFi security parameters\n", FILE_APPEND);
+                                $this->soapResponse = $this->responseGenerator->createWifiSecurityParametersRequest($this->sessionId);
+                            } else {
+                                // Generate parameter exploration request for current phase
+                                $this->soapResponse = $this->responseGenerator->createExploreParametersRequest(
+                                    $this->sessionId, 
+                                    $this->explorationPhase
+                                );
+                            }
                             return;
                         }
                         
@@ -352,16 +376,23 @@ class TR069Server {
         try {
             error_log("TR069Server: Processing GetParameterNamesResponse");
             file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " GetParameterNamesResponse received\n", FILE_APPEND);
-            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Raw GetParameterNamesResponse: " . $rawXml . "\n", FILE_APPEND);
             
-            // Log the discovery stage we're in
-            error_log("TR069Server: Parameter discovery stage: " . $this->parameterDiscoveryStage);
-            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Parameter discovery stage: " . $this->parameterDiscoveryStage . "\n", FILE_APPEND);
+            // Log the exploration phase we're in
+            if ($this->discoveryMode) {
+                error_log("TR069Server: In exploration phase: " . $this->explorationPhase);
+                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " In exploration phase: " . $this->explorationPhase . "\n", FILE_APPEND);
+            } else {
+                // Log the discovery stage we're in
+                error_log("TR069Server: Parameter discovery stage: " . $this->parameterDiscoveryStage);
+                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Parameter discovery stage: " . $this->parameterDiscoveryStage . "\n", FILE_APPEND);
+            }
             
             // Extract parameter names from the response
             $parameterList = [];
             $detectedWifiInterfaces = [];
             $detectedSecurityParams = [];
+            $detectedWlanObjects = [];
+            $detectedXHWParams = [];
             
             // Create a new XML parser just for the parameter extraction
             libxml_use_internal_errors(true);
@@ -407,12 +438,19 @@ class TR069Server {
                     // Detect WiFi interfaces
                     if (preg_match('/WLANConfiguration\.(\d+)$/', $paramName, $matches)) {
                         $detectedWifiInterfaces[] = $matches[1];
+                        $detectedWlanObjects[] = $paramName;
+                    }
+                    
+                    // Detect X_HW vendor-specific parameters
+                    if (stripos($paramName, 'X_HW_') !== false) {
+                        $detectedXHWParams[] = $paramName;
                     }
                     
                     // Try to identify WiFi security parameter names
                     if (stripos($paramName, 'KeyPassphrase') !== false || 
                         stripos($paramName, 'PreSharedKey') !== false || 
                         stripos($paramName, 'WPAKey') !== false || 
+                        stripos($paramName, 'SecurityKey') !== false ||
                         stripos($paramName, 'Password') !== false) {
                         $detectedSecurityParams[] = $paramName;
                     }
@@ -423,25 +461,87 @@ class TR069Server {
                 error_log("TR069Server: No parameters found in GetParameterNamesResponse");
                 file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " No parameters found in GetParameterNamesResponse\n", FILE_APPEND);
                 
-                // If we're in the discovery mode for WLANConfiguration, try again with a different path
-                if ($this->parameterDiscoveryStage == 'wlanconfig') {
-                    error_log("TR069Server: No WLANConfiguration found, trying Device.WiFi path");
-                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Trying Device.WiFi path\n", FILE_APPEND);
-                    
-                    $this->soapResponse = $this->responseGenerator->createGetParameterNamesRequest(
-                        $this->sessionId, 
-                        "Device.WiFi.", 
-                        1
-                    );
-                    return;
-                }
+                // Move to next exploration phase
+                $this->explorationPhase++;
+                error_log("TR069Server: Moving to exploration phase {$this->explorationPhase} after empty response");
+                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Moving to exploration phase {$this->explorationPhase}\n", FILE_APPEND);
                 
-                // If nothing found, fallback to basic parameters
-                $this->soapResponse = null;
+                // If we've gone through all phases, try the comprehensive security parameters
+                if ($this->explorationPhase > 6) {
+                    $this->soapResponse = $this->responseGenerator->createWifiSecurityParametersRequest($this->sessionId);
+                } else {
+                    $this->soapResponse = $this->responseGenerator->createExploreParametersRequest(
+                        $this->sessionId, 
+                        $this->explorationPhase
+                    );
+                }
                 return;
             }
             
-            // WLAN Configuration discovery phase - find the WiFi interfaces
+            // If in exploration mode, analyze what we found and decide next steps
+            if ($this->discoveryMode) {
+                error_log("TR069Server: Analysis of exploration phase " . $this->explorationPhase);
+                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Analysis of exploration phase " . $this->explorationPhase . "\n", FILE_APPEND);
+                
+                // Check if we found WLANConfiguration objects
+                if (!empty($detectedWlanObjects)) {
+                    error_log("TR069Server: Found WLANConfiguration objects: " . implode(", ", $detectedWlanObjects));
+                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Found WLANConfiguration objects: " . implode(", ", $detectedWlanObjects) . "\n", FILE_APPEND);
+                    
+                    // Explore first WLAN configuration
+                    if (count($detectedWlanObjects) > 0) {
+                        $wlanPath = $detectedWlanObjects[0] . ".";
+                        error_log("TR069Server: Exploring WLAN path: " . $wlanPath);
+                        file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Exploring WLAN path: " . $wlanPath . "\n", FILE_APPEND);
+                        
+                        $this->soapResponse = $this->responseGenerator->createGetParameterNamesRequest(
+                            $this->sessionId, 
+                            $wlanPath, 
+                            1
+                        );
+                        return;
+                    }
+                }
+                
+                // Check if we found X_HW parameters
+                if (!empty($detectedXHWParams)) {
+                    error_log("TR069Server: Found X_HW parameters: " . implode(", ", $detectedXHWParams));
+                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Found X_HW parameters: " . implode(", ", $detectedXHWParams) . "\n", FILE_APPEND);
+                    
+                    // Look for X_HW_WLAN or similar
+                    foreach ($detectedXHWParams as $param) {
+                        if (stripos($param, 'WLAN') !== false || stripos($param, 'WiFi') !== false) {
+                            error_log("TR069Server: Exploring X_HW WiFi path: " . $param);
+                            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Exploring X_HW WiFi path: " . $param . "\n", FILE_APPEND);
+                            
+                            $this->soapResponse = $this->responseGenerator->createGetParameterNamesRequest(
+                                $this->sessionId, 
+                                $param . ".", 
+                                1
+                            );
+                            return;
+                        }
+                    }
+                }
+                
+                // Move to next exploration phase if we didn't find anything interesting in this phase
+                $this->explorationPhase++;
+                error_log("TR069Server: Moving to exploration phase {$this->explorationPhase}");
+                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Moving to exploration phase {$this->explorationPhase}\n", FILE_APPEND);
+                
+                // If we've gone through all phases, try the comprehensive security parameters
+                if ($this->explorationPhase > 6) {
+                    $this->soapResponse = $this->responseGenerator->createWifiSecurityParametersRequest($this->sessionId);
+                } else {
+                    $this->soapResponse = $this->responseGenerator->createExploreParametersRequest(
+                        $this->sessionId, 
+                        $this->explorationPhase
+                    );
+                }
+                return;
+            }
+            
+            // Original WLAN Configuration discovery logic continues below
             if ($this->parameterDiscoveryStage == 'wlanconfig') {
                 if (!empty($detectedWifiInterfaces)) {
                     error_log("TR069Server: Detected WiFi interfaces: " . implode(", ", $detectedWifiInterfaces));
@@ -759,14 +859,14 @@ class TR069Server {
                             }
                             
                             // WiFi password detection - different possible parameter names
-                            if (strpos($name, 'WLANConfiguration.1.KeyPassphrase') !== false || 
-                                strpos($name, 'WLANConfiguration.1.PreSharedKey') !== false) {
+                            if (stripos($name, 'WLANConfiguration.1.KeyPassphrase') !== false || 
+                                stripos($name, 'WLANConfiguration.1.PreSharedKey') !== false) {
                                 $deviceUpdates['ssidPassword1'] = $value;
-                            } else if (strpos($name, 'WLANConfiguration.2.KeyPassphrase') !== false || 
-                                       strpos($name, 'WLANConfiguration.2.PreSharedKey') !== false) {
+                            } else if (stripos($name, 'WLANConfiguration.2.KeyPassphrase') !== false || 
+                                       stripos($name, 'WLANConfiguration.2.PreSharedKey') !== false) {
                                 $deviceUpdates['ssidPassword2'] = $value;
-                            } else if (strpos($name, 'WLANConfiguration.5.KeyPassphrase') !== false || 
-                                       strpos($name, 'WLANConfiguration.5.PreSharedKey') !== false) {
+                            } else if (stripos($name, 'WLANConfiguration.5.KeyPassphrase') !== false || 
+                                       stripos($name, 'WLANConfiguration.5.PreSharedKey') !== false) {
                                 $deviceUpdates['ssidPassword2'] = $value;
                             }
                         }
@@ -831,26 +931,22 @@ class TR069Server {
                 
                 // If we are in discovery mode, we use different logic
                 if ($this->discoveryMode) {
-                    error_log("TR069Server: In discovery mode, stage: " . $this->parameterDiscoveryStage);
+                    error_log("TR069Server: In discovery mode, phase: " . $this->explorationPhase);
                     
-                    if ($this->parameterDiscoveryStage == 'wlanconfig') {
-                        $this->soapResponse = $this->responseGenerator->createHuaweiWifiDiscoveryRequest($this->sessionId);
-                    } else if ($this->parameterDiscoveryStage == 'parameters') {
-                        // We are discovering parameters, request will be built based on discovered info
-                        $this->soapResponse = $this->responseGenerator->createGetParameterNamesRequest(
-                            $this->sessionId, 
-                            "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.", 
-                            1
-                        );
-                    } else {
-                        // Default case - use standard Huawei WiFi request
-                        $this->soapResponse = $this->responseGenerator->createHuaweiGetParameterValuesRequest($this->sessionId);
-                    }
+                    // Generate parameter exploration request for current phase
+                    $this->soapResponse = $this->responseGenerator->createExploreParametersRequest(
+                        $this->sessionId, 
+                        $this->explorationPhase
+                    );
                 } else if ($this->useParameterDiscovery) {
-                    // Start discovery sequence
+                    // Start exploration sequence
                     $this->discoveryMode = true;
-                    $this->parameterDiscoveryStage = 'wlanconfig';
-                    $this->soapResponse = $this->responseGenerator->createHuaweiWifiDiscoveryRequest($this->sessionId);
+                    $this->explorationPhase = 1;
+                    $this->explorationAttempts = 0;
+                    $this->soapResponse = $this->responseGenerator->createExploreParametersRequest(
+                        $this->sessionId, 
+                        $this->explorationPhase
+                    );
                 } else {
                     // Use standard request if not in discovery mode
                     $this->soapResponse = $this->responseGenerator->createHuaweiGetParameterValuesRequest($this->sessionId);
