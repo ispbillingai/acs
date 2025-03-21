@@ -1,145 +1,155 @@
 
 <?php
 class InformResponseGenerator {
-    public function createResponse($sessionId) {
-        // First send the InformResponse
-        $informResponse = '<?xml version="1.0" encoding="UTF-8"?>
-        <SOAP-ENV:Envelope 
-            xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" 
-            xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-            <SOAP-ENV:Header>
-                <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $sessionId . '</cwmp:ID>
-            </SOAP-ENV:Header>
-            <SOAP-ENV:Body>
-                <cwmp:InformResponse>
-                    <MaxEnvelopes>1</MaxEnvelopes>
-                </cwmp:InformResponse>
-            </SOAP-ENV:Body>
-        </SOAP-ENV:Envelope>';
+    public function createResponse($id = null) {
+        $soapId = $id ?? '1';
+        $response = '<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <SOAP-ENV:Header>
+    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </SOAP-ENV:Header>
+  <SOAP-ENV:Body>
+    <cwmp:InformResponse>
+      <MaxEnvelopes>1</MaxEnvelopes>
+    </cwmp:InformResponse>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>';
+        
+        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " Created InformResponse for session ID: " . $soapId . "\n", FILE_APPEND);
+        return $response;
+    }
+    
+    // Create a request to discover all WLAN parameters
+    public function createWifiDiscoveryRequest($id = null) {
+        $soapId = $id ?? '1';
+        $response = '<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <SOAP-ENV:Header>
+    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </SOAP-ENV:Header>
+  <SOAP-ENV:Body>
+    <cwmp:GetParameterNames>
+      <ParameterPath>InternetGatewayDevice.LANDevice.1.WLANConfiguration.</ParameterPath>
+      <NextLevel>false</NextLevel>
+    </cwmp:GetParameterNames>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>';
 
-        error_log("TR069: Created InformResponse for session ID: " . $sessionId);
-        return $informResponse;
-    }
-
-    public function createGetParameterValuesRequest($sessionId) {
-        $request = '<?xml version="1.0" encoding="UTF-8"?>
-        <SOAP-ENV:Envelope
-            xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
-            xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-            <SOAP-ENV:Header>
-                <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $sessionId . '</cwmp:ID>
-            </SOAP-ENV:Header>
-            <SOAP-ENV:Body>
-                <cwmp:GetParameterValues>
-                    <ParameterNames SOAP-ENV:arrayType="xsd:string[1]">
-                        <string>InternetGatewayDevice.DeviceInfo.SoftwareVersion</string>
-                    </ParameterNames>
-                </cwmp:GetParameterValues>
-            </SOAP-ENV:Body>
-        </SOAP-ENV:Envelope>';
-        
-        error_log("TR069: Created basic GetParameterValues request for session ID: " . $sessionId);
-        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " Basic GetParameterValues for SoftwareVersion sent\n", FILE_APPEND);
-        return $request;
+        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " GetParameterNames request sent for path: InternetGatewayDevice.LANDevice.1.WLANConfiguration.\n", FILE_APPEND);
+        return $response;
     }
     
-    public function createWifiDiscoveryRequest($sessionId) {
-        // First step: discover if WLANConfiguration exists and its children
-        return $this->createGetParameterNamesRequest($sessionId, "InternetGatewayDevice.LANDevice.1.WLANConfiguration.", 1);
-    }
-    
-    public function createGetParameterNamesRequest($sessionId, $parameterPath = "InternetGatewayDevice.LANDevice.1.WLANConfiguration.", $nextLevel = 1) {
-        $request = '<?xml version="1.0" encoding="UTF-8"?>
-        <SOAP-ENV:Envelope
-            xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
-            xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
-            xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-            xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/">
-            <SOAP-ENV:Header>
-                <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $sessionId . '</cwmp:ID>
-            </SOAP-ENV:Header>
-            <SOAP-ENV:Body>
-                <cwmp:GetParameterNames>
-                    <ParameterPath>' . $parameterPath . '</ParameterPath>
-                    <NextLevel>' . $nextLevel . '</NextLevel>
-                </cwmp:GetParameterNames>
-            </SOAP-ENV:Body>
-        </SOAP-ENV:Envelope>';
-        
-        error_log("TR069: Created GetParameterNames request for path: " . $parameterPath . ", session ID: " . $sessionId);
-        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " GetParameterNames request sent for path: " . $parameterPath . "\n", FILE_APPEND);
-        return $request;
-    }
-    
-    public function createCustomGetParameterValuesRequest($sessionId, $parameterPaths) {
-        // Create a GetParameterValues request with custom parameter paths
-        $paramCount = count($parameterPaths);
-        
-        $paramXml = '';
-        foreach ($parameterPaths as $path) {
-            $paramXml .= "<string>{$path}</string>\n";
+    // Create a request to get SSID and password values from specific parameters
+    public function createCustomGetParameterValuesRequest($id = null, $parameters = []) {
+        if (empty($parameters)) {
+            // Default parameters for WiFi discovery if none specified
+            $parameters = [
+                'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
+                'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
+                'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_WPAKey',
+                'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.SSID',
+                'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.KeyPassphrase',
+                'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.X_HW_WPAKey'
+            ];
         }
         
-        $request = '<?xml version="1.0" encoding="UTF-8"?>
-        <SOAP-ENV:Envelope
-            xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"
-            xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
-            xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-            xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/">
-            <SOAP-ENV:Header>
-                <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $sessionId . '</cwmp:ID>
-            </SOAP-ENV:Header>
-            <SOAP-ENV:Body>
-                <cwmp:GetParameterValues>
-                    <ParameterNames SOAP-ENC:arrayType="xsd:string[' . $paramCount . ']">
-                        ' . $paramXml . '
-                    </ParameterNames>
-                </cwmp:GetParameterValues>
-            </SOAP-ENV:Body>
-        </SOAP-ENV:Envelope>';
+        $parameterNames = '';
+        foreach ($parameters as $param) {
+            $parameterNames .= "<string>{$param}</string>\n        ";
+        }
         
-        error_log("TR069: Created custom GetParameterValues request with " . $paramCount . " parameters");
-        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " Custom GetParameterValues for " . implode(", ", $parameterPaths) . "\n", FILE_APPEND);
-        return $request;
+        $soapId = $id ?? '1';
+        $response = '<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <SOAP-ENV:Header>
+    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </SOAP-ENV:Header>
+  <SOAP-ENV:Body>
+    <cwmp:GetParameterValues>
+      <ParameterNames SOAP-ENC:arrayType="xsd:string[' . count($parameters) . ']">
+        ' . $parameterNames . '
+      </ParameterNames>
+    </cwmp:GetParameterValues>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>';
+
+        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " GetParameterValues request sent for " . count($parameters) . " parameters\n", FILE_APPEND);
+        return $response;
     }
     
-    public function createHG8145VWifiDiscoverySequence($sessionId, $step = 1) {
+    // Special sequence for HG8145V to discover WiFi parameters
+    public function createHG8145VWifiDiscoverySequence($id = null, $step = 1) {
+        $soapId = $id ?? '1';
+        
+        // Different discovery steps for HG8145V
         switch ($step) {
             case 1:
-                // Start with root WLANConfiguration
-                return $this->createGetParameterNamesRequest($sessionId, "InternetGatewayDevice.LANDevice.1.WLANConfiguration.", 1);
+                // First try to get all WLAN configuration
+                $path = "InternetGatewayDevice.LANDevice.1.WLANConfiguration.";
+                $nextLevel = "false";
+                file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " HG8145V Step 1: GetParameterNames for " . $path . "\n", FILE_APPEND);
+                break;
                 
             case 2:
-                // Now explore WLAN instance 1
-                return $this->createGetParameterNamesRequest($sessionId, "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.", 1);
+                // Try to get all WiFi parameters directly
+                return $this->createCustomGetParameterValuesRequest($id, [
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.SSID',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.KeyPassphrase'
+                ]);
                 
             case 3:
-                // Try basic parameters that should exist
-                return $this->createCustomGetParameterValuesRequest(
-                    $sessionId,
-                    ["InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID"]
-                );
+                // Try to get Huawei-specific parameters
+                return $this->createCustomGetParameterValuesRequest($id, [
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_WPAKey',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.X_HW_WPAKey',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_SecurityMode',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.X_HW_SecurityMode'
+                ]);
                 
             case 4:
-                // Try to find the password parameter structure
-                return $this->createGetParameterNamesRequest($sessionId, "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.", 1);
+                // Try to get alternative parameter paths
+                return $this->createCustomGetParameterValuesRequest($id, [
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.PreSharedKey.1.KeyPassphrase',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.WPAEncryptionModes',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.WPAEncryptionModes'
+                ]);
                 
             case 5:
-                // Try Huawei-specific parameters
-                return $this->createCustomGetParameterValuesRequest(
-                    $sessionId,
-                    [
-                        "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_WPAKey", 
-                        "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_SecretKey"
-                    ]
-                );
+                // Try a different namspace approach
+                $path = "InternetGatewayDevice.X_HW_WLAN.";
+                $nextLevel = "false";
+                file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " HG8145V Step 5: GetParameterNames for " . $path . "\n", FILE_APPEND);
+                break;
                 
             default:
-                // Fallback to standard SSID request
-                return $this->createCustomGetParameterValuesRequest(
-                    $sessionId,
-                    ["InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID"]
-                );
+                // Default to step 1
+                $path = "InternetGatewayDevice.LANDevice.1.WLANConfiguration.";
+                $nextLevel = "false";
+                file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " HG8145V Default: GetParameterNames for " . $path . "\n", FILE_APPEND);
         }
+        
+        // For steps 1 and 5, use GetParameterNames
+        $response = '<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <SOAP-ENV:Header>
+    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </SOAP-ENV:Header>
+  <SOAP-ENV:Body>
+    <cwmp:GetParameterNames>
+      <ParameterPath>' . $path . '</ParameterPath>
+      <NextLevel>' . $nextLevel . '</NextLevel>
+    </cwmp:GetParameterNames>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>';
+
+        return $response;
+    }
+    
+    // Create a general GetParameterValues request for standard WiFi parameters
+    public function createGetParameterValuesRequest($id = null) {
+        return $this->createCustomGetParameterValuesRequest($id);
     }
 }

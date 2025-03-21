@@ -10,15 +10,11 @@ ini_set('error_log', __DIR__ . '/tr069_error.log');
 function logWithTimestamp($message) {
     $timestamp = date('Y-m-d H:i:s');
     
-    // Only write WiFi-related messages to special log
-    if (strpos($message, 'WLAN') !== false || 
-        strpos($message, 'WiFi') !== false || 
-        strpos($message, 'SSID') !== false || 
-        strpos($message, 'WPA') !== false ||
-        strpos($message, '9005') !== false) {
-        error_log("[$timestamp] $message");
-        file_put_contents(__DIR__ . '/wifi_discovery.log', "[$timestamp] $message\n", FILE_APPEND);
-    }
+    // Write all messages to the WiFi discovery log
+    file_put_contents(__DIR__ . '/wifi_discovery.log', "[$timestamp] $message\n", FILE_APPEND);
+    
+    // Also log to error_log for server logs
+    error_log("[$timestamp] $message");
 }
 
 // Set unlimited execution time for long-running sessions
@@ -69,19 +65,20 @@ if (!$isHuawei && $_SERVER['REQUEST_METHOD'] === 'POST') {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $raw_post = file_get_contents('php://input');
     if (!empty($raw_post)) {
-        // Log WiFi-related information only
+        // Log any WiFi-related information to help with debugging
         if (stripos($raw_post, 'WLAN') !== false || 
             stripos($raw_post, 'WiFi') !== false || 
             stripos($raw_post, 'SSID') !== false || 
+            stripos($raw_post, 'WPA') !== false ||
             stripos($raw_post, 'X_HW_') !== false ||
+            stripos($raw_post, 'PreSharedKey') !== false ||
+            stripos($raw_post, 'KeyPassphrase') !== false ||
             stripos($raw_post, 'DeviceSummary') !== false && 
             stripos($raw_post, 'WiFiLAN') !== false) {
             
             logWithTimestamp("=== WIFI RELATED XML START ===");
             logWithTimestamp($raw_post);
             logWithTimestamp("=== WIFI RELATED XML END ===");
-            
-            file_put_contents(__DIR__ . '/wifi_discovery.log', date('Y-m-d H:i:s') . " Received WiFi-related XML: " . $raw_post . "\n", FILE_APPEND);
         }
         
         // Log any fault codes
@@ -89,7 +86,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             preg_match('/<FaultCode>(.*?)<\/FaultCode>/', $raw_post, $matches);
             if (isset($matches[1])) {
                 logWithTimestamp("FAULT CODE DETECTED: " . $matches[1]);
-                file_put_contents(__DIR__ . '/wifi_discovery.log', date('Y-m-d H:i:s') . " FAULT: " . $matches[1] . " in response\n", FILE_APPEND);
             }
         }
     } else {
@@ -99,6 +95,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // Initialize and run the TR-069 server
 try {
+    require_once __DIR__ . '/backend/config/database.php';
     require_once __DIR__ . '/backend/tr069/server.php';
     $server = new TR069Server();
     // Pass the Huawei detection flag to the server
@@ -113,7 +110,6 @@ try {
 } catch (Exception $e) {
     logWithTimestamp("ERROR: " . $e->getMessage());
     logWithTimestamp("Stack trace: " . $e->getTraceAsString());
-    file_put_contents(__DIR__ . '/wifi_discovery.log', date('Y-m-d H:i:s') . " ERROR: " . $e->getMessage() . "\n", FILE_APPEND);
     header('HTTP/1.1 500 Internal Server Error');
     echo "Internal Server Error";
 }
