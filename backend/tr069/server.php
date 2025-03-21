@@ -1,3 +1,4 @@
+
 <?php
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/session_manager.php';
@@ -129,24 +130,37 @@ class TR069Server {
                 }
             }
             
-            // For HG8145V models, use the special discovery sequence
+            // For HG8145V models, directly request the WiFi credentials
             if ($this->modelHint == 'HG8145V') {
-                error_log("TR069: Using HG8145V-specific WiFi discovery sequence, step " . $this->hg8145vDiscoveryStep);
-                file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " HG8145V WiFi discovery step " . $this->hg8145vDiscoveryStep . "\n", FILE_APPEND);
+                error_log("TR069: Directly requesting WiFi credentials for HG8145V");
+                file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Directly requesting WiFi credentials for HG8145V\n", FILE_APPEND);
                 
-                $this->soapResponse = $this->responseGenerator->createHG8145VWifiDiscoverySequence(
-                    $this->sessionId, 
-                    $this->hg8145vDiscoveryStep
+                // Send direct request for SSID and password parameters (both 2.4GHz and 5GHz)
+                $parameterNames = [
+                    // 2.4GHz WiFi (WLANConfiguration.1)
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_WPAKey',
+                    
+                    // 5GHz WiFi (WLANConfiguration.5)
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.KeyPassphrase',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.X_HW_WPAKey'
+                ];
+                
+                $this->soapResponse = $this->responseGenerator->createCustomGetParameterValuesRequest(
+                    $this->sessionId,
+                    $parameterNames
                 );
                 
-                // Increment discovery step for next time
-                $this->hg8145vDiscoveryStep++;
-                if ($this->hg8145vDiscoveryStep > 5) {
-                    $this->hg8145vDiscoveryStep = 1; // Reset if we've gone through all steps
-                }
+                file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Requesting direct WiFi parameters: " . implode(", ", $parameterNames) . "\n", FILE_APPEND);
             } else {
-                // Start with basic discovery for other Huawei devices
+                // For other devices, start with parameter discovery
+                error_log("TR069: Starting general parameter discovery");
                 $this->soapResponse = $this->responseGenerator->createWifiDiscoveryRequest($this->sessionId);
+                file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " GetParameterNames request sent for path: InternetGatewayDevice.LANDevice.1.WLANConfiguration.\n", FILE_APPEND);
             }
             
             file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Sending discovery request with session ID: " . $this->sessionId . "\n", FILE_APPEND);
@@ -348,10 +362,39 @@ class TR069Server {
             error_log("TR069: Processing GetParameterNamesResponse");
             file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Processing GetParameterNamesResponse\n", FILE_APPEND);
             
-            // Extract parameter names from the response
+            // Check if we see WLAN Configuration parameters and immediately request WiFi credentials
+            if (strpos($rawXml, 'WLANConfiguration.1.SSID') !== false || 
+                strpos($rawXml, 'WLANConfiguration.5.SSID') !== false) {
+                
+                file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " WiFi parameters found, directly requesting credentials\n", FILE_APPEND);
+                
+                // Directly request WiFi credentials for both 2.4GHz and 5GHz
+                $wifiParams = [
+                    // 2.4GHz
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_WPAKey',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
+                    
+                    // 5GHz 
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID', 
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.KeyPassphrase',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.X_HW_WPAKey',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase'
+                ];
+                
+                $this->soapResponse = $this->responseGenerator->createCustomGetParameterValuesRequest(
+                    $this->sessionId,
+                    $wifiParams
+                );
+                
+                file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Requesting WiFi parameters: " . implode(", ", $wifiParams) . "\n", FILE_APPEND);
+                return;
+            }
+            
+            // Extract parameter names from the response (fallback approach)
             $parameterList = [];
             $detectedWifiInterfaces = [];
-            $detectedSecurityParams = [];
             
             // Create a new XML parser for parameter extraction
             libxml_use_internal_errors(true);
@@ -398,18 +441,16 @@ class TR069Server {
                         $detectedWifiInterfaces[] = $matches[1];
                     }
                     
-                    // Try to identify WiFi security parameter names
-                    if (stripos($paramName, 'KeyPassphrase') !== false || 
-                        stripos($paramName, 'PreSharedKey') !== false || 
-                        stripos($paramName, 'WPAKey') !== false || 
-                        stripos($paramName, 'X_HW_') !== false ||
-                        stripos($paramName, 'SSID') !== false) {
-                        $detectedSecurityParams[] = $paramName;
+                    // Also log SSID and WPA key parameters specifically
+                    if (strpos($paramName, '.SSID') !== false || 
+                        strpos($paramName, '.KeyPassphrase') !== false ||
+                        strpos($paramName, '.X_HW_WPAKey') !== false) {
+                        file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " WiFi parameter found: " . $paramName . "\n", FILE_APPEND);
                     }
                 }
             }
             
-            // Found WiFi interfaces, immediately request SSID and password values
+            // If we found WiFi interfaces, immediately request WiFi parameters
             if (!empty($detectedWifiInterfaces)) {
                 file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Found WiFi interfaces: " . implode(", ", $detectedWifiInterfaces) . "\n", FILE_APPEND);
                 
@@ -417,30 +458,23 @@ class TR069Server {
                 foreach ($detectedWifiInterfaces as $ifaceNum) {
                     $wifiParams[] = "InternetGatewayDevice.LANDevice.1.WLANConfiguration.{$ifaceNum}.SSID";
                     $wifiParams[] = "InternetGatewayDevice.LANDevice.1.WLANConfiguration.{$ifaceNum}.KeyPassphrase";
-                    $wifiParams[] = "InternetGatewayDevice.LANDevice.1.WLANConfiguration.{$ifaceNum}.X_HW_WPAKey";  // Huawei specific
-                    $wifiParams[] = "InternetGatewayDevice.LANDevice.1.WLANConfiguration.{$ifaceNum}.PreSharedKey.1.KeyPassphrase";  // Alternative path
+                    $wifiParams[] = "InternetGatewayDevice.LANDevice.1.WLANConfiguration.{$ifaceNum}.X_HW_WPAKey";
+                    $wifiParams[] = "InternetGatewayDevice.LANDevice.1.WLANConfiguration.{$ifaceNum}.PreSharedKey.1.KeyPassphrase";
                 }
                 
                 $this->soapResponse = $this->responseGenerator->createCustomGetParameterValuesRequest(
                     $this->sessionId,
                     $wifiParams
                 );
-                return;
-            }
-            
-            // For HG8145V, handle the discovery response based on the current step
-            if ($this->modelHint == 'HG8145V') {
-                $this->hg8145vDiscoveryStep = 2;  // Move to step 2 to request credentials
-                file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Moving to HG8145V Step 2 to request WiFi credentials\n", FILE_APPEND);
                 
-                $this->soapResponse = $this->responseGenerator->createHG8145VWifiDiscoverySequence(
-                    $this->sessionId, 
-                    $this->hg8145vDiscoveryStep
-                );
+                file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Requesting WiFi parameters: " . implode(", ", $wifiParams) . "\n", FILE_APPEND);
                 return;
             }
             
-            // General fallback - just request common WiFi parameters
+            // If we reach here and no more specific responses were generated, use a generic approach
+            file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Using generic approach to request WiFi parameters\n", FILE_APPEND);
+            
+            // Request common WiFi parameters as a fallback
             $this->soapResponse = $this->responseGenerator->createGetParameterValuesRequest($this->sessionId);
             
         } catch (Exception $e) {
@@ -505,35 +539,67 @@ class TR069Server {
                         
                         file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Parameter: {$name} = {$value}\n", FILE_APPEND);
                         
-                        // Store WiFi-related parameters in the device database
-                        if (stripos($name, 'SSID') !== false || 
-                            stripos($name, 'KeyPassphrase') !== false ||
-                            stripos($name, 'WPAKey') !== false || 
-                            stripos($name, 'X_HW_') !== false) {
+                        // Log WiFi-related parameters with more emphasis
+                        if (strpos($name, 'SSID') !== false || 
+                            strpos($name, 'KeyPassphrase') !== false ||
+                            strpos($name, 'WPAKey') !== false || 
+                            strpos($name, 'X_HW_') !== false) {
                             
-                            // Log discovery of WiFi parameter
+                            // Highlight discovery of WiFi parameter
                             file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " !!! FOUND WIFI PARAMETER !!! - {$name}: {$value}\n", FILE_APPEND);
+                            
+                            // For critical parameters like SSIDs and passwords, add additional emphasis
+                            if (strpos($name, 'SSID') !== false || 
+                                strpos($name, 'KeyPassphrase') !== false ||
+                                strpos($name, 'WPAKey') !== false || 
+                                strpos($name, 'PreSharedKey') !== false) {
+                                
+                                file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", FILE_APPEND);
+                                file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " !!!     WIFI CREDENTIAL FOUND     !!!\n", FILE_APPEND);
+                                file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " !!! {$name} = {$value} !!!\n", FILE_APPEND);
+                                file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", FILE_APPEND);
+                            }
                         }
                     }
                 }
             } else {
-                error_log("TR069: No parameter values found in response");
                 file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " No parameter values found in response\n", FILE_APPEND);
             }
             
-            // For HG8145V, continue with the discovery sequence
-            if ($this->modelHint == 'HG8145V') {
-                $this->hg8145vDiscoveryStep++;
-                if ($this->hg8145vDiscoveryStep > 5) {
-                    $this->hg8145vDiscoveryStep = 1;
+            // If we didn't find any WiFi credentials, try again with a more direct approach
+            $foundWifiCredentials = false;
+            foreach ($paramValues as $name => $value) {
+                if ((strpos($name, 'SSID') !== false || 
+                     strpos($name, 'KeyPassphrase') !== false ||
+                     strpos($name, 'WPAKey') !== false ||
+                     strpos($name, 'PreSharedKey') !== false) && 
+                     !empty($value)) {
+                    $foundWifiCredentials = true;
+                    break;
                 }
+            }
+            
+            if (!$foundWifiCredentials && $this->modelHint == 'HG8145V') {
+                file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " No WiFi credentials found, trying direct approach\n", FILE_APPEND);
                 
-                // Don't send a response yet - wait for next empty POST
-                $this->soapResponse = null;
+                // Try direct request for HG8145V GPON router passwords
+                $directParams = [
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.KeyPassphrase'
+                ];
+                
+                $this->soapResponse = $this->responseGenerator->createCustomGetParameterValuesRequest(
+                    $this->sessionId,
+                    $directParams
+                );
+                
+                file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Trying direct request for WiFi credentials\n", FILE_APPEND);
                 return;
             }
             
-            // For other devices, don't send a response
+            // Don't send any more responses
             $this->soapResponse = null;
             
         } catch (Exception $e) {
@@ -617,15 +683,30 @@ class TR069Server {
         // If we've detected a Huawei device and we're in a session, send parameter discovery
         if ($this->isHuaweiDevice && !empty($this->sessionId)) {
             if ($this->modelHint == 'HG8145V') {
-                error_log("TR069: Sending HG8145V WiFi discovery sequence, step " . $this->hg8145vDiscoveryStep);
-                file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Sending HG8145V WiFi discovery step " . $this->hg8145vDiscoveryStep . "\n", FILE_APPEND);
+                error_log("TR069: Directly requesting WiFi credentials for HG8145V on empty POST");
+                file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Directly requesting WiFi credentials for HG8145V on empty POST\n", FILE_APPEND);
                 
-                $this->soapResponse = $this->responseGenerator->createHG8145VWifiDiscoverySequence(
-                    $this->sessionId, 
-                    $this->hg8145vDiscoveryStep
+                // Send direct request for SSID and password parameters (both 2.4GHz and 5GHz)
+                $parameterNames = [
+                    // 2.4GHz WiFi (WLANConfiguration.1)
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_WPAKey',
+                    
+                    // 5GHz WiFi (WLANConfiguration.5)
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.KeyPassphrase',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.X_HW_WPAKey'
+                ];
+                
+                $this->soapResponse = $this->responseGenerator->createCustomGetParameterValuesRequest(
+                    $this->sessionId,
+                    $parameterNames
                 );
                 
-                // Don't increment step here - that's done when processing the response
+                file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Requesting direct WiFi parameters: " . implode(", ", $parameterNames) . "\n", FILE_APPEND);
             } else {
                 // For other Huawei devices, start with basic discovery
                 error_log("TR069: Sending WiFi discovery request");

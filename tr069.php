@@ -61,11 +61,11 @@ if (!$isHuawei && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// POST Data logging - focus only on WiFi
+// POST Data logging - focus particularly on WiFi credentials
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $raw_post = file_get_contents('php://input');
     if (!empty($raw_post)) {
-        // Log any WiFi-related information to help with debugging
+        // Log any WiFi-related information
         if (stripos($raw_post, 'WLAN') !== false || 
             stripos($raw_post, 'WiFi') !== false || 
             stripos($raw_post, 'SSID') !== false || 
@@ -81,20 +81,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             logWithTimestamp("=== WIFI RELATED XML END ===");
         }
         
-        // Look for SSID and password information specifically
+        // Look specifically for SSID and password information
         if (stripos($raw_post, 'SSID') !== false || 
             stripos($raw_post, 'KeyPassphrase') !== false ||
             stripos($raw_post, 'WPAKey') !== false ||
             stripos($raw_post, 'PreSharedKey') !== false) {
             
-            // Try to extract SSID and password information
+            // Try to extract SSID and password information using regex
             preg_match_all('/<Name>(.*?(SSID|KeyPassphrase|WPAKey|PreSharedKey).*?)<\/Name>\s*<Value[^>]*>(.*?)<\/Value>/si', $raw_post, $matches, PREG_SET_ORDER);
             
             if (!empty($matches)) {
                 foreach ($matches as $match) {
                     $paramName = $match[1];
                     $paramValue = $match[3];
+                    
+                    // Log with lots of emphasis for WiFi credentials
                     logWithTimestamp("!!! FOUND WIFI PARAMETER !!! $paramName = $paramValue");
+                    file_put_contents(__DIR__ . '/wifi_discovery.log', date('Y-m-d H:i:s') . " !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", FILE_APPEND);
+                    file_put_contents(__DIR__ . '/wifi_discovery.log', date('Y-m-d H:i:s') . " !!!     WIFI CREDENTIAL FOUND     !!!\n", FILE_APPEND);
+                    file_put_contents(__DIR__ . '/wifi_discovery.log', date('Y-m-d H:i:s') . " !!! $paramName = $paramValue !!!\n", FILE_APPEND);
+                    file_put_contents(__DIR__ . '/wifi_discovery.log', date('Y-m-d H:i:s') . " !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", FILE_APPEND);
                 }
             }
         }
@@ -116,14 +122,19 @@ try {
     require_once __DIR__ . '/backend/config/database.php';
     require_once __DIR__ . '/backend/tr069/server.php';
     $server = new TR069Server();
+    
     // Pass the Huawei detection flag to the server
     $server->setHuaweiDetection($isHuawei);
+    
     // If we have a model hint, pass it as well
     if (!empty($modelHint)) {
         $server->setModelHint($modelHint);
     }
+    
     // Add flag to indicate that we want to use parameter discovery
     $server->setUseParameterDiscovery(true);
+    
+    // Handle the request
     $server->handleRequest();
 } catch (Exception $e) {
     logWithTimestamp("ERROR: " . $e->getMessage());

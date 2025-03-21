@@ -42,13 +42,16 @@ class InformResponseGenerator {
     // Create a request to get SSID and password values from specific parameters
     public function createCustomGetParameterValuesRequest($id = null, $parameters = []) {
         if (empty($parameters)) {
-            // Default parameters for WiFi discovery if none specified
+            // Default parameters for Huawei HG8145V WiFi discovery
             $parameters = [
+                // 2.4GHz WiFi parameters
                 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
                 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
                 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_WPAKey',
                 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
                 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
+                
+                // 5GHz WiFi parameters
                 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID',
                 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.KeyPassphrase',
                 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.X_HW_WPAKey',
@@ -56,6 +59,9 @@ class InformResponseGenerator {
                 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.BeaconType'
             ];
         }
+        
+        // Log what parameters we're requesting
+        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " Requesting parameters: " . implode(", ", $parameters) . "\n", FILE_APPEND);
         
         $parameterNames = '';
         foreach ($parameters as $param) {
@@ -85,74 +91,20 @@ class InformResponseGenerator {
     public function createHG8145VWifiDiscoverySequence($id = null, $step = 1) {
         $soapId = $id ?? '1';
         
-        // Different discovery steps for HG8145V
-        switch ($step) {
-            case 1:
-                // First try to get all WLAN configuration
-                $path = "InternetGatewayDevice.LANDevice.1.WLANConfiguration.";
-                $nextLevel = "false";
-                file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " HG8145V Step 1: GetParameterNames for " . $path . "\n", FILE_APPEND);
-                break;
-                
-            case 2:
-                // Based on the discovered parameters, now directly request the WiFi credentials
-                file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " HG8145V Step 2: Requesting WiFi credentials\n", FILE_APPEND);
-                return $this->createCustomGetParameterValuesRequest($id, [
-                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
-                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
-                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID',
-                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.KeyPassphrase'
-                ]);
-                
-            case 3:
-                // Try to get Huawei-specific parameters
-                file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " HG8145V Step 3: Requesting Huawei-specific WiFi parameters\n", FILE_APPEND);
-                return $this->createCustomGetParameterValuesRequest($id, [
-                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_WPAKey',
-                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.X_HW_WPAKey',
-                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_SecurityMode',
-                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.X_HW_SecurityMode'
-                ]);
-                
-            case 4:
-                // Try to get alternative parameter paths
-                file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " HG8145V Step 4: Requesting alternative WiFi password paths\n", FILE_APPEND);
-                return $this->createCustomGetParameterValuesRequest($id, [
-                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
-                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase',
-                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
-                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.BeaconType'
-                ]);
-                
-            case 5:
-                // Try a different namespace approach
-                file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " HG8145V Step 5: Checking for X_HW_WLAN namespace\n", FILE_APPEND);
-                $path = "InternetGatewayDevice.X_HW_WLAN.";
-                $nextLevel = "false";
-                break;
-                
-            default:
-                // Default to step 1
-                $path = "InternetGatewayDevice.LANDevice.1.WLANConfiguration.";
-                $nextLevel = "false";
-                file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " HG8145V Default: GetParameterNames for " . $path . "\n", FILE_APPEND);
-        }
+        // For HG8145V, directly request the WiFi credentials
+        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " Direct HG8145V WiFi credential request\n", FILE_APPEND);
         
-        // For steps 1 and 5, use GetParameterNames
-        $response = '<?xml version="1.0" encoding="UTF-8"?>
-<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-  <SOAP-ENV:Header>
-    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </SOAP-ENV:Header>
-  <SOAP-ENV:Body>
-    <cwmp:GetParameterNames>
-      <ParameterPath>' . $path . '</ParameterPath>
-      <NextLevel>' . $nextLevel . '</NextLevel>
-    </cwmp:GetParameterNames>
-  </SOAP-ENV:Body>
-</SOAP-ENV:Envelope>';
-
-        return $response;
+        // Request SSID and password directly for both 2.4GHz and 5GHz interfaces
+        return $this->createCustomGetParameterValuesRequest($id, [
+            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
+            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
+            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_WPAKey',
+            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
+            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID',
+            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.KeyPassphrase',
+            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.X_HW_WPAKey',
+            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase'
+        ]);
     }
     
     // Create a general GetParameterValues request for standard WiFi parameters
