@@ -391,7 +391,6 @@ class TR069Server {
                     $paramName = $paramNode->textContent;
                     $parameterList[] = $paramName;
                     
-                    error_log("TR069: Discovered parameter: " . $paramName);
                     file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Discovered: " . $paramName . "\n", FILE_APPEND);
                     
                     // Detect WiFi interfaces
@@ -410,43 +409,29 @@ class TR069Server {
                 }
             }
             
-            // Save discovered parameters for later use
-            $this->discoveredParameters = array_merge($this->discoveredParameters, $parameterList);
+            // Found WiFi interfaces, immediately request SSID and password values
+            if (!empty($detectedWifiInterfaces)) {
+                file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Found WiFi interfaces: " . implode(", ", $detectedWifiInterfaces) . "\n", FILE_APPEND);
+                
+                $wifiParams = [];
+                foreach ($detectedWifiInterfaces as $ifaceNum) {
+                    $wifiParams[] = "InternetGatewayDevice.LANDevice.1.WLANConfiguration.{$ifaceNum}.SSID";
+                    $wifiParams[] = "InternetGatewayDevice.LANDevice.1.WLANConfiguration.{$ifaceNum}.KeyPassphrase";
+                    $wifiParams[] = "InternetGatewayDevice.LANDevice.1.WLANConfiguration.{$ifaceNum}.X_HW_WPAKey";  // Huawei specific
+                    $wifiParams[] = "InternetGatewayDevice.LANDevice.1.WLANConfiguration.{$ifaceNum}.PreSharedKey.1.KeyPassphrase";  // Alternative path
+                }
+                
+                $this->soapResponse = $this->responseGenerator->createCustomGetParameterValuesRequest(
+                    $this->sessionId,
+                    $wifiParams
+                );
+                return;
+            }
             
             // For HG8145V, handle the discovery response based on the current step
             if ($this->modelHint == 'HG8145V') {
-                // If we found WLAN interfaces, request the SSID values
-                if (!empty($detectedWifiInterfaces)) {
-                    $ssidParams = [];
-                    foreach ($detectedWifiInterfaces as $ifaceNum) {
-                        $ssidParams[] = "InternetGatewayDevice.LANDevice.1.WLANConfiguration.{$ifaceNum}.SSID";
-                    }
-                    
-                    file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Found WiFi interfaces: " . implode(", ", $detectedWifiInterfaces) . "\n", FILE_APPEND);
-                    
-                    $this->soapResponse = $this->responseGenerator->createCustomGetParameterValuesRequest(
-                        $this->sessionId,
-                        $ssidParams
-                    );
-                    return;
-                }
-                
-                // If we found security parameters, try to request their values
-                if (!empty($detectedSecurityParams)) {
-                    file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Found security parameters: " . implode(", ", $detectedSecurityParams) . "\n", FILE_APPEND);
-                    
-                    $this->soapResponse = $this->responseGenerator->createCustomGetParameterValuesRequest(
-                        $this->sessionId,
-                        $detectedSecurityParams
-                    );
-                    return;
-                }
-                
-                // Move to next discovery step
-                $this->hg8145vDiscoveryStep++;
-                if ($this->hg8145vDiscoveryStep > 5) {
-                    $this->hg8145vDiscoveryStep = 1;
-                }
+                $this->hg8145vDiscoveryStep = 2;  // Move to step 2 to request credentials
+                file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Moving to HG8145V Step 2 to request WiFi credentials\n", FILE_APPEND);
                 
                 $this->soapResponse = $this->responseGenerator->createHG8145VWifiDiscoverySequence(
                     $this->sessionId, 
@@ -455,22 +440,7 @@ class TR069Server {
                 return;
             }
             
-            // For other devices, handle general discovery
-            if (!empty($detectedWifiInterfaces)) {
-                // Request SSID values for discovered interfaces
-                $ssidParams = [];
-                foreach ($detectedWifiInterfaces as $ifaceNum) {
-                    $ssidParams[] = "InternetGatewayDevice.LANDevice.1.WLANConfiguration.{$ifaceNum}.SSID";
-                }
-                
-                $this->soapResponse = $this->responseGenerator->createCustomGetParameterValuesRequest(
-                    $this->sessionId,
-                    $ssidParams
-                );
-                return;
-            }
-            
-            // Continue with general parameter discovery
+            // General fallback - just request common WiFi parameters
             $this->soapResponse = $this->responseGenerator->createGetParameterValuesRequest($this->sessionId);
             
         } catch (Exception $e) {
@@ -533,7 +503,6 @@ class TR069Server {
                         $value = $valueNode->textContent;
                         $paramValues[$name] = $value;
                         
-                        error_log("TR069: Parameter value - {$name}: {$value}");
                         file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Parameter: {$name} = {$value}\n", FILE_APPEND);
                         
                         // Store WiFi-related parameters in the device database
@@ -544,11 +513,6 @@ class TR069Server {
                             
                             // Log discovery of WiFi parameter
                             file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " !!! FOUND WIFI PARAMETER !!! - {$name}: {$value}\n", FILE_APPEND);
-                            
-                            // Store in database if we have a device ID
-                            if (!empty($this->deviceId)) {
-                                $this->deviceManager->storeDeviceParameter($this->deviceId, $name, $value);
-                            }
                         }
                     }
                 }

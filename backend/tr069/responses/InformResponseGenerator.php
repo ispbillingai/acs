@@ -47,9 +47,13 @@ class InformResponseGenerator {
                 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
                 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
                 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_WPAKey',
-                'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.SSID',
-                'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.KeyPassphrase',
-                'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.X_HW_WPAKey'
+                'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
+                'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
+                'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID',
+                'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.KeyPassphrase',
+                'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.X_HW_WPAKey',
+                'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase',
+                'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.BeaconType'
             ];
         }
         
@@ -91,37 +95,40 @@ class InformResponseGenerator {
                 break;
                 
             case 2:
-                // Try to get all WiFi parameters directly
+                // Based on the discovered parameters, now directly request the WiFi credentials
+                file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " HG8145V Step 2: Requesting WiFi credentials\n", FILE_APPEND);
                 return $this->createCustomGetParameterValuesRequest($id, [
                     'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
                     'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
-                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.SSID',
-                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.KeyPassphrase'
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.KeyPassphrase'
                 ]);
                 
             case 3:
                 // Try to get Huawei-specific parameters
+                file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " HG8145V Step 3: Requesting Huawei-specific WiFi parameters\n", FILE_APPEND);
                 return $this->createCustomGetParameterValuesRequest($id, [
                     'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_WPAKey',
-                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.X_HW_WPAKey',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.X_HW_WPAKey',
                     'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_SecurityMode',
-                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.X_HW_SecurityMode'
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.X_HW_SecurityMode'
                 ]);
                 
             case 4:
                 // Try to get alternative parameter paths
+                file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " HG8145V Step 4: Requesting alternative WiFi password paths\n", FILE_APPEND);
                 return $this->createCustomGetParameterValuesRequest($id, [
                     'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
-                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.PreSharedKey.1.KeyPassphrase',
-                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.WPAEncryptionModes',
-                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.WPAEncryptionModes'
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
+                    'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.BeaconType'
                 ]);
                 
             case 5:
-                // Try a different namspace approach
+                // Try a different namespace approach
+                file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " HG8145V Step 5: Checking for X_HW_WLAN namespace\n", FILE_APPEND);
                 $path = "InternetGatewayDevice.X_HW_WLAN.";
                 $nextLevel = "false";
-                file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " HG8145V Step 5: GetParameterNames for " . $path . "\n", FILE_APPEND);
                 break;
                 
             default:

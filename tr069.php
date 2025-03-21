@@ -6,7 +6,7 @@ ini_set('display_errors', 0);
 ini_set('log_errors', 1);
 ini_set('error_log', __DIR__ . '/tr069_error.log');
 
-// Function to log with timestamp - only log WiFi-related info
+// Function to log with timestamp - focus only on WiFi-related info
 function logWithTimestamp($message) {
     $timestamp = date('Y-m-d H:i:s');
     
@@ -79,6 +79,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             logWithTimestamp("=== WIFI RELATED XML START ===");
             logWithTimestamp($raw_post);
             logWithTimestamp("=== WIFI RELATED XML END ===");
+        }
+        
+        // Look for SSID and password information specifically
+        if (stripos($raw_post, 'SSID') !== false || 
+            stripos($raw_post, 'KeyPassphrase') !== false ||
+            stripos($raw_post, 'WPAKey') !== false ||
+            stripos($raw_post, 'PreSharedKey') !== false) {
+            
+            // Try to extract SSID and password information
+            preg_match_all('/<Name>(.*?(SSID|KeyPassphrase|WPAKey|PreSharedKey).*?)<\/Name>\s*<Value[^>]*>(.*?)<\/Value>/si', $raw_post, $matches, PREG_SET_ORDER);
+            
+            if (!empty($matches)) {
+                foreach ($matches as $match) {
+                    $paramName = $match[1];
+                    $paramValue = $match[3];
+                    logWithTimestamp("!!! FOUND WIFI PARAMETER !!! $paramName = $paramValue");
+                }
+            }
         }
         
         // Log any fault codes
