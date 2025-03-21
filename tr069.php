@@ -9,7 +9,6 @@ ini_set('error_log', __DIR__ . '/tr069_error.log');
 // Function to log with timestamp - only log WiFi-related info
 function logWithTimestamp($message) {
     $timestamp = date('Y-m-d H:i:s');
-    error_log("[$timestamp] $message");
     
     // Only write WiFi-related messages to special log
     if (strpos($message, 'WLAN') !== false || 
@@ -17,6 +16,7 @@ function logWithTimestamp($message) {
         strpos($message, 'SSID') !== false || 
         strpos($message, 'WPA') !== false ||
         strpos($message, '9005') !== false) {
+        error_log("[$timestamp] $message");
         file_put_contents(__DIR__ . '/wifi_discovery.log', "[$timestamp] $message\n", FILE_APPEND);
     }
 }
@@ -27,7 +27,9 @@ set_time_limit(0);
 // Basic connection information
 logWithTimestamp("=== NEW TR-069 REQUEST ===");
 logWithTimestamp("Client IP: " . $_SERVER['REMOTE_ADDR']);
-logWithTimestamp("Device User-Agent: " . $_SERVER['HTTP_USER_AGENT']);
+if (isset($_SERVER['HTTP_USER_AGENT'])) {
+    logWithTimestamp("Device User-Agent: " . $_SERVER['HTTP_USER_AGENT']);
+}
 
 // Enhanced Huawei device detection based on User-Agent
 $isHuawei = false;
@@ -55,14 +57,15 @@ if (!$isHuawei && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $raw_post = file_get_contents('php://input');
     if (!empty($raw_post)) {
         if (stripos($raw_post, 'huawei') !== false || 
-            stripos($raw_post, 'hg8') !== false) {
+            stripos($raw_post, 'hg8') !== false ||
+            stripos($raw_post, 'HG8145V') !== false) {
             $isHuawei = true;
             logWithTimestamp("DETECTED HUAWEI DEVICE FROM XML CONTENT");
         }
     }
 }
 
-// POST Data for debugging WiFi information
+// POST Data logging - focus only on WiFi
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $raw_post = file_get_contents('php://input');
     if (!empty($raw_post)) {
@@ -70,7 +73,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (stripos($raw_post, 'WLAN') !== false || 
             stripos($raw_post, 'WiFi') !== false || 
             stripos($raw_post, 'SSID') !== false || 
-            stripos($raw_post, 'X_HW_') !== false) {
+            stripos($raw_post, 'X_HW_') !== false ||
+            stripos($raw_post, 'DeviceSummary') !== false && 
+            stripos($raw_post, 'WiFiLAN') !== false) {
             
             logWithTimestamp("=== WIFI RELATED XML START ===");
             logWithTimestamp($raw_post);

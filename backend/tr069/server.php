@@ -1,4 +1,3 @@
-
 <?php
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/session_manager.php';
@@ -593,29 +592,34 @@ class TR069Server {
             if (!empty($deviceData)) {
                 $this->serialNumber = $deviceData['serialNumber'];
                 
-                // Log device details
-                error_log("TR069: Device info - Model: " . $deviceData['model'] . ", Serial: " . $deviceData['serialNumber']);
-                file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Device info - Model: " . $deviceData['model'] . ", Serial: " . $deviceData['serialNumber'] . "\n", FILE_APPEND);
+                // Log device details - ensuring keys exist
+                $modelName = isset($deviceData['modelName']) ? $deviceData['modelName'] : 'Unknown';
+                error_log("TR069: Device info - Model: " . $modelName . ", Serial: " . $deviceData['serialNumber']);
+                file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Device info - Model: " . $modelName . ", Serial: " . $deviceData['serialNumber'] . "\n", FILE_APPEND);
                 
                 // Check if model is HG8145V
-                if (stripos($deviceData['model'], 'HG8145V') !== false) {
+                if (!empty($modelName) && stripos($modelName, 'HG8145V') !== false) {
                     $this->modelHint = 'HG8145V';
                     error_log("TR069: Confirmed HG8145V model from Inform");
                     file_put_contents(__DIR__ . '/../../wifi_discovery.log', date('Y-m-d H:i:s') . " Confirmed HG8145V model\n", FILE_APPEND);
                 }
                 
                 // Create or update the device record
+                $manufacturer = isset($deviceData['manufacturer']) ? $deviceData['manufacturer'] : 'Unknown';
+                $hardwareVersion = isset($deviceData['hardwareVersion']) ? $deviceData['hardwareVersion'] : '';
+                $softwareVersion = isset($deviceData['softwareVersion']) ? $deviceData['softwareVersion'] : '';
+                
                 $this->deviceId = $this->deviceManager->updateOrCreateDevice(
                     $deviceData['serialNumber'],
-                    $deviceData['manufacturer'],
-                    $deviceData['model'],
-                    $deviceData['hardwareVersion'],
-                    $deviceData['softwareVersion']
+                    $manufacturer,
+                    $modelName,
+                    $hardwareVersion,
+                    $softwareVersion
                 );
                 
                 // Create or update the session
                 if (empty($this->sessionId)) {
-                    $this->sessionId = (string)$request->Header->ID;
+                    $this->sessionId = (string)$request->Header->ID ?? bin2hex(random_bytes(16));
                 }
                 
                 $this->sessionManager->updateOrCreateSession($deviceData['serialNumber'], $this->sessionId);
