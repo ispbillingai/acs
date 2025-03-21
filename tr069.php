@@ -91,6 +91,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+// Create get.log if it doesn't exist
+if (!file_exists(__DIR__ . '/get.log')) {
+    file_put_contents(__DIR__ . '/get.log', date('Y-m-d H:i:s') . " GetParameterValues log initialized\n", FILE_APPEND);
+}
+
 // Initialize and run the TR-069 server
 try {
     require_once __DIR__ . '/backend/tr069/server.php';

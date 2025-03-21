@@ -71,50 +71,50 @@ class TR069Server {
             error_log("TR069Server: Empty POST received");
         }
         
-        if (empty($rawPost)) {
-            // If empty POST, send GetParameterValues request if flag is set
-            if (isset($_SERVER['HTTP_COOKIE']) && strpos($_SERVER['HTTP_COOKIE'], 'session_id=') !== false) {
-                preg_match('/session_id=([^;]+)/', $_SERVER['HTTP_COOKIE'], $matches);
-                $this->sessionId = $matches[1];
-                error_log("TR069Server: Session ID from cookie: " . $this->sessionId);
-                
-                if ($this->isHuaweiDevice) {
-                    error_log("TR069Server: Sending Huawei GetParameterValues request");
-                    $this->soapResponse = $this->responseGenerator->createHuaweiGetParameterValuesRequest($this->sessionId);
-                } else {
-                    error_log("TR069Server: Sending standard GetParameterValues request");
-                    $this->soapResponse = $this->responseGenerator->createGetParameterValuesRequest($this->sessionId);
-                }
-            } else {
-                error_log("TR069Server: No session ID found, handling as empty request");
-                $this->handleEmptyRequest();
+        // For Huawei devices, we need to always send GetParameterValues after InformResponse
+        // Check if we need to send a GetParameterValues request
+        if ($this->isHuaweiDevice && empty($rawPost)) {
+            error_log("TR069Server: Empty POST from Huawei device detected - will send GetParameterValues");
+            
+            // Generate a session ID if we don't have one already
+            if (empty($this->sessionId)) {
+                $this->sessionId = bin2hex(random_bytes(16));
+                error_log("TR069Server: Generated new session ID: " . $this->sessionId);
             }
+            
+            // Always send the GetParameterValues for Huawei devices on empty POST
+            $this->soapResponse = $this->responseGenerator->createHuaweiGetParameterValuesRequest($this->sessionId);
+            $this->sendResponse();
             return;
         }
 
-        try {
-            libxml_use_internal_errors(true);
-            $xml = new SimpleXMLElement($rawPost);
-            $this->processRequest($xml, $rawPost);
-        } catch (Exception $e) {
-            error_log("TR069Server Error: " . $e->getMessage());
-            error_log("Stack trace: " . $e->getTraceAsString());
-            
-            // For Huawei devices, log more details about the XML parsing error
-            if ($this->isHuaweiDevice) {
-                error_log("Huawei XML parsing errors:");
-                foreach (libxml_get_errors() as $error) {
-                    error_log("Line {$error->line}, Column {$error->column}: {$error->message}");
+        // Handle non-empty POST data
+        if (!empty($rawPost)) {
+            try {
+                libxml_use_internal_errors(true);
+                $xml = new SimpleXMLElement($rawPost);
+                $this->processRequest($xml, $rawPost);
+                $this->sendResponse();
+            } catch (Exception $e) {
+                error_log("TR069Server Error: " . $e->getMessage());
+                error_log("Stack trace: " . $e->getTraceAsString());
+                
+                // For Huawei devices, log more details about the XML parsing error
+                if ($this->isHuaweiDevice) {
+                    error_log("Huawei XML parsing errors:");
+                    foreach (libxml_get_errors() as $error) {
+                        error_log("Line {$error->line}, Column {$error->column}: {$error->message}");
+                    }
+                    libxml_clear_errors();
                 }
-                libxml_clear_errors();
+                
+                header('HTTP/1.1 500 Internal Server Error');
+                echo "Internal Server Error: " . $e->getMessage();
+                exit;
             }
-            
-            header('HTTP/1.1 500 Internal Server Error');
-            echo "Internal Server Error: " . $e->getMessage();
-            exit;
+        } else {
+            $this->handleEmptyRequest();
         }
-
-        $this->sendResponse();
     }
 
     private function handleEmptyRequest() {
@@ -126,7 +126,21 @@ class TR069Server {
         }
         
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            error_log("TR069Server: Handling empty POST request with 204 response");
+            // For Huawei devices, we'll send GetParameterValues on empty POST
+            if ($this->isHuaweiDevice) {
+                // Use a generated session ID if we don't have one
+                if (empty($this->sessionId)) {
+                    $this->sessionId = bin2hex(random_bytes(16));
+                    error_log("TR069Server: Generated new session ID for empty POST: " . $this->sessionId);
+                }
+                
+                error_log("TR069Server: Sending Huawei GetParameterValues on empty POST with session ID: " . $this->sessionId);
+                $this->soapResponse = $this->responseGenerator->createHuaweiGetParameterValuesRequest($this->sessionId);
+                $this->sendResponse();
+                return;
+            }
+            
+            error_log("TR069Server: Handling empty POST request with 204 response for non-Huawei device");
             header('HTTP/1.1 204 No Content');
             return;
         }
@@ -158,13 +172,6 @@ class TR069Server {
         switch ($requestName) {
             case 'Inform':
                 $this->handleInform($request, $rawXml);
-                // Set flag to send GetParameterValues on the next empty POST
-                if ($this->isHuaweiDevice) {
-                    error_log("TR069Server: Setting flag to send Huawei GetParameterValues on next request");
-                    $this->shouldSendGetParameterValues = true;
-                    // Set a cookie to identify this session later
-                    setcookie('session_id', $this->sessionId, 0, '/');
-                }
                 break;
             case 'GetParameterValuesResponse':
                 $this->handleGetParameterValuesResponse($request, $rawXml);
@@ -223,6 +230,14 @@ class TR069Server {
             $this->soapResponse = $this->responseGenerator->createResponse($this->sessionId);
             
             error_log("TR069Server: Inform handled successfully. Device ID: " . $this->deviceId . ", Session ID: " . $this->sessionId);
+            
+            // For Huawei devices, we want to set a flag for sending GetParameterValues
+            // (this will be done in the next empty POST)
+            if ($this->isHuaweiDevice) {
+                $this->shouldSendGetParameterValues = true;
+                error_log("TR069Server: Flag set to send Huawei GetParameterValues on next empty POST");
+                // We don't need to set a cookie as we're handling it directly in the handleEmptyRequest method
+            }
         } catch (Exception $e) {
             error_log("TR069Server: Error in handleInform: " . $e->getMessage());
             error_log("Stack trace: " . $e->getTraceAsString());
@@ -233,22 +248,26 @@ class TR069Server {
     private function handleGetParameterValuesResponse($request, $rawXml = '') {
         try {
             error_log("TR069Server: Processing GetParameterValuesResponse");
+            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " GetParameterValuesResponse received\n", FILE_APPEND);
             
             // Log the raw XML for debugging
             if ($this->isHuaweiDevice) {
                 error_log("=== HUAWEI GetParameterValuesResponse XML START ===");
-                error_log($request->asXML());
+                error_log($rawXml);
                 error_log("=== HUAWEI GetParameterValuesResponse XML END ===");
+                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Raw GetParameterValuesResponse: " . $rawXml . "\n", FILE_APPEND);
             }
             
             // Process the parameters in the response
             $parameters = $request->ParameterList->ParameterValueStruct;
             if (empty($parameters)) {
                 error_log("TR069Server: No parameters found in GetParameterValuesResponse");
+                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " No parameters found in GetParameterValuesResponse\n", FILE_APPEND);
                 return;
             }
             
             error_log("TR069Server: Found " . count($parameters) . " parameters in GetParameterValuesResponse");
+            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Found " . count($parameters) . " parameters in GetParameterValuesResponse\n", FILE_APPEND);
             
             // Extract parameters of interest
             $deviceInfo = [];
@@ -257,6 +276,7 @@ class TR069Server {
                 $value = (string)$param->Value;
                 
                 error_log("TR069Server: Parameter in GetParameterValuesResponse - " . $name . " = " . $value);
+                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Parameter: " . $name . " = " . $value . "\n", FILE_APPEND);
                 
                 // Extract key parameters that we're interested in
                 if (stripos($name, 'SSID') !== false) {
@@ -290,12 +310,14 @@ class TR069Server {
             
             // Log what we found
             error_log("TR069Server: GetParameterValuesResponse extracted data: " . json_encode($deviceInfo));
+            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Extracted data: " . json_encode($deviceInfo) . "\n", FILE_APPEND);
             
             // Update device with new information
             if (!empty($deviceInfo) && isset($deviceInfo['serialNumber'])) {
                 $deviceInfo['status'] = 'online';
                 $deviceId = $this->deviceManager->updateDevice($deviceInfo);
                 error_log("TR069Server: Updated device ID: " . $deviceId . " with GetParameterValuesResponse data");
+                file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Updated device ID: " . $deviceId . " with GetParameterValuesResponse data\n", FILE_APPEND);
             }
             
             // For Huawei devices, we don't need to send a response after GetParameterValuesResponse
@@ -304,6 +326,7 @@ class TR069Server {
         } catch (Exception $e) {
             error_log("TR069Server: Error in handleGetParameterValuesResponse: " . $e->getMessage());
             error_log("Stack trace: " . $e->getTraceAsString());
+            file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " ERROR: " . $e->getMessage() . "\n", FILE_APPEND);
             throw $e;
         }
     }
@@ -318,6 +341,11 @@ class TR069Server {
                 error_log("=== HUAWEI RESPONSE XML START ===");
                 error_log($this->soapResponse);
                 error_log("=== HUAWEI RESPONSE XML END ===");
+                
+                // Log to get.log if it's a GetParameterValues request
+                if (strpos($this->soapResponse, 'GetParameterValues') !== false) {
+                    file_put_contents(__DIR__ . '/../../get.log', date('Y-m-d H:i:s') . " Sending GetParameterValues: " . $this->soapResponse . "\n", FILE_APPEND);
+                }
             } else {
                 error_log("TR069Server: Sending response, length: " . strlen($this->soapResponse));
             }
