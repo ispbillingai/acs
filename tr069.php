@@ -21,6 +21,13 @@ logWithTimestamp("=== NEW TR-069 REQUEST ===");
 logWithTimestamp("Client IP: " . $_SERVER['REMOTE_ADDR']);
 logWithTimestamp("Device User-Agent: " . $_SERVER['HTTP_USER_AGENT']);
 
+// Check for Huawei device based on User-Agent
+$isHuawei = false;
+if (isset($_SERVER['HTTP_USER_AGENT']) && (stripos($_SERVER['HTTP_USER_AGENT'], 'huawei') !== false)) {
+    $isHuawei = true;
+    logWithTimestamp("DETECTED HUAWEI DEVICE");
+}
+
 // Request Headers (only important ones)
 $headers = getallheaders();
 if (isset($headers['Authorization'])) {
@@ -32,6 +39,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $raw_post = file_get_contents('php://input');
     if (!empty($raw_post)) {
         logWithTimestamp("Received TR-069 message, length: " . strlen($raw_post));
+        
+        // For Huawei devices, log the full XML (but remove sensitive data)
+        if ($isHuawei) {
+            // Simple sanitization to hide passwords
+            $sanitized_xml = preg_replace('/<Value(.*?)>([^<]{8,})<\/Value>/i', '<Value$1>[REDACTED]</Value>', $raw_post);
+            logWithTimestamp("=== HUAWEI RAW XML START ===");
+            logWithTimestamp($sanitized_xml);
+            logWithTimestamp("=== HUAWEI RAW XML END ===");
+        }
     }
 }
 
@@ -42,6 +58,7 @@ try {
     $server->handleRequest();
 } catch (Exception $e) {
     logWithTimestamp("ERROR: " . $e->getMessage());
+    logWithTimestamp("Stack trace: " . $e->getTraceAsString());
     header('HTTP/1.1 500 Internal Server Error');
     echo "Internal Server Error";
 }

@@ -38,6 +38,11 @@ class HuaweiInformMessageParser {
 
     public function parseInform($request) {
         try {
+            // Log the raw XML for Huawei devices
+            error_log("=== HUAWEI DEVICE INFORM XML START ===");
+            error_log($request->asXML());
+            error_log("=== HUAWEI DEVICE INFORM XML END ===");
+            
             $deviceInfo = [
                 'manufacturer' => '',
                 'manufacturerOUI' => '',
@@ -73,6 +78,7 @@ class HuaweiInformMessageParser {
             ];
 
             if (!$request) {
+                error_log("ERROR: Huawei parser received empty request");
                 throw new Exception("Empty request received");
             }
 
@@ -91,6 +97,7 @@ class HuaweiInformMessageParser {
 
             if (!empty($inform)) {
                 $inform = $inform[0];
+                error_log("Huawei parser found Inform section");
 
                 // Extract DeviceId information
                 $deviceId = $inform->xpath('.//DeviceId')[0];
@@ -99,22 +106,35 @@ class HuaweiInformMessageParser {
                     $deviceInfo['manufacturerOUI'] = (string)$deviceId->OUI;
                     $deviceInfo['modelName'] = (string)$deviceId->ProductClass;
                     $deviceInfo['serialNumber'] = (string)$deviceId->SerialNumber;
+                    
+                    error_log("Huawei Device ID Info:");
+                    error_log("- Manufacturer: " . $deviceInfo['manufacturer']);
+                    error_log("- OUI: " . $deviceInfo['manufacturerOUI']);
+                    error_log("- Model: " . $deviceInfo['modelName']);
+                    error_log("- Serial: " . $deviceInfo['serialNumber']);
+                }
+
+                // Log event codes
+                $eventCodes = $inform->xpath('.//Event/EventCode');
+                if ($eventCodes) {
+                    error_log("Huawei Event Codes:");
+                    foreach ($eventCodes as $eventCode) {
+                        error_log("- Event: " . (string)$eventCode);
+                    }
                 }
 
                 // Extract parameters
                 $parameters = $inform->xpath('.//ParameterList/ParameterValueStruct');
 
                 if ($parameters) {
+                    error_log("Huawei Parameters (Total: " . count($parameters) . "):");
                     foreach ($parameters as $param) {
                         $name = (string)$param->Name;
                         $value = (string)$param->Value;
+                        $valueType = $param->Value->attributes() ? (string)$param->Value->attributes()->type : 'string';
 
-                        // Enhanced parameter logging for Huawei devices
-                        if (strpos($name, 'Device.DeviceInfo') !== false ||
-                            strpos($name, 'Device.X_HW_PON') !== false ||
-                            strpos($name, 'Device.LAN.WLANConfiguration') !== false) {
-                            error_log("TR-069 Huawei Parameter - $name: $value");
-                        }
+                        // Log ALL parameters for Huawei devices
+                        error_log("- Parameter: $name = $value (Type: $valueType)");
 
                         // Map parameters
                         if (isset($this->parameterMap[$name])) {
@@ -135,6 +155,8 @@ class HuaweiInformMessageParser {
                             }
                         }
                     }
+                } else {
+                    error_log("WARNING: No parameters found in Huawei Inform message");
                 }
 
                 // Enhanced logging for Huawei devices
@@ -148,16 +170,20 @@ class HuaweiInformMessageParser {
                 error_log("- SSID 2: " . ($deviceInfo['ssid2'] ?: "Not provided"));
                 error_log("- Uptime: " . $deviceInfo['uptime'] . " seconds");
                 error_log("- Firmware Version: " . ($deviceInfo['currentFirmware'] ?: "Not provided"));
+            } else {
+                error_log("ERROR: No Inform section found in Huawei request");
             }
 
             if (empty($deviceInfo['serialNumber'])) {
+                error_log("ERROR: Missing required field: serialNumber for Huawei device");
                 throw new Exception("Missing required field: serialNumber");
             }
 
             return $deviceInfo;
 
         } catch (Exception $e) {
-            error_log("Error parsing Huawei Inform message: " . $e->getMessage());
+            error_log("ERROR parsing Huawei Inform message: " . $e->getMessage());
+            error_log("Stack trace: " . $e->getTraceAsString());
             throw $e;
         }
     }
