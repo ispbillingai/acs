@@ -1,4 +1,3 @@
-
 <?php
 // Enable error reporting with maximum verbosity
 error_reporting(E_ALL | E_STRICT);
@@ -70,6 +69,7 @@ function logRouterData($paramName, $paramValue) {
 // Function to store discovered parameters in the database
 function storeParametersInDatabase() {
     if (empty($GLOBALS['discoveredParameters'])) {
+        logWithTimestamp("No parameters to store in database", "WARNING");
         return false;
     }
     
@@ -84,13 +84,19 @@ function storeParametersInDatabase() {
     
     $result = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    
+    // Log curl errors if any
+    if (curl_errno($ch)) {
+        logWithTimestamp("Curl error when calling store_tr069_data.php: " . curl_error($ch), "ERROR");
+    }
+    
     curl_close($ch);
     
     if ($httpCode >= 200 && $httpCode < 300) {
-        logWithTimestamp("Parameters stored successfully in database", "INFO");
+        logWithTimestamp("Parameters stored successfully in database: " . $result, "INFO");
         return true;
     } else {
-        logWithTimestamp("Failed to store parameters in database: HTTP $httpCode", "ERROR");
+        logWithTimestamp("Failed to store parameters in database: HTTP $httpCode - Response: $result", "ERROR");
         return false;
     }
 }
