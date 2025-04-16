@@ -1,168 +1,218 @@
 
-import React, { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { DeviceParameters } from '@/components/DeviceParameters';
-import { config } from '@/config/index';
-import { ArrowLeft, RefreshCw } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
+import { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useToast } from "@/hooks/use-toast";
+import { DeviceInfo } from "@/components/DeviceInfo";
+import { DeviceStats } from "@/components/DeviceStats";
+import { DeviceActions } from "@/components/DeviceActions";
+import { DeviceParameters } from "@/components/DeviceParameters";
+import { ConnectedHosts } from "@/components/ConnectedHosts";
+import { Clock, AlertCircle, RefreshCw } from "lucide-react";
+import { config } from "@/config";
 
-// Define the Device interface for TypeScript
 interface Device {
-  id: number;
+  id: string;
   serialNumber: string;
   manufacturer: string;
   model: string;
-  status: 'online' | 'offline' | 'provisioning';
+  status: string;
   lastContact: string;
   ipAddress: string;
   softwareVersion?: string;
   hardwareVersion?: string;
-  parameters: Array<{
-    name: string;
-    value: string;
-    type: string;
-  }>;
-  connectedHosts: Array<{
-    id: number;
-    ipAddress: string;
-    macAddress: string;
-    hostname: string;
-    lastSeen: string;
-    isActive: boolean;
-  }>;
+  ssid?: string;
+  connectedClients?: number;
 }
 
-const DevicePage = () => {
+export default function DevicePage() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const [device, setDevice] = useState<Device | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  
+  const [lastRefresh, setLastRefresh] = useState<string>(
+    new Date().toLocaleTimeString()
+  );
+  const { toast } = useToast();
+  const [refreshInterval, setRefreshInterval] = useState<number | null>(
+    config.ACS_SETTINGS.REFRESH_INTERVAL
+  );
+  const [onlineThreshold] = useState<number>(
+    config.ACS_SETTINGS.ONLINE_THRESHOLD
+  );
+
   const fetchDevice = async () => {
     try {
       setLoading(true);
-      setError(null);
-      console.log('Fetching device with ID:', id);
-      
-      const response = await fetch(`${config.API_BASE_URL}/devices.php?id=${id}`);
-      console.log('Response status:', response.status);
-      
+      const response = await fetch(`/backend/api/devices.php?id=${id}`);
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to fetch device');
+        throw new Error("Failed to fetch device");
       }
-      
       const data = await response.json();
-      console.log('Device data received:', data);
-      setDevice(data);
+      if (data.success && data.device) {
+        setDevice(data.device);
+        setError(null);
+      } else {
+        setError(data.message || "Failed to load device data");
+      }
     } catch (err) {
-      console.error('Error fetching device:', err);
-      setError(err instanceof Error ? err.message : 'Unknown error occurred');
+      setError("An error occurred while fetching device data");
+      console.error(err);
     } finally {
       setLoading(false);
-      setRefreshing(false);
+      setLastRefresh(new Date().toLocaleTimeString());
     }
   };
-  
+
   useEffect(() => {
-    fetchDevice();
-    // Set up polling for real-time updates
-    const interval = setInterval(fetchDevice, config.ACS_SETTINGS.REFRESH_INTERVAL);
-    return () => clearInterval(interval);
-  }, [id]);
-  
+    if (id) {
+      fetchDevice();
+    }
+
+    let intervalId: number | null = null;
+
+    if (refreshInterval) {
+      intervalId = window.setInterval(() => {
+        fetchDevice();
+      }, refreshInterval);
+    }
+
+    return () => {
+      if (intervalId !== null) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [id, refreshInterval]);
+
   const handleRefresh = () => {
-    setRefreshing(true);
+    toast({
+      title: "Refreshing device data",
+      description: "Fetching the latest information from the server.",
+      duration: 3000,
+    });
     fetchDevice();
   };
-  
+
+  const toggleAutoRefresh = () => {
+    if (refreshInterval) {
+      setRefreshInterval(null);
+      toast({
+        title: "Auto-refresh disabled",
+        description: "You will need to manually refresh the device data.",
+        variant: "default",
+      });
+    } else {
+      setRefreshInterval(config.ACS_SETTINGS.REFRESH_INTERVAL);
+      toast({
+        title: "Auto-refresh enabled",
+        description: `Device data will refresh every ${
+          config.ACS_SETTINGS.REFRESH_INTERVAL / 1000
+        } seconds.`,
+        variant: "default",
+      });
+    }
+  };
+
+  const isDeviceOnline = (device: Device): boolean => {
+    if (!device || !device.lastContact) return false;
+    const lastContactTime = new Date(device.lastContact).getTime();
+    const currentTime = new Date().getTime();
+    return currentTime - lastContactTime < onlineThreshold;
+  };
+
   if (loading && !device) {
     return (
-      <div className="container mx-auto p-4">
-        <Button 
-          variant="outline" 
-          onClick={() => navigate('/devices')}
-        >
-          <ArrowLeft className="mr-2 h-4 w-4" /> Back to Devices
-        </Button>
-        <div className="flex justify-center items-center h-[60vh]">
-          <p className="text-lg">Loading device information...</p>
-        </div>
+      <div className="container mx-auto py-8">
+        <Card>
+          <CardContent className="p-8">
+            <div className="text-center">Loading device information...</div>
+          </CardContent>
+        </Card>
       </div>
     );
   }
-  
-  if (error) {
+
+  if (error || !device) {
     return (
-      <div className="container mx-auto p-4">
-        <Button 
-          variant="outline" 
-          onClick={() => navigate('/devices')}
-        >
-          <ArrowLeft className="mr-2 h-4 w-4" /> Back to Devices
-        </Button>
-        <div className="flex justify-center items-center h-[60vh] flex-col">
-          <p className="text-lg text-red-500 mb-4">Error: {error}</p>
-          <Button onClick={fetchDevice}>Try Again</Button>
-        </div>
+      <div className="container mx-auto py-8">
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>
+            {error || "Device not found"}
+          </AlertDescription>
+        </Alert>
       </div>
     );
   }
-  
+
   return (
-    <div className="container mx-auto p-4">
-      <div className="flex justify-between items-center mb-4">
-        <Button 
-          variant="default" 
-          onClick={() => navigate('/devices')}
-        >
-          <ArrowLeft className="mr-2 h-4 w-4" /> Back to Devices
-        </Button>
-        
-        <Button variant="outline" onClick={handleRefresh} disabled={refreshing}>
-          <RefreshCw className="mr-2 h-4 w-4" size={16} className={refreshing ? 'animate-spin' : ''} /> 
-          {refreshing ? 'Refreshing...' : 'Refresh'}
-        </Button>
+    <div className="container mx-auto py-8">
+      <div className="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-bold">{device.model}</h1>
+          <p className="text-gray-500">
+            Serial: {device.serialNumber} | IP: {device.ipAddress}
+          </p>
+        </div>
+        <div className="flex gap-2 items-center">
+          <div className="text-sm text-gray-500 flex items-center">
+            <Clock className="mr-1 h-3 w-3" />
+            Last updated: {lastRefresh}
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={toggleAutoRefresh}
+            className={refreshInterval ? "bg-green-50" : ""}
+          >
+            {refreshInterval ? "Auto-refresh On" : "Auto-refresh Off"}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleRefresh}
+            className="animate-in"
+          >
+            <RefreshCw className="mr-1 h-4 w-4" />
+            Refresh
+          </Button>
+        </div>
       </div>
-      
-      <Card className="mb-6">
-        <CardHeader>
-          <div className="flex justify-between items-center">
-            <CardTitle>Device {device?.model}</CardTitle>
-            <Badge variant={device?.status === 'online' ? 'success' : 'destructive'}>
-              {device?.status}
-            </Badge>
-          </div>
-          <CardDescription>
-            Serial Number: {device?.serialNumber}
-          </CardDescription>
-          <CardDescription>
-            Last Seen: {device?.lastContact}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <p><strong>Manufacturer:</strong> {device?.manufacturer}</p>
-              <p><strong>Model:</strong> {device?.model}</p>
-              <p><strong>IP Address:</strong> {device?.ipAddress}</p>
-            </div>
-            <div>
-              <p><strong>Software Version:</strong> {device?.softwareVersion || 'N/A'}</p>
-              <p><strong>Hardware Version:</strong> {device?.hardwareVersion || 'N/A'}</p>
-              <p><strong>Connected Clients:</strong> {device?.connectedHosts?.filter(host => host.isActive).length || 0}</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-      
-      {device && <DeviceParameters device={device} />}
+
+      {!isDeviceOnline(device) && (
+        <Alert variant="destructive" className="mb-6">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Device Offline</AlertTitle>
+          <AlertDescription>
+            This device has not been seen since{" "}
+            {new Date(device.lastContact).toLocaleString()}. Some information may
+            be outdated.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        <DeviceInfo device={device} />
+        <DeviceStats device={device} />
+        <DeviceActions device={device} onRefresh={fetchDevice} />
+      </div>
+
+      <Tabs defaultValue="parameters" className="w-full">
+        <TabsList className="grid w-full md:w-[600px] grid-cols-2">
+          <TabsTrigger value="parameters">Parameters</TabsTrigger>
+          <TabsTrigger value="hosts">Connected Hosts</TabsTrigger>
+        </TabsList>
+        <TabsContent value="parameters" className="mt-6">
+          <DeviceParameters deviceId={device.id} />
+        </TabsContent>
+        <TabsContent value="hosts" className="mt-6">
+          <ConnectedHosts deviceId={device.id} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
-};
-
-export default DevicePage;
+}
