@@ -1,101 +1,89 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import DeviceInfo from '../../components/DeviceInfo';
-import DeviceActions from '../../components/DeviceActions';
-import DeviceParameters from '../../components/DeviceParameters';
-import ConnectedHosts from '../../components/ConnectedHosts';
-import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
-import { Separator } from '../../components/ui/separator';
-import { useToast } from '../../hooks/use-toast';
-import { useQuery } from '@tanstack/react-query';
+import { Card } from '@/components/ui/card';
+import { DeviceInfo } from '@/components/DeviceInfo';
+import { DeviceActions } from '@/components/DeviceActions';
+import { DeviceParameters } from '@/components/DeviceParameters';
+import { ConnectedHosts } from '@/components/ConnectedHosts';
 
-// Define Device interface with all required properties
 interface Device {
-  id: number;
+  id: string;
   serialNumber: string;
   manufacturer: string;
   model: string;
-  status: string;
+  status: 'online' | 'offline' | 'provisioning';
   lastContact: string;
   ipAddress: string;
-  softwareVersion: string;
-  hardwareVersion: string;
-  connectedClients: number;
-  uptime: string;
-  parameters?: Parameter[];
-  connectedHosts?: Host[];
+  softwareVersion?: string;
+  hardwareVersion?: string;
+  connectedClients?: number;
+  parameters?: Array<{
+    name: string;
+    value: string;
+    type: string;
+  }>;
+  connectedHosts?: Array<{
+    id?: string;
+    ipAddress: string;
+    hostname: string;
+    macAddress?: string;
+    lastSeen?: string;
+    isActive?: boolean;
+  }>;
 }
 
-interface Parameter {
-  name: string;
-  value: string;
-  type: string;
-}
-
-interface Host {
-  id?: number;
-  ipAddress: string;
-  hostname: string;
-  macAddress?: string;
-  isActive?: boolean;
-  lastSeen?: string;
-}
-
-const DevicePage = () => {
+const DeviceDetailsPage = () => {
   const { id } = useParams<{ id: string }>();
-  const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState('info');
+  const [device, setDevice] = useState<Device | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  // Fetch device data
-  const { data: device, isLoading, error } = useQuery({
-    queryKey: ['device', id],
-    queryFn: async () => {
-      const response = await fetch(`/backend/api/devices.php?id=${id}`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch device data');
-      }
-      return response.json() as Promise<Device>;
-    }
-  });
-
-  // Show error toast if fetch fails
   useEffect(() => {
-    if (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to load device data',
-        variant: 'destructive',
-      });
-    }
-  }, [error, toast]);
+    const fetchDeviceDetails = async () => {
+      try {
+        setLoading(true);
+        const response = await fetch(`/backend/api/devices.php?id=${id}`);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        setDevice(data);
+      } catch (error) {
+        console.error('Error fetching device details:', error);
+        setError('Failed to load device details. Please try again later.');
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  // Handle loading state
-  if (isLoading) {
+    if (id) {
+      fetchDeviceDetails();
+    }
+  }, [id, refreshTrigger]);
+
+  const handleRefresh = () => {
+    setRefreshTrigger(prev => prev + 1);
+  };
+
+  if (loading) {
     return (
       <div className="p-6">
         <div className="max-w-7xl mx-auto">
-          <div className="bg-white rounded-lg shadow p-6 animate-pulse">
-            <div className="h-6 bg-gray-200 rounded w-1/4 mb-4"></div>
-            <div className="h-4 bg-gray-200 rounded w-2/3 mb-2"></div>
-            <div className="h-4 bg-gray-200 rounded w-1/2"></div>
-          </div>
+          <p>Loading device details...</p>
         </div>
       </div>
     );
   }
 
-  // Ensure device data exists
-  if (!device) {
+  if (error || !device) {
     return (
       <div className="p-6">
         <div className="max-w-7xl mx-auto">
-          <div className="bg-white rounded-lg shadow p-6 text-center">
-            <h2 className="text-xl font-semibold">Device not found</h2>
-            <p className="mt-2 text-gray-600">The device you're looking for doesn't exist or has been removed.</p>
-            <a href="/" className="text-blue-600 hover:text-blue-800 mt-4 inline-block">← Back to Dashboard</a>
-          </div>
+          <p className="text-error-dark">{error || 'Device not found'}</p>
         </div>
       </div>
     );
@@ -104,65 +92,38 @@ const DevicePage = () => {
   return (
     <div className="p-6">
       <div className="max-w-7xl mx-auto space-y-8">
-        <div className="flex items-center justify-between">
-          <div>
-            <a href="/" className="text-blue-600 hover:text-blue-800">← Back to Dashboard</a>
-            <h1 className="text-3xl font-semibold tracking-tight mt-2">
-              Device Details
-            </h1>
-          </div>
-          <span className={`px-3 py-1 text-sm rounded-full ${device.status === 'online' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-            {device.status === 'online' ? 'Online' : 'Offline'}
-          </span>
+        <div className="flex justify-between items-center">
+          <h1 className="text-3xl font-semibold tracking-tight">
+            Device Details
+          </h1>
+          <DeviceActions device={device} onRefresh={handleRefresh} />
         </div>
-
-        <Tabs defaultValue={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="mb-4">
-            <TabsTrigger value="info">Device Info</TabsTrigger>
-            <TabsTrigger value="parameters">Parameters</TabsTrigger>
-            <TabsTrigger value="hosts">Connected Hosts</TabsTrigger>
-          </TabsList>
-          
-          <TabsContent value="info">
-            <Card>
-              <CardHeader>
-                <CardTitle>Device Information</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <DeviceInfo device={device} />
-              </CardContent>
-            </Card>
-            
-            <div className="mt-6">
-              <DeviceActions device={device} />
-            </div>
-          </TabsContent>
-          
-          <TabsContent value="parameters">
-            <Card>
-              <CardHeader>
-                <CardTitle>Device Parameters</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <DeviceParameters parameters={device.parameters || []} />
-              </CardContent>
-            </Card>
-          </TabsContent>
-          
-          <TabsContent value="hosts">
-            <Card>
-              <CardHeader>
-                <CardTitle>Connected Hosts</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ConnectedHosts hosts={device.connectedHosts || []} />
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+        
+        <DeviceInfo device={{
+          status: device.status,
+          manufacturer: device.manufacturer || 'N/A',
+          model: device.model || 'N/A',
+          serialNumber: device.serialNumber,
+          softwareVersion: device.softwareVersion || 'N/A',
+          hardwareVersion: device.hardwareVersion || 'N/A',
+          ipAddress: device.ipAddress || 'N/A',
+          lastContact: device.lastContact || 'N/A',
+          connectedClients: device.connectedClients || 0,
+          uptime: 'N/A'
+        }} />
+        
+        <DeviceParameters 
+          parameters={device.parameters || []} 
+          deviceId={device.id}
+        />
+        
+        <ConnectedHosts 
+          deviceId={device.id}
+          refreshTrigger={refreshTrigger}
+        />
       </div>
     </div>
   );
 };
 
-export default DevicePage;
+export default DeviceDetailsPage;

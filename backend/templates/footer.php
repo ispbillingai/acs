@@ -18,7 +18,7 @@
         data: {
             labels: ['Online', 'Offline'],
             datasets: [{
-                data: [<?php echo $onlineDevices; ?>, <?php echo $offlineDevices; ?>],
+                data: [<?php echo isset($onlineDevices) ? $onlineDevices : 0; ?>, <?php echo isset($offlineDevices) ? $offlineDevices : 0; ?>],
                 backgroundColor: ['#10B981', '#EF4444'],
                 borderWidth: 0
             }]
@@ -41,7 +41,7 @@
             labels: ['6h ago', '5h ago', '4h ago', '3h ago', '2h ago', '1h ago', 'Now'],
             datasets: [{
                 label: 'Active Devices',
-                data: [65, 59, 80, 81, 56, 55, <?php echo $onlineDevices; ?>],
+                data: [65, 59, 80, 81, 56, 55, <?php echo isset($onlineDevices) ? $onlineDevices : 0; ?>],
                 fill: true,
                 borderColor: '#6366F1',
                 backgroundColor: 'rgba(99, 102, 241, 0.1)',
