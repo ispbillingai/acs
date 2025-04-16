@@ -1,87 +1,178 @@
 
-import React from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { WifiIcon, SignalIcon, Laptop, Smartphone, Server } from "lucide-react";
-import { ConnectedClient } from "@/types";
+import { useState, useEffect } from "react";
+import { Card } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { LaptopIcon, SmartphoneIcon, ServerIcon, WifiIcon } from "lucide-react";
 
-interface ConnectedClientsTableProps {
-  clients: ConnectedClient[];
+interface Client {
+  id: string;
+  hostname: string;
+  ipAddress: string;
+  macAddress: string;
+  isActive: boolean;
+  lastSeen: string;
+  connectionType: "wifi" | "lan";
+  deviceType: "mobile" | "computer" | "unknown";
 }
 
-export const ConnectedClientsTable: React.FC<ConnectedClientsTableProps> = ({ clients }) => {
-  if (!clients || clients.length === 0) {
-    return null;
-  }
+interface ConnectedClientsTableProps {
+  deviceId: string;
+}
 
-  // Function to guess device type from hostname
-  const getDeviceIcon = (hostname: string) => {
-    const lowercaseHostname = (hostname || "").toLowerCase();
-    
-    if (lowercaseHostname.includes("galaxy") || 
-        lowercaseHostname.includes("iphone") || 
-        lowercaseHostname.includes("android") ||
-        lowercaseHostname.includes("mobile") ||
-        lowercaseHostname.includes("a04s")) {
-      return <Smartphone className="h-4 w-4 text-purple-500" />;
-    } else if (lowercaseHostname.includes("pc") || 
-              lowercaseHostname.includes("laptop") || 
-              lowercaseHostname.includes("desktop") ||
-              lowercaseHostname.includes("mac")) {
-      return <Laptop className="h-4 w-4 text-blue-500" />;
-    } else {
-      return <Server className="h-4 w-4 text-gray-500" />;
+export const ConnectedClientsTable = ({ deviceId }: ConnectedClientsTableProps) => {
+  const [clients, setClients] = useState<Client[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchClients = async () => {
+      setLoading(true);
+      
+      try {
+        // In a real application, this would be an API call
+        // For this demo, we'll use mock data
+        setTimeout(() => {
+          const mockClients: Client[] = [
+            {
+              id: "1",
+              hostname: "Galaxy-S20-Ultra",
+              ipAddress: "192.168.100.2",
+              macAddress: "AA:BB:CC:DD:EE:FF",
+              isActive: true,
+              lastSeen: new Date().toISOString(),
+              connectionType: "wifi",
+              deviceType: "mobile"
+            },
+            {
+              id: "2",
+              hostname: "Gomez",
+              ipAddress: "192.168.100.3",
+              macAddress: "AA:BB:CC:DD:EE:FF",
+              isActive: true,
+              lastSeen: new Date().toISOString(),
+              connectionType: "lan",
+              deviceType: "computer"
+            },
+            {
+              id: "3",
+              hostname: "faith-s-A04s",
+              ipAddress: "192.168.100.4",
+              macAddress: "AA:BB:CC:DD:EE:FF",
+              isActive: true,
+              lastSeen: new Date().toISOString(),
+              connectionType: "wifi",
+              deviceType: "mobile"
+            },
+            {
+              id: "4",
+              hostname: "Unknown Device",
+              ipAddress: "192.168.100.23",
+              macAddress: "AA:BB:CC:DD:EE:FF",
+              isActive: true,
+              lastSeen: new Date().toISOString(),
+              connectionType: "lan",
+              deviceType: "unknown"
+            }
+          ];
+          
+          setClients(mockClients);
+          setLoading(false);
+        }, 1000);
+      } catch (err) {
+        console.error("Error fetching clients:", err);
+        setLoading(false);
+      }
+    };
+
+    if (deviceId) {
+      fetchClients();
     }
+  }, [deviceId]);
+
+  const getDeviceIcon = (client: Client) => {
+    if (client.deviceType === "mobile") {
+      return <SmartphoneIcon className="h-4 w-4 text-blue-500" />;
+    }
+    if (client.deviceType === "computer") {
+      return <LaptopIcon className="h-4 w-4 text-green-500" />;
+    }
+    return <ServerIcon className="h-4 w-4 text-gray-500" />;
+  };
+
+  const getConnectionIcon = (client: Client) => {
+    if (client.connectionType === "wifi") {
+      return <WifiIcon className="h-4 w-4 text-purple-500 ml-1" />;
+    }
+    return null;
   };
 
   return (
-    <Card className="bg-gradient-to-br from-white to-purple-50 border border-purple-100 shadow-md">
-      <CardHeader className="bg-white bg-opacity-70 backdrop-blur-sm border-b border-purple-100">
-        <CardTitle className="flex items-center gap-2 text-purple-800">
-          <WifiIcon className="h-5 w-5 text-purple-500" />
-          Connected Clients
-        </CardTitle>
-        <CardDescription className="text-purple-700">
-          {clients.length} active device{clients.length !== 1 ? "s" : ""} connected to this router
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="p-4">
-        <div className="overflow-x-auto rounded-md border border-purple-100 bg-white">
-          <Table>
-            <TableHeader className="bg-purple-50">
+    <Card className="p-6">
+      <h2 className="text-xl font-semibold mb-4">Connected Clients</h2>
+      <div className="rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-[200px]">Device</TableHead>
+              <TableHead>IP Address</TableHead>
+              <TableHead>Connection</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="text-right">Last Seen</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading ? (
               <TableRow>
-                <TableHead className="text-purple-800">Device</TableHead>
-                <TableHead className="text-purple-800">Hostname</TableHead>
-                <TableHead className="text-purple-800">IP Address</TableHead>
-                <TableHead className="text-purple-800">MAC Address</TableHead>
-                <TableHead className="text-purple-800">Status</TableHead>
-                <TableHead className="text-purple-800">Last Seen</TableHead>
+                <TableCell colSpan={5} className="text-center py-8">
+                  <div className="flex justify-center">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
+                    <span className="ml-3">Loading clients...</span>
+                  </div>
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {clients.map((client) => (
-                <TableRow key={client.id} className="hover:bg-purple-50 transition-colors">
-                  <TableCell>{getDeviceIcon(client.hostname)}</TableCell>
-                  <TableCell className="font-medium">{client.hostname || "Unknown Device"}</TableCell>
+            ) : clients.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={5} className="text-center py-8">
+                  No connected clients found
+                </TableCell>
+              </TableRow>
+            ) : (
+              clients.map((client) => (
+                <TableRow key={client.id}>
+                  <TableCell className="font-medium flex items-center">
+                    {getDeviceIcon(client)}
+                    <span className="ml-2">{client.hostname}</span>
+                  </TableCell>
                   <TableCell>{client.ipAddress}</TableCell>
-                  <TableCell>{client.macAddress}</TableCell>
                   <TableCell>
-                    <div className="flex items-center gap-2">
-                      <SignalIcon 
-                        className={`h-4 w-4 ${client.isActive ? "text-success-dark" : "text-muted-foreground"}`} 
-                      />
-                      <span className={client.isActive ? "text-green-600" : "text-gray-500"}>
-                        {client.isActive ? "Active" : "Inactive"}
-                      </span>
+                    <div className="flex items-center">
+                      <Badge className={client.connectionType === "wifi" ? "bg-purple-500" : "bg-blue-500"}>
+                        {client.connectionType.toUpperCase()}
+                      </Badge>
+                      {getConnectionIcon(client)}
                     </div>
                   </TableCell>
-                  <TableCell>{new Date(client.lastSeen).toLocaleString()}</TableCell>
+                  <TableCell>
+                    <Badge variant={client.isActive ? "default" : "outline"} className={client.isActive ? "bg-green-500" : ""}>
+                      {client.isActive ? "Active" : "Inactive"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right text-sm text-gray-500">
+                    {new Date(client.lastSeen).toLocaleString()}
+                  </TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </CardContent>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
     </Card>
   );
 };

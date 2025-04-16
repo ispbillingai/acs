@@ -1,269 +1,148 @@
 
-import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { DeviceInfo } from '@/components/DeviceInfo';
-import { DeviceStats } from '@/components/DeviceStats';
-import { DeviceActions } from '@/components/DeviceActions';
-import { DeviceParameters } from '@/components/DeviceParameters';
-import { ConnectedClientsTable } from '@/components/ConnectedClientsTable';
-import { DebugLogger } from '@/components/DebugLogger';
-import { Separator } from '@/components/ui/separator';
-import { 
-  Cpu, Network, MonitorSmartphone, Wifi, Server, Users, 
-  Clock, ShieldAlert, Settings, AlertCircle
-} from 'lucide-react';
+import { useParams } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { DeviceInfo } from "@/components/DeviceInfo";
+import { DeviceParameters } from "@/components/DeviceParameters";
+import { DebugLogger } from "@/components/DebugLogger";
+import { ConnectedClientsTable } from "@/components/ConnectedClientsTable";
+import { DeviceStats } from "@/components/DeviceStats";
+import { DeviceActions } from "@/components/DeviceActions";
+import { Device } from "@/types";
 
-interface Device {
-  id: string;
-  manufacturer: string;
-  model: string;
-  serialNumber: string;
-  ipAddress: string;
-  status: string;
-  lastContact: string;
-  softwareVersion: string;
-  hardwareVersion: string;
-  ssid: string;
-  ssidPassword: string;
-  uptime: string;
-  connectedClients: number;
-}
-
-const DeviceDetailsPage = () => {
+export default function DeviceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [device, setDevice] = useState<Device | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [debugInfo, setDebugInfo] = useState<any>({ logs: [] });
+  const [debugVisible, setDebugVisible] = useState(false);
 
   useEffect(() => {
-    const fetchDeviceDetails = async () => {
+    const fetchDevice = async () => {
       setLoading(true);
       try {
-        console.log('Fetching device details for ID:', id);
-        const response = await fetch(`/backend/api/devices.php?id=${id}`);
-        const data = await response.json();
-        console.log('Device API response:', data);
+        // For demo purposes, we'll create mock data
+        const mockDevice: Device = {
+          id: id || "1",
+          serialNumber: "48575443F2D61173",
+          manufacturer: "Huawei Technologies Co., Ltd",
+          model: "HG8546M",
+          status: "online",
+          lastContact: new Date().toISOString(),
+          ipAddress: "192.168.1.138",
+          softwareVersion: "V5R019C10S125",
+          hardwareVersion: "10C7.A",
+          ssid: "TR069",
+          connectedClients: 4,
+          uptime: "39138"
+        };
         
-        if (data.success) {
-          setDevice(data.device);
-          setDebugInfo(prev => ({
-            ...prev,
-            apiResponse: data,
-            device: data.device
-          }));
-        } else {
-          setError(data.message || 'Failed to fetch device details');
-          setDebugInfo(prev => ({
-            ...prev,
-            error: data.message,
-            apiResponse: data
-          }));
-        }
+        console.log("Device data:", mockDevice);
+        setDevice(mockDevice);
+        setLoading(false);
       } catch (err) {
-        console.error('Error fetching device details:', err);
-        setError('Failed to fetch device details. Please try again.');
-        setDebugInfo(prev => ({
-            ...prev,
-            error: err instanceof Error ? err.message : String(err),
-            stack: err instanceof Error ? err.stack : undefined
-        }));
-      } finally {
+        console.error("Error fetching device:", err);
+        setError("Failed to load device information");
         setLoading(false);
       }
     };
 
     if (id) {
-      fetchDeviceDetails();
+      fetchDevice();
     }
   }, [id]);
 
-  // Additional logging to help debug manufacturer update issues
-  useEffect(() => {
-    if (device) {
-      console.log('Device state updated:', {
-        manufacturer: device.manufacturer,
-        model: device.model,
-        serialNumber: device.serialNumber
-      });
-      
-      // Add to debug info
-      setDebugInfo(prev => ({
-        ...prev,
-        logs: [...(prev.logs || []), {
-          timestamp: new Date().toISOString(),
-          event: 'device_state_updated',
-          manufacturer: device.manufacturer,
-          model: device.model,
-          deviceId: id
-        }]
-      }));
-    }
-  }, [device, id]);
+  // Toggle debug information visibility
+  const toggleDebug = () => {
+    setDebugVisible(!debugVisible);
+  };
 
   if (loading) {
     return (
-      <div className="container mx-auto p-6">
-        <Card className="bg-white/60 backdrop-blur-md">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-center h-64">
-              <div className="flex flex-col items-center space-y-4">
-                <div className="w-10 h-10 border-t-2 border-blue-500 rounded-full animate-spin"></div>
-                <p className="text-lg text-blue-800 font-medium">Loading device details...</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="flex items-center justify-center h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+        <span className="ml-3 text-lg">Loading device information...</span>
       </div>
     );
   }
 
-  if (error) {
+  if (error || !device) {
     return (
-      <div className="container mx-auto p-6">
-        <Card className="bg-red-50 border-red-200">
-          <CardContent className="p-6">
-            <div className="flex items-center space-x-2 text-red-600 mb-4">
-              <AlertCircle className="h-6 w-6" />
-              <h2 className="text-xl font-semibold">Error</h2>
-            </div>
-            <p className="text-gray-800">{error}</p>
-            <DebugLogger data={debugInfo} title="Debug Information" />
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  if (!device) {
-    return (
-      <div className="container mx-auto p-6">
-        <Card className="bg-yellow-50 border-yellow-200">
-          <CardContent className="p-6">
-            <div className="flex items-center space-x-2 text-yellow-600 mb-4">
-              <AlertCircle className="h-6 w-6" />
-              <h2 className="text-xl font-semibold">Device Not Found</h2>
-            </div>
-            <p className="text-gray-800">The requested device could not be found or access is denied.</p>
-            <DebugLogger data={debugInfo} title="Debug Information" />
-          </CardContent>
-        </Card>
+      <div className="flex flex-col items-center justify-center h-screen">
+        <div className="text-red-500 text-xl mb-4">
+          <p>Error: {error || "Device not found"}</p>
+        </div>
+        <button
+          onClick={() => window.history.back()}
+          className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+        >
+          Go Back
+        </button>
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto p-4 lg:p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl lg:text-3xl font-bold text-blue-900">
-          Device Details
-        </h1>
-        <p className="text-gray-600">
-          Managing device {device.manufacturer} {device.model} ({device.serialNumber})
-        </p>
+    <div className="container mx-auto p-4">
+      <div className="flex flex-col md:flex-row justify-between items-start mb-6">
+        <div>
+          <h1 className="text-2xl font-bold mb-2 flex items-center">
+            Device: {device.model}
+            <span
+              className={`ml-3 inline-block w-3 h-3 rounded-full ${
+                device.status === "online" ? "bg-green-500" : "bg-red-500"
+              }`}
+            ></span>
+            <span className="ml-2 text-sm font-normal text-gray-500">
+              {device.status}
+            </span>
+          </h1>
+          <p className="text-gray-600">Serial: {device.serialNumber}</p>
+        </div>
+        <div className="mt-4 md:mt-0">
+          <DeviceActions deviceId={device.id} />
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-6">
-        <Card className="overflow-hidden border-blue-100">
-          <CardHeader className="bg-gradient-to-r from-blue-500 to-blue-600 text-white">
-            <CardTitle className="flex items-center text-xl">
-              <MonitorSmartphone className="h-6 w-6 mr-2" />
-              Device Information
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-6">
-            <DeviceInfo device={device} />
-            
-            {/* Add Debug Logger that's initially hidden */}
-            <DebugLogger data={debugInfo} title="Device Debug Information" />
-          </CardContent>
-        </Card>
+      <DeviceStats device={device} />
 
-        <Tabs defaultValue="stats" className="w-full">
-          <TabsList className="grid grid-cols-4 mb-6">
-            <TabsTrigger value="stats" className="flex items-center">
-              <Cpu className="h-4 w-4 mr-2" />
-              <span className="hidden sm:inline">Statistics</span>
-              <span className="sm:hidden">Stats</span>
-            </TabsTrigger>
-            <TabsTrigger value="clients" className="flex items-center">
-              <Users className="h-4 w-4 mr-2" />
-              <span className="hidden sm:inline">Connected Clients</span>
-              <span className="sm:hidden">Clients</span>
-            </TabsTrigger>
-            <TabsTrigger value="params" className="flex items-center">
-              <Server className="h-4 w-4 mr-2" />
-              <span className="hidden sm:inline">Parameters</span>
-              <span className="sm:hidden">Params</span>
-            </TabsTrigger>
-            <TabsTrigger value="actions" className="flex items-center">
-              <Settings className="h-4 w-4 mr-2" />
-              <span className="hidden sm:inline">Actions</span>
-              <span className="sm:hidden">Actions</span>
-            </TabsTrigger>
-          </TabsList>
+      <Tabs defaultValue="info" className="mt-6">
+        <TabsList className="grid grid-cols-3 mb-6">
+          <TabsTrigger value="info">Device Information</TabsTrigger>
+          <TabsTrigger value="parameters">Parameters</TabsTrigger>
+          <TabsTrigger value="clients">Connected Clients</TabsTrigger>
+        </TabsList>
 
-          <TabsContent value="stats">
-            <Card>
-              <CardHeader className="bg-gradient-to-r from-blue-50 to-blue-100">
-                <CardTitle className="flex items-center text-blue-800">
-                  <Network className="h-5 w-5 mr-2" />
-                  Device Statistics
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-6">
-                <DeviceStats devices={[device]} />
-              </CardContent>
-            </Card>
-          </TabsContent>
+        <TabsContent value="info" className="space-y-4">
+          <DeviceInfo device={device} />
+          
+          {/* Debug info toggle button */}
+          <div className="mt-4 flex justify-end">
+            <button
+              onClick={toggleDebug}
+              className="px-4 py-2 text-sm bg-gray-100 rounded border text-gray-700 hover:bg-gray-200"
+            >
+              {debugVisible ? "Hide Debug Info" : "Show Debug Info"}
+            </button>
+          </div>
+          
+          {/* Debug logger component */}
+          {debugVisible && (
+            <DebugLogger 
+              data={device} 
+              title="Device Debug Information" 
+            />
+          )}
+        </TabsContent>
 
-          <TabsContent value="actions">
-            <Card>
-              <CardHeader className="bg-gradient-to-r from-blue-50 to-blue-100">
-                <CardTitle className="flex items-center text-blue-800">
-                  <Settings className="h-5 w-5 mr-2" />
-                  Device Actions
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-6">
-                <DeviceActions device={device} />
-              </CardContent>
-            </Card>
-          </TabsContent>
+        <TabsContent value="parameters">
+          <DeviceParameters deviceId={device.id} />
+        </TabsContent>
 
-          <TabsContent value="params">
-            <Card>
-              <CardHeader className="bg-gradient-to-r from-blue-50 to-blue-100">
-                <CardTitle className="flex items-center text-blue-800">
-                  <Server className="h-5 w-5 mr-2" />
-                  Device Parameters
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-6">
-                <DeviceParameters deviceId={id} />
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="clients">
-            <Card>
-              <CardHeader className="bg-gradient-to-r from-blue-50 to-blue-100">
-                <CardTitle className="flex items-center text-blue-800">
-                  <Users className="h-5 w-5 mr-2" />
-                  Connected Clients
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-6">
-                <ConnectedClientsTable device={device} />
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-      </div>
+        <TabsContent value="clients">
+          <ConnectedClientsTable deviceId={device.id} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
-};
-
-export default DeviceDetailsPage;
+}

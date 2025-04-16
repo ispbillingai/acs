@@ -1,14 +1,18 @@
 
 import { Card } from "@/components/ui/card";
-import { CircleIcon, WifiIcon, ClockIcon, HardDriveIcon, ServerIcon, CpuIcon, RouterIcon, AlertTriangleIcon } from "lucide-react";
+import { CircleIcon, WifiIcon, ClockIcon, HardDriveIcon, ServerIcon, CpuIcon, RouterIcon } from "lucide-react";
 import { Device } from "@/types";
+import { DebugLogger } from "@/components/DebugLogger";
+import { useState } from "react";
 
 interface DeviceInfoProps {
   device: Device;
 }
 
 export const DeviceInfo = ({ device }: DeviceInfoProps) => {
-  // Add console logging to debug device info
+  const [showDebug, setShowDebug] = useState(false);
+  
+  // Log device info for debugging
   console.log("DeviceInfo received device data:", device);
   
   const getStatusColor = (status: string) => {
@@ -22,13 +26,10 @@ export const DeviceInfo = ({ device }: DeviceInfoProps) => {
     }
   };
 
-  // Default to Huawei if manufacturer is missing or "Unknown"
-  const manufacturer = (!device.manufacturer || device.manufacturer === "Unknown") ? "Huawei" : device.manufacturer;
-
   const infoItems = [
     { 
       label: "Manufacturer", 
-      value: manufacturer,
+      value: device.manufacturer,
       icon: <ServerIcon className="h-4 w-4 text-blue-500" />
     },
     { 
@@ -68,7 +69,7 @@ export const DeviceInfo = ({ device }: DeviceInfoProps) => {
     },
     { 
       label: "Connected Clients", 
-      value: device.connectedClients || "0",
+      value: device.connectedClients?.toString() || "0",
       icon: <RouterIcon className="h-4 w-4 text-blue-500" />
     },
     { 
@@ -80,11 +81,19 @@ export const DeviceInfo = ({ device }: DeviceInfoProps) => {
 
   return (
     <Card className="p-6 bg-gradient-to-br from-white to-blue-50 border border-blue-100 shadow-md">
-      <div className="flex items-center gap-2 mb-6">
-        <CircleIcon className={`h-3 w-3 ${getStatusColor(device.status)}`} />
-        <span className={`font-medium capitalize ${getStatusColor(device.status)}`}>
-          {device.status}
-        </span>
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-2">
+          <CircleIcon className={`h-3 w-3 ${getStatusColor(device.status)}`} />
+          <span className={`font-medium capitalize ${getStatusColor(device.status)}`}>
+            {device.status}
+          </span>
+        </div>
+        <button 
+          onClick={() => setShowDebug(!showDebug)}
+          className="text-xs bg-blue-50 hover:bg-blue-100 text-blue-800 px-2 py-1 rounded border border-blue-200"
+        >
+          {showDebug ? "Hide Raw Data" : "Show Raw Data"}
+        </button>
       </div>
 
       {device && (
@@ -103,17 +112,10 @@ export const DeviceInfo = ({ device }: DeviceInfoProps) => {
         </div>
       )}
 
-      {/* Error logs section */}
-      <div className="mt-6 bg-red-50 p-4 rounded-lg border border-red-100">
-        <div className="flex items-center text-red-700 mb-2">
-          <AlertTriangleIcon className="h-5 w-5 mr-2" />
-          <h3 className="font-semibold">Debug Information</h3>
-        </div>
-        <div className="bg-white p-3 rounded border border-red-100 text-sm font-mono text-gray-700 max-h-60 overflow-auto">
-          <p>Device data received: {JSON.stringify(device, null, 2)}</p>
-          <p className="mt-2 text-red-600">Note: If manufacturer is "Unknown" or missing, check if backend is properly updating device.manufacturer.</p>
-        </div>
-      </div>
+      {/* Show debug info when requested */}
+      {showDebug && (
+        <DebugLogger data={device} title="Device Raw Data" />
+      )}
     </Card>
   );
 };
