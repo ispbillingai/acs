@@ -62,8 +62,8 @@ try {
         ];
         
         foreach ($paramTypes as $paramName => $paramValue) {
-            $stmt = $db->prepare("INSERT INTO parameters (device_id, param_name, param_value, param_type, is_writable) 
-                                VALUES (:deviceId, :paramName, :paramValue, 'string', 0)
+            $stmt = $db->prepare("INSERT INTO parameters (device_id, param_name, param_value, param_type) 
+                                VALUES (:deviceId, :paramName, :paramValue, 'string')
                                 ON DUPLICATE KEY UPDATE param_value = :paramValue");
             $stmt->execute([
                 ':deviceId' => $deviceId,
