@@ -80,12 +80,12 @@ if (!$isHuawei && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Array of simplified parameter requests that have been shown to work well
+// Array of simplified parameter requests focused on SSIDs
 $simplifiedParameterRequests = [
     // Basic SSID for most routers
     ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID'],
     
-    // Try to get password for 2.4GHz network
+    // Try to get password for 2.4GHz network - only 3 attempts max
     ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase'],
     ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase'],
     ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_WPAKey'],
@@ -93,7 +93,7 @@ $simplifiedParameterRequests = [
     // Try to get SSID for 5GHz network
     ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID'],
     
-    // Try to get password for 5GHz network
+    // Try to get password for 5GHz network - only 3 attempts max
     ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.KeyPassphrase'],
     ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase'],
     ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.X_HW_WPAKey'],
@@ -102,6 +102,15 @@ $simplifiedParameterRequests = [
     ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.SSID'],
     ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.KeyPassphrase']
 ];
+
+// Track attempts to avoid endless loops
+$passwordAttempts = [
+    'wlan1' => 0,
+    'wlan5' => 0,
+    'wlan2' => 0
+];
+
+$maxPasswordAttempts = 3; // Maximum attempts per WLAN interface
 
 // Function to generate a parameter request XML
 function generateParameterRequestXML($soapId, $parameters) {
@@ -126,6 +135,16 @@ function generateParameterRequestXML($soapId, $parameters) {
 </SOAP-ENV:Envelope>';
 
     return $response;
+}
+
+// Check if we should attempt to get passwords
+$shouldTryPasswords = true;
+if (file_exists(__DIR__ . '/router_config.txt')) {
+    $config = parse_ini_file(__DIR__ . '/router_config.txt');
+    if (isset($config['try_passwords']) && $config['try_passwords'] === '0') {
+        $shouldTryPasswords = false;
+        logWithTimestamp("Password retrieval disabled in config", "INFO");
+    }
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -189,6 +208,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             preg_match_all('/<Name>(.*?(SSID|KeyPassphrase|WPAKey|PreSharedKey).*?)<\/Name>\s*<Value[^>]*>(.*?)<\/Value>/si', $raw_post, $matches, PREG_SET_ORDER);
             
             $foundCredentials = false;
+            $foundPassword = false;
+            $wlanInterface = null;
             
             if (!empty($matches)) {
                 foreach ($matches as $match) {
@@ -201,6 +222,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     
                     $foundCredentials = true;
+                    
+                    // Determine which WLAN interface this belongs to
+                    if (preg_match('/WLANConfiguration\.(\d+)/', $paramName, $wlanMatches)) {
+                        $wlanId = $wlanMatches[1];
+                        $wlanInterface = 'wlan' . $wlanId;
+                    }
+                    
+                    // Check if this is a password parameter
+                    if (stripos($paramName, 'KeyPassphrase') !== false || 
+                        stripos($paramName, 'WPAKey') !== false ||
+                        stripos($paramName, 'PreSharedKey') !== false) {
+                        $foundPassword = true;
+                    }
                     
                     // Log the found credential with emphasis
                     logWifiCredential($paramName, $paramValue);
@@ -239,7 +273,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['request_index'] = $requestIndex;
             }
             
-            $requestIndex++;
+            // Increment password attempt counter if this was a password request
+            if ($wlanInterface && isset($passwordAttempts[$wlanInterface])) {
+                if (stripos($simplifiedParameterRequests[$requestIndex][0], 'KeyPassphrase') !== false ||
+                    stripos($simplifiedParameterRequests[$requestIndex][0], 'WPAKey') !== false ||
+                    stripos($simplifiedParameterRequests[$requestIndex][0], 'PreSharedKey') !== false) {
+                    $passwordAttempts[$wlanInterface]++;
+                    logWithTimestamp("Password attempt #{$passwordAttempts[$wlanInterface]} for {$wlanInterface}", "INFO");
+                }
+            }
+            
+            // Skip password parameters if we should not try them or reached max attempts
+            $nextRequestIndex = $requestIndex + 1;
+            if (!$shouldTryPasswords) {
+                // Skip all password parameter requests
+                while ($nextRequestIndex < count($simplifiedParameterRequests) && 
+                      (stripos($simplifiedParameterRequests[$nextRequestIndex][0], 'KeyPassphrase') !== false ||
+                       stripos($simplifiedParameterRequests[$nextRequestIndex][0], 'WPAKey') !== false ||
+                       stripos($simplifiedParameterRequests[$nextRequestIndex][0], 'PreSharedKey') !== false)) {
+                    $nextRequestIndex++;
+                }
+            } else {
+                // Check if we've hit max password attempts for this interface
+                if ($wlanInterface && isset($passwordAttempts[$wlanInterface]) && 
+                    $passwordAttempts[$wlanInterface] >= $maxPasswordAttempts) {
+                    logWithTimestamp("Reached max password attempts for {$wlanInterface}, skipping remaining password requests", "INFO");
+                    
+                    // Skip to next SSID parameter
+                    while ($nextRequestIndex < count($simplifiedParameterRequests) && 
+                          (stripos($simplifiedParameterRequests[$nextRequestIndex][0], $wlanInterface) !== false) &&
+                          (stripos($simplifiedParameterRequests[$nextRequestIndex][0], 'KeyPassphrase') !== false ||
+                           stripos($simplifiedParameterRequests[$nextRequestIndex][0], 'WPAKey') !== false ||
+                           stripos($simplifiedParameterRequests[$nextRequestIndex][0], 'PreSharedKey') !== false)) {
+                        $nextRequestIndex++;
+                    }
+                }
+            }
+            
+            $requestIndex = $nextRequestIndex;
             $_SESSION['request_index'] = $requestIndex;
             
             if ($requestIndex < count($simplifiedParameterRequests)) {
@@ -283,6 +354,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Extract SOAP ID
                 preg_match('/<cwmp:ID SOAP-ENV:mustUnderstand="1">(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
                 $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
+                
+                // Handle Internal error (9002) specifically
+                if ($faultCode == '9002') {
+                    logWithTimestamp("Internal error detected - switching to simplified request", "INFO");
+                    
+                    // Try a very simple request for just the SSID
+                    $simpleParam = ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID'];
+                    $simpleRequest = generateParameterRequestXML($soapId, $simpleParam);
+                    
+                    header('Content-Type: text/xml');
+                    echo $simpleRequest;
+                    logWithTimestamp("Sent simplified SSID request after error", "INFO");
+                    exit;
+                }
                 
                 // Try the next parameter set
                 static $faultRequestIndex = 0;

@@ -11,8 +11,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { InfoIcon, WifiIcon, KeyIcon, SignalIcon, ExternalLinkIcon } from "lucide-react";
+import { InfoIcon, WifiIcon, KeyIcon, SignalIcon, LockIcon, ShieldIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/hooks/use-toast";
 
 interface DeviceParametersProps {
   deviceId: string;
@@ -32,6 +33,7 @@ interface RouterSSIDsResponse {
   ssids: Array<{parameter: string, value: string, network_type?: string}>;
   passwords: Array<{parameter: string, value: string, network_type?: string}>;
   raw_parameters: Array<{name: string, value: string}>;
+  password_protected: boolean;
 }
 
 export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
@@ -40,6 +42,7 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
   const [loading, setLoading] = useState(true);
   const [tr069Data, setTr069Data] = useState<RouterSSIDsResponse | null>(null);
   const [showPasswords, setShowPasswords] = useState(false);
+  const { toast } = useToast();
 
   useEffect(() => {
     // This function fetches both mock data and checks for router SSIDs
@@ -88,6 +91,13 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
                   network_type: ssid.network_type
                 });
               });
+              
+              // Notify user about retrieved SSIDs
+              toast({
+                title: "WiFi Information Retrieved",
+                description: `Successfully retrieved ${data.ssids.length} SSID(s) from the router.`,
+                duration: 5000,
+              });
             }
             
             // Add passwords from the response
@@ -120,9 +130,25 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
                 }
               });
             }
+            
+            // Show warning if passwords are protected
+            if (data.password_protected) {
+              toast({
+                title: "Password Protection Active",
+                description: "Your router is configured to hide WiFi passwords from TR-069 requests. This is a security feature.",
+                variant: "warning",
+                duration: 8000,
+              });
+            }
           }
         } catch (error) {
           console.error("Error fetching router SSIDs:", error);
+          toast({
+            title: "Connection Error",
+            description: "Could not retrieve WiFi information from the router.",
+            variant: "destructive",
+            duration: 5000,
+          });
         }
         
         setParameters(mockData);
@@ -132,7 +158,7 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
     };
 
     fetchParameters();
-  }, [deviceId]);
+  }, [deviceId, toast]);
 
   const filteredParameters = parameters.filter((param) =>
     param.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -142,6 +168,7 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
   // Check if we have any SSID parameters
   const hasSSIDs = parameters.some(param => param.category === 'ssid');
   const hasPasswords = parameters.some(param => param.category === 'password');
+  const passwordsProtected = tr069Data?.password_protected || false;
 
   const getCategoryIcon = (param: Parameter) => {
     if (param.category === 'ssid') return <WifiIcon className="h-4 w-4 text-blue-500" />;
@@ -213,7 +240,13 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
           <InfoIcon className="h-4 w-4 text-green-500" />
           <AlertTitle className="text-green-700">WiFi Information Retrieved!</AlertTitle>
           <AlertDescription className="text-green-600">
-            Successfully retrieved {tr069Data?.ssids.length || 0} SSID(s) and {tr069Data?.passwords.length || 0} password(s) from the router.
+            Successfully retrieved {tr069Data?.ssids.length || 0} SSID(s) from the router.
+            {passwordsProtected && (
+              <span className="block mt-1 flex items-center">
+                <ShieldIcon className="h-4 w-4 mr-1 text-amber-500" />
+                Your router is configured to protect WiFi passwords from remote access.
+              </span>
+            )}
             {hasPasswords && (
               <span className="block mt-1">
                 {showPasswords ? 
@@ -281,6 +314,17 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
           <AlertDescription className="text-blue-600">
             No WiFi SSIDs or passwords have been retrieved from a router yet. 
             Connect a TR-069 enabled router to discover WiFi credentials.
+          </AlertDescription>
+        </Alert>
+      )}
+      
+      {!loading && hasSSIDs && passwordsProtected && !hasPasswords && (
+        <Alert className="mt-6 bg-amber-50 border-amber-200">
+          <LockIcon className="h-4 w-4 text-amber-500" />
+          <AlertTitle className="text-amber-700">Password Protection Active</AlertTitle>
+          <AlertDescription className="text-amber-600">
+            Your router is configured to protect WiFi passwords from TR-069 requests.
+            This is a security feature that prevents remote access to your WiFi passwords.
           </AlertDescription>
         </Alert>
       )}

@@ -10,12 +10,17 @@ $result = [
     'timestamp' => date('Y-m-d H:i:s'),
     'ssids' => [],
     'passwords' => [],
-    'raw_parameters' => []
+    'raw_parameters' => [],
+    'password_protected' => false  // Flag to indicate if passwords are protected/unavailable
 ];
 
 if (file_exists($ssidsFile)) {
     // Read the SSIDs file
     $lines = file($ssidsFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    
+    // Variables to track whether we found SSIDs but no passwords
+    $foundSsids = false;
+    $foundPasswords = false;
     
     foreach ($lines as $line) {
         // Skip comments
@@ -35,6 +40,7 @@ if (file_exists($ssidsFile)) {
             
             // Categorize by type with improved detection
             if (stripos($name, 'SSID') !== false) {
+                $foundSsids = true;
                 $result['ssids'][] = [
                     'parameter' => trim($name),
                     'value' => trim($value),
@@ -45,6 +51,7 @@ if (file_exists($ssidsFile)) {
             else if (stripos($name, 'KeyPassphrase') !== false || 
                     stripos($name, 'WPAKey') !== false || 
                     stripos($name, 'PreSharedKey') !== false) {
+                $foundPasswords = true;
                 $result['passwords'][] = [
                     'parameter' => trim($name),
                     'value' => trim($value),
@@ -53,6 +60,11 @@ if (file_exists($ssidsFile)) {
                 ];
             }
         }
+    }
+    
+    // If we have SSIDs but no passwords, set the password_protected flag
+    if ($foundSsids && !$foundPasswords) {
+        $result['password_protected'] = true;
     }
     
     echo json_encode($result, JSON_PRETTY_PRINT);
