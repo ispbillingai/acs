@@ -11,6 +11,7 @@ export interface Device {
   lastContact: string;
   connectedClients: number;
   uptime?: string;
+  ssid?: string;
 }
 
 export interface DeviceParameter {

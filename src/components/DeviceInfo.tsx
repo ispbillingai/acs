@@ -1,6 +1,6 @@
 
 import { Card } from "@/components/ui/card";
-import { CircleIcon } from "lucide-react";
+import { CircleIcon, WifiIcon } from "lucide-react";
 
 interface DeviceInfoProps {
   device: {
@@ -8,12 +8,13 @@ interface DeviceInfoProps {
     manufacturer: string;
     model: string;
     serialNumber: string;
-    softwareVersion: string;
-    hardwareVersion: string;
+    softwareVersion?: string;
+    hardwareVersion?: string;
     ipAddress: string;
     lastContact: string;
     connectedClients: number;
-    uptime: string;
+    uptime?: string;
+    ssid?: string;
   };
 }
 
@@ -36,6 +37,11 @@ export const DeviceInfo = ({ device }: DeviceInfoProps) => {
     { label: "Software Version", value: device.softwareVersion },
     { label: "Hardware Version", value: device.hardwareVersion },
     { label: "IP Address", value: device.ipAddress },
+    { 
+      label: "SSID", 
+      value: device.ssid,
+      icon: device.ssid ? <WifiIcon className="h-4 w-4 text-blue-500" /> : null 
+    },
     { label: "Last Contact", value: device.lastContact },
     { label: "Connected Clients", value: device.connectedClients },
     { label: "Uptime", value: device.uptime },
@@ -52,7 +58,10 @@ export const DeviceInfo = ({ device }: DeviceInfoProps) => {
         {infoItems.map((item) => (
           <div key={item.label} className="space-y-1">
             <p className="text-sm text-muted-foreground">{item.label}</p>
-            <p className="font-medium">{item.value}</p>
+            <div className="font-medium flex items-center gap-1">
+              {item.icon}
+              {item.value || "N/A"}
+            </div>
           </div>
         ))}
       </div>

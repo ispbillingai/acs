@@ -65,6 +65,24 @@ try {
         }
     }
 
+    // Get SSID from parameters table
+    function getSSID($db, $deviceId) {
+        try {
+            $sql = "SELECT param_value FROM parameters WHERE device_id = :deviceId AND param_name LIKE '%SSID%' LIMIT 1";
+            $stmt = $db->prepare($sql);
+            $stmt->execute([':deviceId' => $deviceId]);
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if ($result) {
+                return $result['param_value'];
+            }
+            return null;
+        } catch (PDOException $e) {
+            error_log("Database error in getSSID: " . $e->getMessage());
+            return null;
+        }
+    }
+
     $device = getDevice($db, $deviceId);
     error_log("Device retrieval result: " . ($device ? "success" : "failed"));
 
@@ -72,6 +90,22 @@ try {
         error_log("Device not found, redirecting to index");
         header('Location: index.php');
         exit;
+    }
+
+    // Check if SSID is empty in device table but exists in parameters
+    if (empty($device['ssid'])) {
+        $ssid = getSSID($db, $deviceId);
+        if ($ssid) {
+            $device['ssid'] = $ssid;
+            // Update the device table with the SSID
+            $updateSql = "UPDATE devices SET ssid = :ssid WHERE id = :id";
+            $updateStmt = $db->prepare($updateSql);
+            $updateStmt->execute([
+                ':ssid' => $ssid,
+                ':id' => $deviceId
+            ]);
+            error_log("Updated device SSID to: " . $ssid);
+        }
     }
 
     // Check if device is online (last contact within 10 minutes)
