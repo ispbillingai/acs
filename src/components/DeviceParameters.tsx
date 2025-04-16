@@ -11,7 +11,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { InfoIcon, WifiIcon, KeyIcon, SignalIcon, LockIcon, ShieldIcon } from "lucide-react";
+import { InfoIcon, WifiIcon, KeyIcon, SignalIcon, LockIcon, ShieldIcon, UserIcon, GlobeIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 
@@ -34,6 +34,9 @@ interface RouterSSIDsResponse {
   passwords: Array<{parameter: string, value: string, network_type?: string}>;
   raw_parameters: Array<{name: string, value: string}>;
   password_protected: boolean;
+  lan_users?: Array<{mac: string, ip: string, hostname?: string}>;
+  wifi_users?: Array<{mac: string, signal?: string, connected_to?: string}>;
+  wan_settings?: Array<{name: string, value: string}>;
 }
 
 export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
@@ -114,6 +117,96 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
               });
             }
             
+            // Add WAN settings if available
+            if (data.wan_settings && data.wan_settings.length > 0) {
+              data.wan_settings.forEach(setting => {
+                mockData.push({
+                  name: setting.name,
+                  value: setting.value,
+                  type: "string",
+                  writable: false,
+                  category: "wan"
+                });
+              });
+              
+              toast({
+                title: "WAN Settings Retrieved",
+                description: `Retrieved ${data.wan_settings.length} WAN configuration parameters.`,
+                duration: 5000,
+              });
+            }
+            
+            // Add LAN/WiFi users if available
+            if (data.lan_users && data.lan_users.length > 0) {
+              data.lan_users.forEach((user, index) => {
+                mockData.push({
+                  name: `LAN.ConnectedDevice.${index+1}.MACAddress`,
+                  value: user.mac,
+                  type: "string",
+                  writable: false,
+                  category: "lan_user"
+                });
+                mockData.push({
+                  name: `LAN.ConnectedDevice.${index+1}.IPAddress`,
+                  value: user.ip,
+                  type: "string",
+                  writable: false,
+                  category: "lan_user"
+                });
+                if (user.hostname) {
+                  mockData.push({
+                    name: `LAN.ConnectedDevice.${index+1}.HostName`,
+                    value: user.hostname,
+                    type: "string",
+                    writable: false,
+                    category: "lan_user"
+                  });
+                }
+              });
+              
+              toast({
+                title: "LAN Users Retrieved",
+                description: `Found ${data.lan_users.length} devices connected via LAN.`,
+                duration: 5000,
+              });
+            }
+            
+            if (data.wifi_users && data.wifi_users.length > 0) {
+              data.wifi_users.forEach((user, index) => {
+                mockData.push({
+                  name: `WiFi.ConnectedDevice.${index+1}.MACAddress`,
+                  value: user.mac,
+                  type: "string",
+                  writable: false,
+                  category: "wifi_user"
+                });
+                if (user.signal) {
+                  mockData.push({
+                    name: `WiFi.ConnectedDevice.${index+1}.SignalStrength`,
+                    value: user.signal,
+                    type: "string",
+                    writable: false,
+                    category: "wifi_user"
+                  });
+                }
+                if (user.connected_to) {
+                  mockData.push({
+                    name: `WiFi.ConnectedDevice.${index+1}.ConnectedTo`,
+                    value: user.connected_to,
+                    type: "string",
+                    writable: false,
+                    category: "wifi_user"
+                  });
+                }
+              });
+              
+              toast({
+                title: "WiFi Users Retrieved",
+                description: `Found ${data.wifi_users.length} devices connected via WiFi.`,
+                duration: 5000,
+              });
+            }
+            
             // Add any other parameters
             if (data.raw_parameters && data.raw_parameters.length > 0) {
               data.raw_parameters.forEach(param => {
@@ -136,7 +229,7 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
               toast({
                 title: "Password Protection Active",
                 description: "Your router is configured to hide WiFi passwords from TR-069 requests. This is a security feature.",
-                variant: "warning",
+                variant: "destructive",
                 duration: 8000,
               });
             }
@@ -168,11 +261,17 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
   // Check if we have any SSID parameters
   const hasSSIDs = parameters.some(param => param.category === 'ssid');
   const hasPasswords = parameters.some(param => param.category === 'password');
+  const hasLanUsers = parameters.some(param => param.category === 'lan_user');
+  const hasWifiUsers = parameters.some(param => param.category === 'wifi_user');
+  const hasWanSettings = parameters.some(param => param.category === 'wan');
   const passwordsProtected = tr069Data?.password_protected || false;
 
   const getCategoryIcon = (param: Parameter) => {
     if (param.category === 'ssid') return <WifiIcon className="h-4 w-4 text-blue-500" />;
     if (param.category === 'password') return <KeyIcon className="h-4 w-4 text-amber-500" />;
+    if (param.category === 'lan_user') return <UserIcon className="h-4 w-4 text-green-500" />;
+    if (param.category === 'wifi_user') return <SignalIcon className="h-4 w-4 text-purple-500" />;
+    if (param.category === 'wan') return <GlobeIcon className="h-4 w-4 text-indigo-500" />;
     return null;
   };
 
@@ -200,6 +299,15 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
           )}
         </div>
       );
+    }
+    if (param.category === 'lan_user') {
+      return <Badge className="bg-green-500">LAN User</Badge>;
+    }
+    if (param.category === 'wifi_user') {
+      return <Badge className="bg-purple-500">WiFi User</Badge>;
+    }
+    if (param.category === 'wan') {
+      return <Badge className="bg-indigo-500">WAN Setting</Badge>;
     }
     return null;
   };
@@ -241,17 +349,19 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
           <AlertTitle className="text-green-700">WiFi Information Retrieved!</AlertTitle>
           <AlertDescription className="text-green-600">
             Successfully retrieved {tr069Data?.ssids.length || 0} SSID(s) from the router.
+            {hasLanUsers && (
+              <span className="block mt-1">Found {tr069Data?.lan_users?.length || 0} devices connected via LAN.</span>
+            )}
+            {hasWifiUsers && (
+              <span className="block mt-1">Found {tr069Data?.wifi_users?.length || 0} devices connected via WiFi.</span>
+            )}
+            {hasWanSettings && (
+              <span className="block mt-1">Retrieved WAN configuration settings.</span>
+            )}
             {passwordsProtected && (
               <span className="block mt-1 flex items-center">
                 <ShieldIcon className="h-4 w-4 mr-1 text-amber-500" />
                 Your router is configured to protect WiFi passwords from remote access.
-              </span>
-            )}
-            {hasPasswords && (
-              <span className="block mt-1">
-                {showPasswords ? 
-                  "Passwords are currently visible. Click 'Hide Passwords' for security." : 
-                  "For security, passwords are hidden. Click 'Show Passwords' to view them."}
               </span>
             )}
           </AlertDescription>
@@ -285,11 +395,19 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
               filteredParameters.map((param) => (
                 <TableRow 
                   key={param.name} 
-                  className={param.category === 'ssid' 
-                    ? "bg-blue-50" 
-                    : param.category === 'password' 
-                      ? "bg-amber-50" 
-                      : ""}
+                  className={
+                    param.category === 'ssid' 
+                      ? "bg-blue-50" 
+                      : param.category === 'password' 
+                        ? "bg-amber-50" 
+                        : param.category === 'lan_user'
+                          ? "bg-green-50"
+                          : param.category === 'wifi_user'
+                            ? "bg-purple-50"
+                            : param.category === 'wan'
+                              ? "bg-indigo-50"
+                              : ""
+                  }
                 >
                   <TableCell className="font-mono text-sm flex items-center">
                     {getCategoryIcon(param)}
@@ -310,21 +428,10 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
       {!loading && !hasSSIDs && (
         <Alert className="mt-6 bg-blue-50 border-blue-200">
           <InfoIcon className="h-4 w-4 text-blue-500" />
-          <AlertTitle className="text-blue-700">No WiFi Information Yet</AlertTitle>
+          <AlertTitle className="text-blue-700">No Router Information Yet</AlertTitle>
           <AlertDescription className="text-blue-600">
-            No WiFi SSIDs or passwords have been retrieved from a router yet. 
-            Connect a TR-069 enabled router to discover WiFi credentials.
-          </AlertDescription>
-        </Alert>
-      )}
-      
-      {!loading && hasSSIDs && passwordsProtected && !hasPasswords && (
-        <Alert className="mt-6 bg-amber-50 border-amber-200">
-          <LockIcon className="h-4 w-4 text-amber-500" />
-          <AlertTitle className="text-amber-700">Password Protection Active</AlertTitle>
-          <AlertDescription className="text-amber-600">
-            Your router is configured to protect WiFi passwords from TR-069 requests.
-            This is a security feature that prevents remote access to your WiFi passwords.
+            No router information has been retrieved yet. 
+            Connect a TR-069 enabled router to discover network details.
           </AlertDescription>
         </Alert>
       )}
