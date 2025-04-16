@@ -1,21 +1,10 @@
 
 import { Card } from "@/components/ui/card";
-import { CircleIcon, WifiIcon } from "lucide-react";
+import { CircleIcon, WifiIcon, ClockIcon, HardDriveIcon } from "lucide-react";
+import { Device } from "@/types";
 
 interface DeviceInfoProps {
-  device: {
-    status: string;
-    manufacturer: string;
-    model: string;
-    serialNumber: string;
-    softwareVersion?: string;
-    hardwareVersion?: string;
-    ipAddress: string;
-    lastContact: string;
-    connectedClients: number;
-    uptime?: string;
-    ssid?: string;
-  };
+  device: Device;
 }
 
 export const DeviceInfo = ({ device }: DeviceInfoProps) => {
@@ -34,7 +23,11 @@ export const DeviceInfo = ({ device }: DeviceInfoProps) => {
     { label: "Manufacturer", value: device.manufacturer },
     { label: "Model", value: device.model },
     { label: "Serial Number", value: device.serialNumber },
-    { label: "Software Version", value: device.softwareVersion },
+    { 
+      label: "Software Version", 
+      value: device.softwareVersion,
+      icon: device.softwareVersion ? <HardDriveIcon className="h-4 w-4 text-blue-500" /> : null 
+    },
     { label: "Hardware Version", value: device.hardwareVersion },
     { label: "IP Address", value: device.ipAddress },
     { 
@@ -44,7 +37,11 @@ export const DeviceInfo = ({ device }: DeviceInfoProps) => {
     },
     { label: "Last Contact", value: device.lastContact },
     { label: "Connected Clients", value: device.connectedClients },
-    { label: "Uptime", value: device.uptime },
+    { 
+      label: "Uptime", 
+      value: device.uptime,
+      icon: device.uptime ? <ClockIcon className="h-4 w-4 text-blue-500" /> : null 
+    },
   ];
 
   return (
@@ -60,7 +57,7 @@ export const DeviceInfo = ({ device }: DeviceInfoProps) => {
             <p className="text-sm text-muted-foreground">{item.label}</p>
             <div className="font-medium flex items-center gap-1">
               {item.icon}
-              {item.value || "N/A"}
+              {item.value !== undefined && item.value !== null ? item.value : "N/A"}
             </div>
           </div>
         ))}

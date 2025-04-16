@@ -1,4 +1,3 @@
-
 <?php
 class HuaweiInformMessageParser {
     private $parameterMap = [
@@ -37,15 +36,22 @@ class HuaweiInformMessageParser {
         'InternetGatewayDevice.DeviceInfo.ModelName' => 'modelName',
         'InternetGatewayDevice.DeviceInfo.ProductClass' => 'modelName',
         'InternetGatewayDevice.DeviceInfo.SerialNumber' => 'serialNumber',
+        
+        // Additional parameters for uptime and software version
+        'InternetGatewayDevice.DeviceInfo.UpTime' => 'uptime',
+        'InternetGatewayDevice.DeviceInfo.SoftwareVersion' => 'softwareVersion',
+        'InternetGatewayDevice.DeviceInfo.X_HW_SoftwareVersion' => 'softwareVersion',
     ];
 
     public function parseInform($request) {
         try {
             // Prepare default device info structure
             $deviceInfo = [
-                'manufacturer' => 'Huawei',
+                'manufacturer' => 'Huawei', // Always set to Huawei for this parser
                 'modelName' => '',
                 'serialNumber' => '',
+                'softwareVersion' => '',
+                'uptime' => '',
                 // WiFi parameters
                 'ssid1' => null,
                 'ssid2' => null,
@@ -95,7 +101,11 @@ class HuaweiInformMessageParser {
                 }
                 if (!empty($deviceId)) {
                     $deviceId = $deviceId[0];
-                    $deviceInfo['manufacturer'] = (string)$deviceId->Manufacturer ?: 'Huawei';
+                    // We'll keep the manufacturer as Huawei, but still extract from XML if available
+                    if (!empty($deviceId->Manufacturer)) {
+                        // Just for logging, we'll still use Huawei
+                        $extractedManufacturer = (string)$deviceId->Manufacturer;
+                    }
                     $deviceInfo['modelName'] = (string)$deviceId->ProductClass ?: '';
                     $deviceInfo['serialNumber'] = (string)$deviceId->SerialNumber ?: '';
                 }
@@ -115,6 +125,13 @@ class HuaweiInformMessageParser {
                         if (isset($this->parameterMap[$name])) {
                             $key = $this->parameterMap[$name];
                             $deviceInfo[$key] = $value;
+                        }
+                        
+                        // Special parsing for uptime or software version if found in other parameters
+                        if (stripos($name, 'UpTime') !== false) {
+                            $deviceInfo['uptime'] = $value;
+                        } else if (stripos($name, 'SoftwareVersion') !== false) {
+                            $deviceInfo['softwareVersion'] = $value;
                         }
                     }
                 }

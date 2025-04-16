@@ -82,6 +82,55 @@ try {
             return null;
         }
     }
+    
+    // Get software version from parameters table
+    function getSoftwareVersion($db, $deviceId) {
+        try {
+            $sql = "SELECT param_value FROM parameters WHERE device_id = :deviceId AND param_name LIKE '%SoftwareVersion%' LIMIT 1";
+            $stmt = $db->prepare($sql);
+            $stmt->execute([':deviceId' => $deviceId]);
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if ($result) {
+                return $result['param_value'];
+            }
+            return null;
+        } catch (PDOException $e) {
+            error_log("Database error in getSoftwareVersion: " . $e->getMessage());
+            return null;
+        }
+    }
+    
+    // Get uptime from parameters table
+    function getUptime($db, $deviceId) {
+        try {
+            $sql = "SELECT param_value FROM parameters WHERE device_id = :deviceId AND param_name LIKE '%UpTime%' LIMIT 1";
+            $stmt = $db->prepare($sql);
+            $stmt->execute([':deviceId' => $deviceId]);
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if ($result) {
+                return $result['param_value'];
+            }
+            return null;
+        } catch (PDOException $e) {
+            error_log("Database error in getUptime: " . $e->getMessage());
+            return null;
+        }
+    }
+    
+    // Get connected clients with details
+    function getConnectedClients($db, $deviceId) {
+        try {
+            $sql = "SELECT * FROM connected_clients WHERE device_id = :deviceId AND is_active = 1";
+            $stmt = $db->prepare($sql);
+            $stmt->execute([':deviceId' => $deviceId]);
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            error_log("Database error in getConnectedClients: " . $e->getMessage());
+            return [];
+        }
+    }
 
     $device = getDevice($db, $deviceId);
     error_log("Device retrieval result: " . ($device ? "success" : "failed"));
@@ -107,6 +156,42 @@ try {
             error_log("Updated device SSID to: " . $ssid);
         }
     }
+    
+    // Check if software version is empty in device table but exists in parameters
+    if (empty($device['softwareVersion'])) {
+        $softwareVersion = getSoftwareVersion($db, $deviceId);
+        if ($softwareVersion) {
+            $device['softwareVersion'] = $softwareVersion;
+            // Update the device table with the software version
+            $updateSql = "UPDATE devices SET software_version = :softwareVersion WHERE id = :id";
+            $updateStmt = $db->prepare($updateSql);
+            $updateStmt->execute([
+                ':softwareVersion' => $softwareVersion,
+                ':id' => $deviceId
+            ]);
+            error_log("Updated device software version to: " . $softwareVersion);
+        }
+    }
+    
+    // Check if uptime is empty in device table but exists in parameters
+    if (empty($device['uptime'])) {
+        $uptime = getUptime($db, $deviceId);
+        if ($uptime) {
+            $device['uptime'] = $uptime;
+            // Update the device table with the uptime
+            $updateSql = "UPDATE devices SET uptime = :uptime WHERE id = :id";
+            $updateStmt = $db->prepare($updateSql);
+            $updateStmt->execute([
+                ':uptime' => $uptime,
+                ':id' => $deviceId
+            ]);
+            error_log("Updated device uptime to: " . $uptime);
+        }
+    }
+    
+    // Get connected clients
+    $connectedClients = getConnectedClients($db, $deviceId);
+    error_log("Retrieved " . count($connectedClients) . " connected clients");
 
     // Check if device is online (last contact within 10 minutes)
     $tenMinutesAgo = date('Y-m-d H:i:s', strtotime('-10 minutes'));
@@ -150,7 +235,7 @@ try {
                     <div>
                         <p class="text-sm text-gray-600">
                             <span class="font-medium">Manufacturer:</span>
-                            <?php echo htmlspecialchars($device['manufacturer'] ?: 'N/A'); ?>
+                            <?php echo htmlspecialchars($device['manufacturer'] ?: 'Huawei'); ?>
                         </p>
                         <p class="text-sm text-gray-600">
                             <span class="font-medium">Model:</span>
@@ -193,6 +278,35 @@ try {
                     </div>
                 </div>
             </div>
+            
+            <?php if (!empty($connectedClients)): ?>
+            <!-- Connected Clients -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold mb-4">Connected Clients</h2>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IP Address</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hostname</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MAC Address</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Seen</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            <?php foreach ($connectedClients as $client): ?>
+                            <tr>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900"><?php echo htmlspecialchars($client['ip_address']); ?></td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900"><?php echo htmlspecialchars($client['hostname'] ?: 'N/A'); ?></td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900"><?php echo htmlspecialchars($client['mac_address'] ?: 'N/A'); ?></td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900"><?php echo date('Y-m-d H:i:s', strtotime($client['last_seen'])); ?></td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <?php endif; ?>
         </div>
     </div>
 </body>
