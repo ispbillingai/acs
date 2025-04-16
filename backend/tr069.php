@@ -1,3 +1,4 @@
+
 <?php
 // Enable error reporting with maximum verbosity
 error_reporting(E_ALL | E_STRICT);
@@ -17,7 +18,7 @@ $GLOBALS['currentHostIndex'] = 1; // Track which host index we're currently fetc
 // Function to log with timestamp and priority level
 function logWithTimestamp($message, $level = 'INFO') {
     $timestamp = date('Y-m-d H:i:s');
-    $logFile = __DIR__ . '/wifi_discovery.log';
+    $logFile = $_SERVER['DOCUMENT_ROOT'] . '/wifi_discovery.log';
     file_put_contents($logFile, "[{$timestamp}] [{$level}] {$message}\n", FILE_APPEND);
     
     // Only log errors to error_log
@@ -33,11 +34,11 @@ function logRouterData($paramName, $paramValue) {
         return;
     }
     
-    $logFile = __DIR__ . '/wifi_discovery.log';
+    $logFile = $_SERVER['DOCUMENT_ROOT'] . '/wifi_discovery.log';
     $timestamp = date('Y-m-d H:i:s');
     
     // Skip duplicate entries for the same parameter
-    $existingContent = file_exists(__DIR__ . '/router_ssids.txt') ? file_get_contents(__DIR__ . '/router_ssids.txt') : '';
+    $existingContent = file_exists($_SERVER['DOCUMENT_ROOT'] . '/router_ssids.txt') ? file_get_contents($_SERVER['DOCUMENT_ROOT'] . '/router_ssids.txt') : '';
     $parameterLine = "{$paramName} = {$paramValue}";
     if (strpos($existingContent, $parameterLine) !== false) {
         // Parameter already exists in file, skip logging it again
@@ -63,7 +64,7 @@ function logRouterData($paramName, $paramValue) {
     file_put_contents($logFile, "[{$timestamp}] ********************************\n", FILE_APPEND);
     
     // Save to the dedicated router_ssids.txt file
-    file_put_contents(__DIR__ . '/router_ssids.txt', "{$paramName} = {$paramValue}\n", FILE_APPEND);
+    file_put_contents($_SERVER['DOCUMENT_ROOT'] . '/router_ssids.txt', "{$paramName} = {$paramValue}\n", FILE_APPEND);
 }
 
 // Function to store discovered parameters in the database
@@ -75,29 +76,49 @@ function storeParametersInDatabase() {
     
     logWithTimestamp("Storing discovered parameters in database", "INFO");
     
-    // Make a request to the store_tr069_data.php API
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, 'http://localhost/backend/api/store_tr069_data.php');
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+    // Make a direct call to the store_tr069_data.php script
+    $scriptPath = __DIR__ . '/api/store_tr069_data.php';
     
-    $result = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    
-    // Log curl errors if any
-    if (curl_errno($ch)) {
-        logWithTimestamp("Curl error when calling store_tr069_data.php: " . curl_error($ch), "ERROR");
+    if (!file_exists($scriptPath)) {
+        logWithTimestamp("Error: store_tr069_data.php script not found at {$scriptPath}", "ERROR");
+        return false;
     }
     
-    curl_close($ch);
-    
-    if ($httpCode >= 200 && $httpCode < 300) {
-        logWithTimestamp("Parameters stored successfully in database: " . $result, "INFO");
+    try {
+        // Include the script directly
+        logWithTimestamp("Calling store_tr069_data.php directly", "INFO");
+        include_once $scriptPath;
         return true;
-    } else {
-        logWithTimestamp("Failed to store parameters in database: HTTP $httpCode - Response: $result", "ERROR");
-        return false;
+    } catch (Exception $e) {
+        logWithTimestamp("Error calling store_tr069_data.php: " . $e->getMessage(), "ERROR");
+        
+        // Fallback to HTTP request if direct include fails
+        $ch = curl_init();
+        $apiUrl = 'http://' . $_SERVER['HTTP_HOST'] . '/backend/api/store_tr069_data.php';
+        logWithTimestamp("Fallback to HTTP request: {$apiUrl}", "INFO");
+        
+        curl_setopt($ch, CURLOPT_URL, $apiUrl);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+        
+        $result = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        
+        // Log curl errors if any
+        if (curl_errno($ch)) {
+            logWithTimestamp("Curl error when calling store_tr069_data.php: " . curl_error($ch), "ERROR");
+        }
+        
+        curl_close($ch);
+        
+        if ($httpCode >= 200 && $httpCode < 300) {
+            logWithTimestamp("Parameters stored successfully in database: " . $result, "INFO");
+            return true;
+        } else {
+            logWithTimestamp("Failed to store parameters in database: HTTP $httpCode - Response: $result", "ERROR");
+            return false;
+        }
     }
 }
 
@@ -305,9 +326,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Start with a clean router_ssids.txt file for new connections
     if (stripos($raw_post, '<cwmp:Inform>') !== false && $isHuawei) {
         // Only delete the file if it's a new session
-        if (file_exists(__DIR__ . '/router_ssids.txt')) {
-            unlink(__DIR__ . '/router_ssids.txt');
-            file_put_contents(__DIR__ . '/router_ssids.txt', "# TR-069 WiFi Parameters Discovered " . date('Y-m-d H:i:s') . "\n", FILE_APPEND);
+        if (file_exists($_SERVER['DOCUMENT_ROOT'] . '/router_ssids.txt')) {
+            unlink($_SERVER['DOCUMENT_ROOT'] . '/router_ssids.txt');
+            file_put_contents($_SERVER['DOCUMENT_ROOT'] . '/router_ssids.txt', "# TR-069 WiFi Parameters Discovered " . date('Y-m-d H:i:s') . "\n", FILE_APPEND);
         }
         
         // Reset attempted parameters for new sessions
@@ -698,8 +719,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // If we haven't sent a parameter request yet, use backend TR-069 server
 try {
-    require_once __DIR__ . '/backend/config/database.php';
-    require_once __DIR__ . '/backend/tr069/server.php';
+    require_once __DIR__ . '/config/database.php';
+    require_once __DIR__ . '/tr069/server.php';
     $server = new TR069Server();
     
     // Pass the Huawei detection flag to the server
@@ -712,6 +733,9 @@ try {
     
     // Handle the request
     $server->handleRequest();
+    
+    // After request handling, store parameters in database
+    storeParametersInDatabase();
 } catch (Exception $e) {
     logWithTimestamp("ERROR: " . $e->getMessage(), "ERROR");
     header('HTTP/1.1 500 Internal Server Error');
