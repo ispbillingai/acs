@@ -1,255 +1,151 @@
 
-import React, { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { toast } from "sonner";
-import { Home, RefreshCcw, SettingsIcon } from "lucide-react";
-import { DeviceInfo } from "@/components/DeviceInfo";
-import { ConnectedClientsTable } from "@/components/ConnectedClientsTable"; 
-import { Device, DeviceParameter, ConnectedClient } from "@/types";
+import React, { useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { DeviceInfo } from '@/components/DeviceInfo';
+import { DeviceActions } from '@/components/DeviceActions';
+import { DeviceParameters } from '@/components/DeviceParameters';
+import { ConnectedClientsTable } from '@/components/ConnectedClientsTable';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Separator } from '@/components/ui/separator';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { CircleIcon, WifiIcon, ServerIcon } from 'lucide-react';
+import { toast } from 'sonner';
+import { Device } from '@/types';
 
-// Fetch device data from the API
-const fetchDevice = async (id: string): Promise<Device> => {
-  const response = await fetch(`/api/devices/${id}`);
-  if (!response.ok) {
-    throw new Error("Failed to fetch device");
-  }
-  return response.json();
-};
+interface DeviceDetailProps {}
 
-// Fetch device parameters from the API
-const fetchParameters = async (id: string): Promise<DeviceParameter[]> => {
-  const response = await fetch(`/api/devices/${id}/parameters`);
-  if (!response.ok) {
-    throw new Error("Failed to fetch parameters");
-  }
-  return response.json();
-};
-
-// Fetch connected clients from the API
-const fetchConnectedClients = async (id: string): Promise<ConnectedClient[]> => {
-  const response = await fetch(`/api/devices/${id}/clients`);
-  if (!response.ok) {
-    throw new Error("Failed to fetch connected clients");
-  }
-  return response.json();
-};
-
-const DeviceDetailPage = () => {
+const DeviceDetail: React.FC<DeviceDetailProps> = () => {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState("info");
 
-  // Use React Query to fetch and cache the device data
-  const { 
-    data: device, 
-    isLoading: isDeviceLoading, 
-    isError: isDeviceError, 
-    refetch: refetchDevice 
+  const {
+    data: device,
+    isLoading,
+    error,
+    refetch
   } = useQuery({
-    queryKey: ["device", id],
-    queryFn: () => fetchDevice(id || ""),
-    enabled: !!id,
-  });
-
-  // Use React Query to fetch and cache the parameters data
-  const { 
-    data: parameters, 
-    isLoading: isParametersLoading, 
-    isError: isParametersError, 
-    refetch: refetchParameters 
-  } = useQuery({
-    queryKey: ["parameters", id],
-    queryFn: () => fetchParameters(id || ""),
-    enabled: !!id,
-  });
-
-  // Use React Query to fetch and cache the connected clients data
-  const { 
-    data: connectedClients, 
-    isLoading: isClientsLoading, 
-    isError: isClientsError, 
-    refetch: refetchClients 
-  } = useQuery({
-    queryKey: ["connectedClients", id],
-    queryFn: () => fetchConnectedClients(id || ""),
-    enabled: !!id,
-  });
-
-  // Create a unified refetch function
-  const handleRefresh = async () => {
-    toast.promise(
-      Promise.all([refetchDevice(), refetchParameters(), refetchClients()]),
-      {
-        loading: "Refreshing device data...",
-        success: "Device data refreshed successfully",
-        error: "Failed to refresh device data",
+    queryKey: ['device', id],
+    queryFn: async () => {
+      try {
+        const response = await fetch(`/backend/api/devices.php?id=${id}`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch device');
+        }
+        return response.json();
+      } catch (err) {
+        console.error('Error fetching device:', err);
+        throw err;
       }
-    );
-  };
+    },
+  });
 
-  // If there's an error with any of the data fetching, show an error message
   useEffect(() => {
-    if (isDeviceError || isParametersError || isClientsError) {
-      toast.error("Failed to load device data");
+    if (error) {
+      toast.error('Failed to load device data');
     }
-  }, [isDeviceError, isParametersError, isClientsError]);
+  }, [error]);
 
-  // If the page is still loading, show a loading message
-  if (isDeviceLoading || isParametersLoading || isClientsLoading) {
+  if (isLoading) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <p className="text-lg">Loading device data...</p>
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-pulse space-y-4">
+          <div className="h-4 bg-blue-200 rounded w-32"></div>
+          <div className="h-4 bg-blue-200 rounded w-64"></div>
+          <div className="h-4 bg-blue-200 rounded w-48"></div>
+        </div>
       </div>
     );
   }
 
-  // If the device data is not available, show an error message
-  if (!device) {
+  if (error || !device) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-4">
-        <p className="text-lg">Device not found or failed to load</p>
-        <Button onClick={() => navigate(-1)}>Go Back</Button>
+      <div className="flex flex-col items-center justify-center min-h-screen space-y-4">
+        <h2 className="text-2xl font-bold text-red-600">Error Loading Device</h2>
+        <p className="text-gray-600">Could not load device information.</p>
+        <button 
+          onClick={() => refetch()}
+          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+        >
+          Try Again
+        </button>
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      {/* Breadcrumb navigation */}
-      <Breadcrumb>
-        <BreadcrumbList>
-          <BreadcrumbItem>
-            <BreadcrumbLink href="/">
-              <Home className="h-4 w-4" />
-              <span className="ml-2">Home</span>
-            </BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbLink href="/devices">Devices</BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbLink>{device.serialNumber || "Detail"}</BreadcrumbLink>
-          </BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb>
-
-      {/* Page header */}
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Device Details</h1>
+          <h1 className="text-2xl font-bold tracking-tight">
+            Device Details
+          </h1>
           <p className="text-muted-foreground">
-            View and manage device information and configuration
+            Model: {device.model || 'Unknown'} | Serial: {device.serialNumber}
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={handleRefresh}>
-            <RefreshCcw className="mr-2 h-4 w-4" />
-            Refresh
-          </Button>
-          <Button>
-            <SettingsIcon className="mr-2 h-4 w-4" />
-            Configure
-          </Button>
+        <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-md shadow-sm">
+          <CircleIcon 
+            className={`h-3 w-3 ${
+              device.status === 'online' ? 'text-green-600' : 'text-red-600'
+            }`} 
+          />
+          <span className="font-medium capitalize">
+            {device.status}
+          </span>
+          <span className="text-gray-400">|</span>
+          <WifiIcon className="h-4 w-4 text-blue-500" />
+          <span className="text-sm text-gray-600">
+            {device.ipAddress}
+          </span>
         </div>
       </div>
 
-      {/* Device status card */}
-      <Card className="bg-gradient-to-br from-blue-50 to-purple-50 border-blue-100">
-        <CardHeader className="pb-2">
-          <CardTitle>Device Status</CardTitle>
-          <CardDescription>
-            Current status and basic information
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-            <div className={`rounded-lg border p-3 ${device.status === 'online' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-              <div className="text-sm font-medium text-muted-foreground">Status</div>
-              <div className={`text-xl font-bold ${device.status === 'online' ? 'text-green-600' : 'text-red-600'}`}>
-                {device.status === 'online' ? 'Online' : 'Offline'}
-              </div>
-            </div>
-            <div className="rounded-lg border bg-blue-50 border-blue-200 p-3">
-              <div className="text-sm font-medium text-muted-foreground">Model</div>
-              <div className="text-xl font-bold text-blue-600">{device.model || 'N/A'}</div>
-            </div>
-            <div className="rounded-lg border bg-purple-50 border-purple-200 p-3">
-              <div className="text-sm font-medium text-muted-foreground">Connected Clients</div>
-              <div className="text-xl font-bold text-purple-600">{device.connectedClients || '0'}</div>
-            </div>
-            <div className="rounded-lg border bg-indigo-50 border-indigo-200 p-3">
-              <div className="text-sm font-medium text-muted-foreground">Last Contact</div>
-              <div className="text-xl font-bold text-indigo-600">
-                {device.lastContact ? new Date(device.lastContact).toLocaleTimeString() : 'N/A'}
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Main content tabs */}
-      <Tabs defaultValue={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="info">Information</TabsTrigger>
-          <TabsTrigger value="clients">Connected Clients</TabsTrigger>
+      <Tabs defaultValue="overview" className="w-full">
+        <TabsList className="grid w-full grid-cols-4 mb-4">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="parameters">Parameters</TabsTrigger>
+          <TabsTrigger value="clients">Connected Clients</TabsTrigger>
+          <TabsTrigger value="actions">Actions</TabsTrigger>
         </TabsList>
-
-        <TabsContent value="info" className="space-y-4">
+        
+        <TabsContent value="overview" className="space-y-4">
           <DeviceInfo device={device} />
+          
+          <Card className="bg-gradient-to-br from-white to-blue-50 border border-blue-100 shadow-md">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ServerIcon className="h-5 w-5 text-blue-500" />
+                Device Information
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {device.parameters && device.parameters.map((param: any, index: number) => (
+                  <div key={index} className="space-y-1 bg-white p-3 rounded-lg border border-blue-50 shadow-sm hover:shadow transition-shadow">
+                    <p className="text-sm text-blue-500 font-medium">{param.name}</p>
+                    <p className="font-medium text-gray-800 truncate" title={param.value}>{param.value}</p>
+                    <p className="text-xs text-gray-500">{param.type}</p>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
-
-        <TabsContent value="clients" className="space-y-4">
-          {connectedClients && connectedClients.length > 0 ? (
-            <ConnectedClientsTable clients={connectedClients} />
-          ) : (
-            <Card>
-              <CardHeader>
-                <CardTitle>No Connected Clients</CardTitle>
-                <CardDescription>This device has no connected clients at the moment</CardDescription>
-              </CardHeader>
-            </Card>
-          )}
-        </TabsContent>
-
+        
         <TabsContent value="parameters" className="space-y-4">
-          {parameters && parameters.length > 0 ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>Device Parameters</CardTitle>
-                <CardDescription>Technical parameters retrieved from the device</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid gap-4">
-                  {parameters.map((param) => (
-                    <div key={param.id} className="grid grid-cols-1 items-center gap-4 rounded-lg border p-4 md:grid-cols-5">
-                      <div className="col-span-1 md:col-span-2 font-medium">{param.name}</div>
-                      <div className="col-span-1 md:col-span-2 font-mono text-sm">{param.value}</div>
-                      <div className="text-xs text-muted-foreground">{param.type}</div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          ) : (
-            <Card>
-              <CardHeader>
-                <CardTitle>No Parameters</CardTitle>
-                <CardDescription>No parameters available for this device</CardDescription>
-              </CardHeader>
-            </Card>
-          )}
+          <DeviceParameters device={device} />
+        </TabsContent>
+        
+        <TabsContent value="clients" className="space-y-4">
+          <ConnectedClientsTable device={device} />
+        </TabsContent>
+        
+        <TabsContent value="actions" className="space-y-4">
+          <DeviceActions device={device} />
         </TabsContent>
       </Tabs>
     </div>
   );
 };
 
-export default DeviceDetailPage;
+export default DeviceDetail;

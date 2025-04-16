@@ -1,83 +1,113 @@
 
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { CircleIcon, Settings2 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import React from 'react';
+import { Link } from 'react-router-dom';
+import { 
+  CircleIcon, 
+  WifiIcon, 
+  ServerIcon, 
+  ClockIcon, 
+  ArrowRightIcon,
+  SmartphoneIcon,
+  LaptopIcon,
+  RouterIcon,
+  ModemIcon,
+  TvIcon,
+  PrinterIcon,
+  DevicesIcon
+} from 'lucide-react';
+import { Card, CardContent, CardFooter } from '@/components/ui/card';
+import { Device } from '@/types';
 
 interface DeviceCardProps {
-  device: {
-    id: string;
-    serialNumber: string;
-    model: string;
-    status: "online" | "offline" | "provisioning";
-    lastContact: string;
-    ipAddress: string;
-    manufacturer: string;
-    softwareVersion?: string;
-    hardwareVersion?: string;
-  };
+  device: Device;
 }
 
+const getDeviceIcon = (model: string | undefined, manufacturer: string | undefined) => {
+  const modelLower = model?.toLowerCase() || '';
+  const manufacturerLower = manufacturer?.toLowerCase() || '';
+  
+  if (modelLower.includes('router') || manufacturerLower.includes('router')) {
+    return <RouterIcon className="h-5 w-5 text-blue-500" />;
+  } else if (modelLower.includes('modem') || manufacturerLower.includes('modem')) {
+    return <ModemIcon className="h-5 w-5 text-blue-500" />;
+  } else if (modelLower.includes('phone') || manufacturerLower.includes('phone')) {
+    return <SmartphoneIcon className="h-5 w-5 text-blue-500" />;
+  } else if (modelLower.includes('tv') || manufacturerLower.includes('tv')) {
+    return <TvIcon className="h-5 w-5 text-blue-500" />;
+  } else if (modelLower.includes('printer') || manufacturerLower.includes('printer')) {
+    return <PrinterIcon className="h-5 w-5 text-blue-500" />;
+  } else if (modelLower.includes('laptop') || manufacturerLower.includes('laptop')) {
+    return <LaptopIcon className="h-5 w-5 text-blue-500" />;
+  } else {
+    return <DevicesIcon className="h-5 w-5 text-blue-500" />;
+  }
+};
+
 export const DeviceCard = ({ device }: DeviceCardProps) => {
-  const navigate = useNavigate();
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "online":
-        return "text-success-dark";
-      case "offline":
-        return "text-error-dark";
-      default:
-        return "text-warning-dark";
-    }
-  };
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString();
-  };
-
   return (
-    <Card 
-      className="p-6 hover:shadow-lg transition-shadow animate-fade-up cursor-pointer"
-      onClick={() => navigate(`/device/${device.id}`)}
-    >
-      <div className="flex justify-between items-start mb-4">
-        <div>
-          <div className="flex items-center gap-2 mb-2">
-            <CircleIcon className={`h-3 w-3 ${getStatusColor(device.status)}`} />
-            <Badge variant="outline" className="capitalize">
-              {device.status}
-            </Badge>
+    <Card className="overflow-hidden bg-white border-blue-100 shadow-sm hover:shadow-md transition-all">
+      <div className={`h-1 ${device.status === 'online' ? 'bg-green-500' : device.status === 'offline' ? 'bg-red-500' : 'bg-orange-500'}`}></div>
+      
+      <CardContent className="p-5">
+        <div className="flex justify-between items-start">
+          <div className="flex items-center space-x-2">
+            {getDeviceIcon(device.model, device.manufacturer)}
+            <div>
+              <h3 className="font-semibold text-blue-900">
+                {device.manufacturer || 'Unknown Manufacturer'}
+              </h3>
+              <p className="text-sm text-gray-600">{device.model || 'Unknown Model'}</p>
+            </div>
           </div>
-          <h3 className="font-semibold text-lg mb-1">{device.manufacturer} {device.model}</h3>
-          <p className="text-sm text-muted-foreground">{device.serialNumber}</p>
+          
+          <div className="flex items-center space-x-1 px-2 py-1 rounded-full bg-opacity-10 text-xs font-medium">
+            <CircleIcon className={`h-2 w-2 ${
+              device.status === 'online' ? 'text-green-600' : 
+              device.status === 'offline' ? 'text-red-600' : 'text-orange-600'
+            }`} />
+            <span className={`${
+              device.status === 'online' ? 'text-green-600' : 
+              device.status === 'offline' ? 'text-red-600' : 'text-orange-600'
+            } capitalize`}>
+              {device.status}
+            </span>
+          </div>
         </div>
-        <button 
-          className="hover:bg-accent p-2 rounded-full transition-colors"
-          onClick={(e) => {
-            e.stopPropagation();
-            navigate(`/device/${device.id}`);
-          }}
+        
+        <div className="mt-4 space-y-2">
+          <div className="flex items-center text-sm text-gray-600">
+            <ServerIcon className="h-4 w-4 mr-2 text-gray-400" />
+            <span className="font-medium">S/N:</span>
+            <span className="ml-2 truncate" title={device.serialNumber}>
+              {device.serialNumber}
+            </span>
+          </div>
+          
+          <div className="flex items-center text-sm text-gray-600">
+            <WifiIcon className="h-4 w-4 mr-2 text-gray-400" />
+            <span className="font-medium">IP:</span>
+            <span className="ml-2">{device.ipAddress}</span>
+          </div>
+          
+          <div className="flex items-center text-sm text-gray-600">
+            <ClockIcon className="h-4 w-4 mr-2 text-gray-400" />
+            <span className="font-medium">Last Seen:</span>
+            <span className="ml-2 truncate" title={device.lastContact}>
+              {new Date(device.lastContact).toLocaleString()}
+            </span>
+          </div>
+        </div>
+      </CardContent>
+      
+      <CardFooter className="bg-gray-50 p-3 border-t border-blue-100">
+        <Link 
+          to={`/devices/${device.id}`}
+          className="text-blue-600 hover:text-blue-800 text-sm font-medium inline-flex items-center w-full justify-end"
         >
-          <Settings2 className="h-5 w-5" />
-        </button>
-      </div>
-      <div className="space-y-1">
-        <p className="text-sm">
-          <span className="text-muted-foreground">Last Contact:</span>{" "}
-          {formatDate(device.lastContact)}
-        </p>
-        <p className="text-sm">
-          <span className="text-muted-foreground">IP Address:</span>{" "}
-          {device.ipAddress}
-        </p>
-        {device.softwareVersion && (
-          <p className="text-sm">
-            <span className="text-muted-foreground">Software:</span>{" "}
-            {device.softwareVersion}
-          </p>
-        )}
-      </div>
+          View Details
+          <ArrowRightIcon className="w-4 h-4 ml-1" />
+        </Link>
+      </CardFooter>
     </Card>
   );
 };
