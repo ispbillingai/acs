@@ -1,4 +1,3 @@
-
 <?php
 // Enable error reporting
 error_reporting(E_ALL);
@@ -545,6 +544,49 @@ try {
                     </div>
                 </div>
                 
+                <!-- Optical Signal Readings -->
+                <div class="card info-card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="card-title mb-0"><i class='bx bx-signal-5 me-2'></i>Optical Signal Readings</h5>
+                        <button class="btn btn-sm btn-outline-primary" id="refresh-optical">
+                            <i class='bx bx-refresh me-1'></i>Refresh Optical Readings
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="card bg-gradient-to-r from-green-100 to-green-50 p-4 h-100 shadow-sm rounded-lg border border-green-200">
+                                    <h6 class="text-green-700 font-semibold mb-3">
+                                        <i class='bx bx-upload me-2'></i>TX Power (Transmit)
+                                    </h6>
+                                    <div class="d-flex align-items-center">
+                                        <span class="display-6 me-2 text-success"><?php echo htmlspecialchars($device['txPower'] ?? 'N/A'); ?></span>
+                                    </div>
+                                    <p class="text-muted small mt-2">Signal strength from device to network</p>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card bg-gradient-to-r from-blue-100 to-blue-50 p-4 h-100 shadow-sm rounded-lg border border-blue-200">
+                                    <h6 class="text-blue-700 font-semibold mb-3">
+                                        <i class='bx bx-download me-2'></i>RX Power (Receive)
+                                    </h6>
+                                    <div class="d-flex align-items-center">
+                                        <span class="display-6 me-2 text-primary"><?php echo htmlspecialchars($device['rxPower'] ?? 'N/A'); ?></span>
+                                    </div>
+                                    <p class="text-muted small mt-2">Signal strength from network to device</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-4 small">
+                            <div class="alert alert-info py-2">
+                                <i class='bx bx-info-circle me-2'></i>
+                                Optical power readings may not be available for all device models. Click refresh to attempt retrieving the latest readings.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
                 <?php if (!empty($connectedClients)): ?>
                 <!-- Connected Clients -->
                 <div class="card table-card mb-4">
@@ -620,6 +662,35 @@ try {
                 if (sidebar) {
                     sidebar.classList.add('collapse');
                 }
+            }
+            
+            // Add optical readings refresh handler
+            const refreshOpticalBtn = document.getElementById('refresh-optical');
+            if (refreshOpticalBtn) {
+                refreshOpticalBtn.addEventListener('click', function() {
+                    this.disabled = true;
+                    this.innerHTML = '<i class="bx bx-loader-alt bx-spin me-1"></i> Refreshing...';
+                    
+                    // Create an AJAX request to refresh optical readings
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('GET', 'backend/api/refresh_optical.php?id=<?php echo $deviceId; ?>', true);
+                    xhr.onload = function() {
+                        if (this.status >= 200 && this.status < 300) {
+                            // Reload the page to show updated data
+                            window.location.reload();
+                        } else {
+                            alert('Error refreshing optical readings');
+                            refreshOpticalBtn.disabled = false;
+                            refreshOpticalBtn.innerHTML = '<i class="bx bx-refresh me-1"></i> Refresh Optical Readings';
+                        }
+                    };
+                    xhr.onerror = function() {
+                        alert('Network error while refreshing optical readings');
+                        refreshOpticalBtn.disabled = false;
+                        refreshOpticalBtn.innerHTML = '<i class="bx bx-refresh me-1"></i> Refresh Optical Readings';
+                    };
+                    xhr.send();
+                });
             }
         });
     </script>

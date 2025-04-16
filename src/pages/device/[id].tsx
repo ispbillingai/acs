@@ -1,95 +1,117 @@
-import { useRouter } from 'next/router';
-import { useEffect, useState } from 'react';
-import { Card } from "@/components/ui/card";
-import { Device } from "@/types";
-import { DeviceInfo } from "@/components/DeviceInfo";
-import { DeviceActions } from "@/components/DeviceActions";
-import { DeviceStats } from "@/components/DeviceStats";
-import { DebugLogger } from "@/components/DebugLogger";
-import { ConnectedClientsTable } from "@/components/ConnectedClientsTable";
-import { DeviceParameters } from "@/components/DeviceParameters";
 
-// Import new OpticalReadings component
-import { OpticalReadings } from "@/components/OpticalReadings";
+import React from 'react';
+import { useParams } from 'react-router-dom';
+import { Device } from '@/types';
+import { DeviceInfo } from '@/components/DeviceInfo';
+import { DeviceActions } from '@/components/DeviceActions';
+import { ConnectedClientsTable } from '@/components/ConnectedClientsTable';
+import { DeviceParameters } from '@/components/DeviceParameters';
+import { DeviceStats } from '@/components/DeviceStats';
+import { OpticalReadings } from '@/components/OpticalReadings';
 
 const DevicePage = () => {
-  const router = useRouter();
-  const { id: deviceId } = router.query;
-  const [device, setDevice] = useState<Device | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [showDebug, setShowDebug] = useState(false);
+  const { id } = useParams<{ id: string }>();
+  
+  // This would typically fetch data from an API
+  const [device, setDevice] = React.useState<Device | null>(null);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
 
-  useEffect(() => {
-    if (!deviceId) return;
-    fetchDeviceData();
-  }, [deviceId]);
-
-  const fetchDeviceData = async () => {
-    setIsLoading(true);
-    try {
-      const res = await fetch(`/api/devices/${deviceId}`);
-      if (!res.ok) {
-        throw new Error(`HTTP error! status: ${res.status}`);
+  React.useEffect(() => {
+    // In a real app, fetch actual device data from an API
+    const fetchDevice = async () => {
+      try {
+        setIsLoading(true);
+        // Simulate API call with timeout
+        setTimeout(() => {
+          // Mock data for preview
+          const mockDevice: Device = {
+            id: id || '1',
+            serialNumber: 'SN12345678',
+            manufacturer: 'Huawei',
+            model: 'HG8546',
+            softwareVersion: '1.0.5',
+            hardwareVersion: '2.1',
+            status: 'online',
+            lastContact: new Date().toISOString(),
+            ipAddress: '192.168.1.1',
+            ssid: 'HomeNetwork',
+            uptime: '259200', // 3 days in seconds
+            connectedClients: 3,
+            txPower: '-5.2 dBm',
+            rxPower: '-23.4 dBm'
+          };
+          
+          setDevice(mockDevice);
+          setIsLoading(false);
+        }, 1000);
+      } catch (err) {
+        setError('Failed to load device data');
+        setIsLoading(false);
       }
-      const data = await res.json();
-      setDevice(data);
-    } catch (error) {
-      console.error("Could not fetch device data:", error);
-      setDevice(null);
-    } finally {
-      setIsLoading(false);
+    };
+
+    fetchDevice();
+  }, [id]);
+
+  const handleRefresh = () => {
+    // Re-fetch data
+    if (id) {
+      // This would trigger a new API call in a real app
+      setIsLoading(true);
+      setTimeout(() => {
+        setIsLoading(false);
+      }, 1000);
     }
   };
 
-  return (
-    <div className="container mx-auto p-6">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold">{device?.serialNumber}</h1>
-        <p className="text-gray-500">Device Details</p>
-      </div>
+  const handleRefreshOptical = () => {
+    // Specifically refresh optical readings
+    if (id && device) {
+      console.log("Refreshing optical readings for device:", id);
+      // Simulate refreshing optical readings
+      setTimeout(() => {
+        setDevice({
+          ...device,
+          txPower: `-${Math.random() * 10 + 1 }.${Math.floor(Math.random() * 10)} dBm`,
+          rxPower: `-${Math.random() * 20 + 10}.${Math.floor(Math.random() * 10)} dBm`
+        });
+      }, 1000);
+    }
+  };
 
-      {isLoading ? (
-        <div className="grid gap-6">
-          {/* Loading skeleton */}
-          <div className="h-40 bg-gray-100 animate-pulse rounded-lg"></div>
-          <div className="h-60 bg-gray-100 animate-pulse rounded-lg"></div>
-          <div className="h-40 bg-gray-100 animate-pulse rounded-lg"></div>
-        </div>
-      ) : device ? (
-        <div className="grid gap-6">
-          <DeviceStats device={device} />
-          
-          {/* Add the new OpticalReadings component */}
-          <OpticalReadings device={device} onRefresh={() => fetchDeviceData()} />
-          
-          <DeviceInfo device={device} />
-          
-          <div className="flex justify-end">
-            <DeviceActions device={device} onRefresh={() => fetchDeviceData()} />
-          </div>
-          
-          {device.connectedClients && device.connectedClients > 0 && (
-            <Card className="p-6">
-              <h2 className="text-xl font-bold mb-4">Connected Clients</h2>
-              <ConnectedClientsTable deviceId={deviceId} />
-            </Card>
-          )}
-          
-          <Card className="p-6">
-            <h2 className="text-xl font-bold mb-4">Device Parameters</h2>
-            <DeviceParameters deviceId={deviceId} />
-          </Card>
-          
-          {showDebug && (
-            <DebugLogger data={device} title="Device Raw Data" />
-          )}
-        </div>
-      ) : (
-        <div className="text-center p-12">
-          <h2 className="text-2xl font-bold">Device not found</h2>
-          <p className="text-gray-500 mt-2">The requested device could not be found.</p>
-        </div>
-      )}
+  if (isLoading) {
+    return <div className="p-8 text-center">Loading device data...</div>;
+  }
+
+  if (error) {
+    return <div className="p-8 text-center text-red-500">{error}</div>;
+  }
+
+  if (!device) {
+    return <div className="p-8 text-center">Device not found</div>;
+  }
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <h1 className="text-2xl font-bold">Device {device.serialNumber}</h1>
+        <DeviceActions 
+          device={device} 
+          onRefresh={handleRefresh}
+          onRefreshOptical={handleRefreshOptical} 
+        />
+      </div>
+      
+      <DeviceStats device={device} />
+      
+      <DeviceInfo device={device} />
+      
+      <OpticalReadings device={device} onRefresh={handleRefreshOptical} />
+      
+      <ConnectedClientsTable deviceId={device.id} />
+      
+      <DeviceParameters deviceId={device.id} />
     </div>
   );
 };

@@ -4,8 +4,8 @@ error_reporting(0);
 ini_set('display_errors', 0);
 ini_set('log_errors', 0);
 
-// Create debug log file
-$debugLogFile = __DIR__ . '/../tr069_debug.log';
+// Create debug log file specifically for optical power readings
+$debugLogFile = __DIR__ . '/../tr069_optical_power.log';
 file_put_contents($debugLogFile, date('Y-m-d H:i:s') . " [DEBUG] === TR069 Optical Power Readings Log Initialized ===\n", FILE_APPEND);
 
 function writeDebugLog($message) {
@@ -111,7 +111,10 @@ set_time_limit(0);
 // Basic connection information
 $clientIP = $_SERVER['REMOTE_ADDR'];
 $isNewSession = !isset($GLOBALS['knownDevices'][$clientIP]);
-writeDebugLog("Connection from IP: {$clientIP}, new session: " . ($isNewSession ? 'yes' : 'no'));
+
+if ($isNewSession) {
+    writeDebugLog("New connection from IP: {$clientIP} - Checking for optical power readings");
+}
 
 // Enhanced Huawei device detection based on User-Agent
 $isHuawei = false;
@@ -120,6 +123,8 @@ $modelDetected = '';
 
 if (isset($_SERVER['HTTP_USER_AGENT'])) {
     $userAgent = $_SERVER['HTTP_USER_AGENT'];
+    
+    // Only log this if we're looking for optical powers
     writeDebugLog("User-Agent: {$userAgent}");
     
     // Detect MikroTik devices
@@ -137,7 +142,7 @@ if (isset($_SERVER['HTTP_USER_AGENT'])) {
         
         if (stripos($userAgent, 'hg8546') !== false) {
             $modelDetected = 'HG8546M';
-            writeDebugLog("Detected model: HG8546M");
+            writeDebugLog("Detected model: HG8546M - Will check for optical power readings");
         }
     }
 }
@@ -230,7 +235,7 @@ function generateHostParameters($hostCount) {
     return $hostParams;
 }
 
-// Function to generate a parameter request XML
+// Function to generate a parameter request XML with focus on optical parameters
 function generateParameterRequestXML($soapId, $parameters) {
     $arraySize = count($parameters);
     $parameterStrings = '';
@@ -713,4 +718,4 @@ if (stripos($raw_post, '<cwmp:Inform>') !== false) {
     
     // Create a custom SOAP envelope for optical power readings
     $opticalRequest = '<?xml version="1.0" encoding="UTF-8"?>
-<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://
