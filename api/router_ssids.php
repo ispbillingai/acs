@@ -1,9 +1,8 @@
-
 <?php
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 
-// Check if the SSIDs file exists
+// Simplified router_ssids.php with logging removed
 $ssidsFile = __DIR__ . '/../router_ssids.txt';
 
 $result = [
@@ -11,15 +10,15 @@ $result = [
     'ssids' => [],
     'passwords' => [],
     'raw_parameters' => [],
-    'password_protected' => false,  // Flag to indicate if passwords are protected/unavailable
+    'password_protected' => false,
     'lan_users' => [],
     'wifi_users' => [],
     'wan_settings' => [],
-    'errors' => [],  // Array to track errors
-    'device_info' => [], // Array to track device model information
+    'errors' => [],
+    'device_info' => [], 
     'mikrotik_errors' => 0, // Counter for MikroTik errors
     'huawei_errors' => 0,   // Counter for Huawei errors
-    'discovery_status' => 'unknown' // Status of network discovery
+    'discovery_status' => 'unknown'
 ];
 
 // Parse and count errors from the log file - but only count unique errors

@@ -1,12 +1,7 @@
-
-import React, { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import React from 'react';
+import { DeviceParameters } from '@/components/DeviceParameters';
+import { config } from '@/config/index';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import DeviceParameters from '@/components/DeviceParameters';
-import { API_BASE_URL } from '@/config';
-import { ArrowLeft, RefreshCw } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 
 // Define the Device interface for TypeScript
 interface Device {
@@ -134,7 +129,7 @@ const DevicePage = () => {
     <div className="container mx-auto p-4">
       <div className="flex justify-between items-center mb-4">
         <Button 
-          variant="outline" 
+          variant="default" 
           onClick={() => navigate('/devices')}
         >
           <ArrowLeft className="mr-2 h-4 w-4" /> Back to Devices

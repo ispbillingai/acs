@@ -1,4 +1,3 @@
-
 <?php
 class InformResponseGenerator {
     public function createResponse($id = null) {
@@ -15,7 +14,6 @@ class InformResponseGenerator {
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
         
-        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " [INFO] Created InformResponse for session ID: " . $soapId . "\n", FILE_APPEND);
         return $response;
     }
     
@@ -36,7 +34,6 @@ class InformResponseGenerator {
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
 
-        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " [INFO] Sent SSID discovery request\n", FILE_APPEND);
         return $response;
     }
     
@@ -56,7 +53,6 @@ class InformResponseGenerator {
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
 
-        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " [INFO] GetParameterNames request sent for WLAN discovery\n", FILE_APPEND);
         return $response;
     }
     
@@ -77,7 +73,6 @@ class InformResponseGenerator {
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
 
-        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " [INFO] Sent HG8546M specific request for SSIDs\n", FILE_APPEND);
         return $response;
     }
     
@@ -96,7 +91,6 @@ class InformResponseGenerator {
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
 
-        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " [INFO] Sent acknowledgement for parameter response\n", FILE_APPEND);
         return $response;
     }
     
@@ -141,7 +135,6 @@ class InformResponseGenerator {
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
 
-        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " [INFO] Sent custom GetParameterValues request for " . count($filteredParameters) . " parameters\n", FILE_APPEND);
         return $response;
     }
 }

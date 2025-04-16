@@ -1,4 +1,3 @@
-
 <?php
 // Disable all error reporting and logging
 error_reporting(0);
