@@ -15,7 +15,7 @@ class InformResponseGenerator {
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
         
-        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " Created InformResponse for session ID: " . $soapId . "\n", FILE_APPEND);
+        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " [INFO] Created InformResponse for session ID: " . $soapId . "\n", FILE_APPEND);
         return $response;
     }
     
@@ -39,7 +39,35 @@ class InformResponseGenerator {
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
 
-        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " Sent direct SSID request\n", FILE_APPEND);
+        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " [INFO] Sent SSID discovery request\n", FILE_APPEND);
+        return $response;
+    }
+    
+    // For requesting credentials (after SSID discovery)
+    public function createWifiCredentialsRequest($id = null) {
+        $soapId = $id ?? '1';
+        $response = '<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <SOAP-ENV:Header>
+    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </SOAP-ENV:Header>
+  <SOAP-ENV:Body>
+    <cwmp:GetParameterValues>
+      <ParameterNames SOAP-ENC:arrayType="xsd:string[8]">
+        <string>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID</string>
+        <string>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase</string>
+        <string>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_WPAKey</string>
+        <string>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase</string>
+        <string>InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID</string>
+        <string>InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.KeyPassphrase</string>
+        <string>InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.X_HW_WPAKey</string>
+        <string>InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase</string>
+      </ParameterNames>
+    </cwmp:GetParameterValues>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>';
+
+        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " [INFO] Sent WiFi credentials request\n", FILE_APPEND);
         return $response;
     }
     
@@ -59,7 +87,7 @@ class InformResponseGenerator {
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
 
-        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " GetParameterNames request sent for WLAN discovery\n", FILE_APPEND);
+        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " [INFO] GetParameterNames request sent for WLAN discovery\n", FILE_APPEND);
         return $response;
     }
     
@@ -78,8 +106,9 @@ class InformResponseGenerator {
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
 
-        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " Sent acknowledgement for parameter response\n", FILE_APPEND);
+        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " [INFO] Sent acknowledgement for parameter response\n", FILE_APPEND);
         return $response;
     }
 }
+
 

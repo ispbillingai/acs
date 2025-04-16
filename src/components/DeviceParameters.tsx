@@ -11,7 +11,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { InfoIcon } from "lucide-react";
+import { InfoIcon, WifiIcon, KeyIcon, ExternalLinkIcon } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 interface DeviceParametersProps {
   deviceId: string;
@@ -22,12 +23,21 @@ interface Parameter {
   value: string;
   type: string;
   writable: boolean;
+  category?: string;
+}
+
+interface RouterSSIDsResponse {
+  timestamp: string;
+  ssids: Array<{parameter: string, value: string}>;
+  passwords: Array<{parameter: string, value: string}>;
+  raw_parameters: Array<{name: string, value: string}>;
 }
 
 export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [parameters, setParameters] = useState<Parameter[]>([]);
   const [loading, setLoading] = useState(true);
+  const [tr069Data, setTr069Data] = useState<RouterSSIDsResponse | null>(null);
 
   useEffect(() => {
     // This function fetches both mock data and checks for router SSIDs
@@ -61,21 +71,50 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
         try {
           const response = await fetch("/api/router_ssids.php");
           if (response.ok) {
-            const ssidData = await response.text();
+            const data: RouterSSIDsResponse = await response.json();
+            setTr069Data(data);
             
-            // Parse the SSID data (format: paramName = paramValue)
-            const ssidLines = ssidData.split("\n").filter(line => line.trim());
-            
-            for (const line of ssidLines) {
-              const [name, value] = line.split(" = ");
-              if (name && value) {
+            // Add SSIDs from the response
+            if (data.ssids && data.ssids.length > 0) {
+              data.ssids.forEach(ssid => {
                 mockData.push({
-                  name: name.trim(),
-                  value: value.trim(),
+                  name: ssid.parameter,
+                  value: ssid.value,
                   type: "string",
-                  writable: false
+                  writable: false,
+                  category: "ssid"
                 });
-              }
+              });
+            }
+            
+            // Add passwords from the response
+            if (data.passwords && data.passwords.length > 0) {
+              data.passwords.forEach(password => {
+                mockData.push({
+                  name: password.parameter,
+                  value: password.value,
+                  type: "string",
+                  writable: false,
+                  category: "password"
+                });
+              });
+            }
+            
+            // Add any other parameters
+            if (data.raw_parameters && data.raw_parameters.length > 0) {
+              data.raw_parameters.forEach(param => {
+                // Only add if not already added as ssid or password
+                const isAlreadyAdded = mockData.some(p => p.name === param.name);
+                if (!isAlreadyAdded) {
+                  mockData.push({
+                    name: param.name,
+                    value: param.value,
+                    type: "string",
+                    writable: false,
+                    category: "other"
+                  });
+                }
+              });
             }
           }
         } catch (error) {
@@ -92,13 +131,25 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
   }, [deviceId]);
 
   const filteredParameters = parameters.filter((param) =>
-    param.name.toLowerCase().includes(searchTerm.toLowerCase())
+    param.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    param.value.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   // Check if we have any SSID parameters
-  const hasSSIDs = parameters.some(param => 
-    param.name.includes("SSID") && param.name.endsWith(".SSID")
-  );
+  const hasSSIDs = parameters.some(param => param.category === 'ssid');
+  const hasPasswords = parameters.some(param => param.category === 'password');
+
+  const getCategoryIcon = (param: Parameter) => {
+    if (param.category === 'ssid') return <WifiIcon className="h-4 w-4 text-blue-500" />;
+    if (param.category === 'password') return <KeyIcon className="h-4 w-4 text-amber-500" />;
+    return null;
+  };
+
+  const getCategoryBadge = (param: Parameter) => {
+    if (param.category === 'ssid') return <Badge className="bg-blue-500">SSID</Badge>;
+    if (param.category === 'password') return <Badge className="bg-amber-500">Password</Badge>;
+    return null;
+  };
 
   return (
     <Card className="p-6">
@@ -112,11 +163,11 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
       </div>
 
       {!loading && hasSSIDs && (
-        <Alert className="mb-6 bg-green-50">
-          <InfoIcon className="h-4 w-4" />
-          <AlertTitle>Success!</AlertTitle>
-          <AlertDescription>
-            Successfully retrieved SSID information from the router.
+        <Alert className="mb-6 bg-green-50 border-green-200">
+          <InfoIcon className="h-4 w-4 text-green-500" />
+          <AlertTitle className="text-green-700">WiFi Information Retrieved!</AlertTitle>
+          <AlertDescription className="text-green-600">
+            Successfully retrieved {tr069Data?.ssids.length || 0} SSID(s) and {tr069Data?.passwords.length || 0} password(s) from the router.
           </AlertDescription>
         </Alert>
       )}
@@ -128,7 +179,7 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
               <TableHead className="w-[50%]">Parameter</TableHead>
               <TableHead>Value</TableHead>
               <TableHead>Type</TableHead>
-              <TableHead>Writable</TableHead>
+              <TableHead className="w-[100px]">Category</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -146,11 +197,21 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
               </TableRow>
             ) : (
               filteredParameters.map((param) => (
-                <TableRow key={param.name} className={param.name.includes("SSID") ? "bg-green-50" : ""}>
-                  <TableCell className="font-mono text-sm">{param.name}</TableCell>
-                  <TableCell>{param.value}</TableCell>
+                <TableRow 
+                  key={param.name} 
+                  className={param.category === 'ssid' 
+                    ? "bg-blue-50" 
+                    : param.category === 'password' 
+                      ? "bg-amber-50" 
+                      : ""}
+                >
+                  <TableCell className="font-mono text-sm flex items-center">
+                    {getCategoryIcon(param)}
+                    <span className="ml-2">{param.name}</span>
+                  </TableCell>
+                  <TableCell className="font-medium">{param.value}</TableCell>
                   <TableCell>{param.type}</TableCell>
-                  <TableCell>{param.writable ? "Yes" : "No"}</TableCell>
+                  <TableCell>{getCategoryBadge(param)}</TableCell>
                 </TableRow>
               ))
             )}
