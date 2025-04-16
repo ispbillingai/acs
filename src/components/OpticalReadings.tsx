@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowDownIcon, ArrowUpIcon, RefreshCwIcon, SignalIcon, ZapIcon } from "lucide-react";
 import { Device } from "@/types";
+import { DebugLogger } from './DebugLogger';
 
 interface OpticalReadingsProps {
   device: Device;
@@ -12,6 +13,7 @@ interface OpticalReadingsProps {
 
 export const OpticalReadings = ({ device, onRefresh }: OpticalReadingsProps) => {
   const [isLoading, setIsLoading] = useState(false);
+  const [showDebug, setShowDebug] = useState(false);
   
   const handleRefresh = () => {
     if (onRefresh) {
@@ -81,6 +83,30 @@ export const OpticalReadings = ({ device, onRefresh }: OpticalReadingsProps) => 
           <p className="text-gray-400 text-sm mt-1">Try refreshing or check device compatibility.</p>
         </div>
       )}
+      
+      {showDebug && (
+        <DebugLogger 
+          data={{
+            txPower: device.txPower,
+            rxPower: device.rxPower,
+            deviceType: device.model,
+            timestamp: new Date().toISOString()
+          }}
+          title="Optical Power Debug" 
+          className="mt-4"
+        />
+      )}
+      
+      <div className="mt-4 text-right">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setShowDebug(!showDebug)}
+          className="text-xs text-gray-500"
+        >
+          {showDebug ? 'Hide Debug' : 'Show Debug'}
+        </Button>
+      </div>
     </Card>
   );
 };

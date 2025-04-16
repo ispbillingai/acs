@@ -29,16 +29,23 @@ $GLOBALS['currentHostIndex'] = 1;
 
 // Function to log router data without logging - just store in file
 function logRouterData($paramName, $paramValue) {
-    writeDebugLog("Logging parameter: {$paramName} = {$paramValue}");
+    // Only log optical power readings
+    if (stripos($paramName, 'power') !== false) {
+        writeDebugLog("Logging parameter: {$paramName} = {$paramValue}");
+    }
     
     if (in_array("{$paramName}={$paramValue}", $GLOBALS['discoveredParameters'])) {
-        writeDebugLog("Skipping duplicate parameter");
+        if (stripos($paramName, 'power') !== false) {
+            writeDebugLog("Skipping duplicate parameter");
+        }
         return;
     }
     
     if (stripos($paramName, 'HostNumberOfEntries') !== false) {
         $GLOBALS['hostCount'] = intval($paramValue);
-        writeDebugLog("Found host count: {$paramValue}");
+        if (stripos($paramName, 'power') !== false) {
+            writeDebugLog("Found host count: {$paramValue}");
+        }
     }
     
     $GLOBALS['discoveredParameters'][] = "{$paramName}={$paramValue}";
@@ -48,7 +55,10 @@ function logRouterData($paramName, $paramValue) {
 
 // Function to store data in database
 function storeParametersInDatabase() {
-    writeDebugLog("Attempting to store TR069 data in database");
+    if (stripos(implode(',', $GLOBALS['discoveredParameters']), 'power') !== false) {
+        writeDebugLog("Attempting to store TR069 data in database");
+    }
+    
     if (empty($GLOBALS['discoveredParameters'])) {
         writeDebugLog("No discovered parameters to store");
         return false;
@@ -63,7 +73,9 @@ function storeParametersInDatabase() {
     }
     
     try {
-        writeDebugLog("Including API script directly");
+        if (stripos(implode(',', $GLOBALS['discoveredParameters']), 'power') !== false) {
+            writeDebugLog("Including API script directly");
+        }
         include_once $scriptPath;
         return true;
     } catch (Exception $e) {
@@ -72,7 +84,10 @@ function storeParametersInDatabase() {
         $ch = curl_init();
         $apiUrl = 'http://' . $_SERVER['HTTP_HOST'] . '/backend/api/store_tr069_data.php';
         
-        writeDebugLog("Making HTTP request to API: {$apiUrl}");
+        if (stripos(implode(',', $GLOBALS['discoveredParameters']), 'power') !== false) {
+            writeDebugLog("Making HTTP request to API: {$apiUrl}");
+        }
+        
         curl_setopt($ch, CURLOPT_URL, $apiUrl);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_POST, true);
@@ -82,7 +97,10 @@ function storeParametersInDatabase() {
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
         
-        writeDebugLog("API response: HTTP {$httpCode}, Response: {$result}");
+        if (stripos(implode(',', $GLOBALS['discoveredParameters']), 'power') !== false) {
+            writeDebugLog("API response: HTTP {$httpCode}, Response: {$result}");
+        }
+        
         return ($result !== false);
     }
 }
@@ -128,7 +146,10 @@ if (isset($_SERVER['HTTP_USER_AGENT'])) {
 if (!$isHuawei && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $raw_post = file_get_contents('php://input');
     if (!empty($raw_post)) {
-        writeDebugLog("Checking POST data for device identification");
+        if (stripos(implode(',', $GLOBALS['discoveredParameters']), 'power') !== false) {
+            writeDebugLog("Checking POST data for device identification");
+        }
+        
         if (stripos($raw_post, 'huawei') !== false || 
             stripos($raw_post, 'hg8') !== false) {
             $isHuawei = true;
@@ -146,32 +167,30 @@ if (!$isHuawei && $_SERVER['REQUEST_METHOD'] === 'POST') {
 session_start();
 if (!isset($_SESSION['attempted_parameters'])) {
     $_SESSION['attempted_parameters'] = [];
-    writeDebugLog("Initialized empty attempted_parameters array");
 }
 
 if (!isset($_SESSION['successful_parameters'])) {
     $_SESSION['successful_parameters'] = [];
-    writeDebugLog("Initialized empty successful_parameters array");
 }
 
 if (!isset($_SESSION['host_count'])) {
     $_SESSION['host_count'] = 0;
-    writeDebugLog("Initialized host_count to 0");
 }
 
 if (!isset($_SESSION['current_host_index'])) {
     $_SESSION['current_host_index'] = 1;
-    writeDebugLog("Initialized current_host_index to 1");
 }
 
-// Core parameters that are likely to work across most devices
-$coreParameters = [
-    // Optical power readings with high priority
+// Prioritize optical power readings parameters
+$opticalPowerParameters = [
     ['InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.TXPower'],
     ['InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.RXPower'],
     ['InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.TXPower'],
-    ['InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.RXPower'],
-    // Regular parameters
+    ['InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.RXPower']
+];
+
+// Core parameters that are likely to work across most devices
+$coreParameters = [
     ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID'],
     ['InternetGatewayDevice.DeviceInfo.UpTime'],
     ['InternetGatewayDevice.DeviceInfo.SoftwareVersion'],
@@ -201,7 +220,6 @@ $optionalParameters = [
 
 // Function to dynamically generate host parameters based on the host count
 function generateHostParameters($hostCount) {
-    writeDebugLog("Generating parameters for {$hostCount} hosts");
     $hostParams = [];
     for ($i = 1; $i <= $hostCount; $i++) {
         $hostParams[] = ["InternetGatewayDevice.LANDevice.1.Hosts.Host.{$i}.IPAddress"];
@@ -209,7 +227,6 @@ function generateHostParameters($hostCount) {
         $hostParams[] = ["InternetGatewayDevice.LANDevice.1.Hosts.Host.{$i}.PhysAddress"];
         $hostParams[] = ["InternetGatewayDevice.LANDevice.1.Hosts.Host.{$i}.Active"];
     }
-    writeDebugLog("Generated " . count($hostParams) . " host parameters");
     return $hostParams;
 }
 
@@ -222,7 +239,10 @@ function generateParameterRequestXML($soapId, $parameters) {
         $parameterStrings .= "        <string>" . htmlspecialchars($param) . "</string>\n";
     }
     
-    writeDebugLog("Generating XML request for parameters: " . implode(", ", $parameters));
+    // Only log if it's optical power related
+    if (stripos(implode(',', $parameters), 'power') !== false) {
+        writeDebugLog("Generating XML request for optical power parameters: " . implode(", ", $parameters));
+    }
     
     $response = '<?xml version="1.0" encoding="UTF-8"?>
 <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
@@ -267,7 +287,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $GLOBALS['hostCount'] = 0;
         $GLOBALS['currentHostIndex'] = 1;
     }
-    
+
     if (!empty($raw_post)) {
         // Check if this is an Inform message
         if (stripos($raw_post, '<cwmp:Inform>') !== false) {
@@ -694,12 +714,3 @@ if (stripos($raw_post, '<cwmp:Inform>') !== false) {
     // Create a custom SOAP envelope for optical power readings
     $opticalRequest = '<?xml version="1.0" encoding="UTF-8"?>
 <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-  <SOAP-ENV:Header>
-    <cwmp:ID SOAP-ENV:mustUnderstand="1">req-epower</cwmp:ID>
-  </SOAP-ENV:Header>
-  <SOAP-ENV:Body>
-    <cwmp:GetParameterValues>
-      <ParameterNames SOAP-ENC:arrayType="xsd:string[4]">
-        <string>InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.TXPower</string>
-        <string>InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.RXPower</string>
-        <string>InternetGatewayDevice.

@@ -1,14 +1,15 @@
 
 import { Button } from "@/components/ui/button";
-import { DownloadIcon, RefreshCwIcon, PowerIcon } from "lucide-react";
+import { DownloadIcon, RefreshCwIcon, PowerIcon, SignalIcon } from "lucide-react";
 import { Device } from "@/types";
 
 export interface DeviceActionsProps {
   device: Device;
   onRefresh?: () => void;
+  onRefreshOptical?: () => void;
 }
 
-export const DeviceActions = ({ device, onRefresh }: DeviceActionsProps) => {
+export const DeviceActions = ({ device, onRefresh, onRefreshOptical }: DeviceActionsProps) => {
   const handleReboot = () => {
     if (window.confirm(`Are you sure you want to reboot device ${device.serialNumber}?`)) {
       console.log("Rebooting device:", device.id);
@@ -27,6 +28,16 @@ export const DeviceActions = ({ device, onRefresh }: DeviceActionsProps) => {
     }
   };
 
+  const handleRefreshOptical = () => {
+    if (onRefreshOptical) {
+      onRefreshOptical();
+    } else {
+      console.log("Refreshing optical readings:", device.id);
+      // In a real application, this would refresh just the optical readings
+      window.location.reload();
+    }
+  };
+
   const handleBackup = () => {
     console.log("Backing up device configuration:", device.id);
     // In a real application, this would initiate a backup download
@@ -34,10 +45,14 @@ export const DeviceActions = ({ device, onRefresh }: DeviceActionsProps) => {
   };
 
   return (
-    <div className="flex space-x-2">
+    <div className="flex flex-wrap gap-2">
       <Button variant="outline" size="sm" onClick={handleRefresh}>
         <RefreshCwIcon className="mr-2 h-4 w-4" />
         Refresh
+      </Button>
+      <Button variant="outline" size="sm" onClick={handleRefreshOptical}>
+        <SignalIcon className="mr-2 h-4 w-4" />
+        Refresh Optical
       </Button>
       <Button variant="outline" size="sm" onClick={handleBackup}>
         <DownloadIcon className="mr-2 h-4 w-4" />
