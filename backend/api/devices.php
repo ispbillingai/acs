@@ -1,4 +1,3 @@
-
 <?php
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -7,10 +6,30 @@ header('Access-Control-Allow-Headers: Content-Type');
 
 require_once __DIR__ . '/../config/database.php';
 
+// Create log file if it doesn't exist
+$logFile = __DIR__ . '/../../acs.log';
+if (!file_exists($logFile)) {
+    file_put_contents($logFile, date('Y-m-d H:i:s') . " [INFO] === ACS Log Initialized ===\n");
+}
+
+function writeLog($message) {
+    global $logFile;
+    file_put_contents($logFile, date('Y-m-d H:i:s') . " [INFO] " . $message . "\n", FILE_APPEND);
+}
+
 $database = new Database();
 $db = $database->getConnection();
 
+writeLog("Attempting database connection to: " . $database->host);
+if ($db) {
+    writeLog("Database connection established successfully");
+} else {
+    writeLog("DATABASE CONNECTION FAILED!");
+}
+
 $method = $_SERVER['REQUEST_METHOD'];
+
+writeLog("Database connection successful");
 
 switch ($method) {
     case 'GET':
@@ -52,12 +71,16 @@ function getDevices($db) {
                 software_version as softwareVersion,
                 hardware_version as hardwareVersion
                 FROM devices 
-                WHERE last_contact >= DATE_SUB(NOW(), INTERVAL 5 MINUTE)
                 ORDER BY last_contact DESC";
+        
+        writeLog("Executing SQL query: " . $sql);
         
         $stmt = $db->prepare($sql);
         $stmt->execute();
         $devices = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        writeLog("Found " . count($devices) . " devices");
+        writeLog("Devices data: " . print_r($devices, true));
         
         // Format timestamps
         foreach ($devices as &$device) {
@@ -70,7 +93,7 @@ function getDevices($db) {
         
         echo json_encode($devices);
     } catch (PDOException $e) {
-        error_log("Database error in getDevices: " . $e->getMessage());
+        writeLog("Database error in getDevices: " . $e->getMessage());
         http_response_code(500);
         echo json_encode(['error' => 'Failed to fetch devices']);
     }
@@ -78,6 +101,8 @@ function getDevices($db) {
 
 function getDevice($db, $id) {
     try {
+        writeLog("Fetching device with ID: " . $id);
+        
         // First get the device basic info
         $deviceSql = "SELECT 
                 d.*,
@@ -95,10 +120,13 @@ function getDevice($db, $id) {
         $device = $deviceStmt->fetch(PDO::FETCH_ASSOC);
         
         if (!$device) {
+            writeLog("Device not found with ID: " . $id);
             http_response_code(404);
             echo json_encode(['error' => 'Device not found']);
             return;
         }
+        
+        writeLog("Device basic data found: " . print_r($device, true));
         
         // Format the device data
         $result = [
@@ -123,9 +151,11 @@ function getDevice($db, $id) {
                 FROM parameters 
                 WHERE device_id = :id";
         
+        writeLog("Fetching parameters with SQL: " . $paramsSql);
         $paramsStmt = $db->prepare($paramsSql);
         $paramsStmt->execute([':id' => $id]);
         $result['parameters'] = $paramsStmt->fetchAll(PDO::FETCH_ASSOC);
+        writeLog("Found " . count($result['parameters']) . " parameters for device");
         
         // Get connected hosts
         $hostsSql = "SELECT 
@@ -138,9 +168,11 @@ function getDevice($db, $id) {
                 FROM connected_clients 
                 WHERE device_id = :id";
         
+        writeLog("Fetching connected hosts with SQL: " . $hostsSql);
         $hostsStmt = $db->prepare($hostsSql);
         $hostsStmt->execute([':id' => $id]);
         $result['connectedHosts'] = $hostsStmt->fetchAll(PDO::FETCH_ASSOC);
+        writeLog("Found " . count($result['connectedHosts']) . " connected hosts for device");
         
         // Update status based on last contact time
         $lastContact = strtotime($result['lastContact']);
@@ -149,16 +181,19 @@ function getDevice($db, $id) {
         
         echo json_encode($result);
     } catch (PDOException $e) {
-        error_log("Database error in getDevice: " . $e->getMessage());
+        writeLog("Database error in getDevice: " . $e->getMessage());
         http_response_code(500);
-        echo json_encode(['error' => 'Failed to fetch device details']);
+        echo json_encode(['error' => 'Failed to fetch device details: ' . $e->getMessage()]);
     }
 }
 
 function updateDeviceParameters($db, $data) {
     try {
+        writeLog("Updating device parameters with data: " . print_r($data, true));
+        
         // Check if required fields are present
         if (!isset($data['serialNumber'])) {
+            writeLog("Error: Serial number is required but not provided");
             http_response_code(400);
             echo json_encode(['error' => 'Serial number is required']);
             return;
@@ -166,6 +201,7 @@ function updateDeviceParameters($db, $data) {
         
         // Check if device exists
         $checkSql = "SELECT id FROM devices WHERE serial_number = :serialNumber";
+        writeLog("Checking if device exists with SQL: " . $checkSql . " (serialNumber=" . $data['serialNumber'] . ")");
         $checkStmt = $db->prepare($checkSql);
         $checkStmt->execute([':serialNumber' => $data['serialNumber']]);
         $device = $checkStmt->fetch(PDO::FETCH_ASSOC);
@@ -174,6 +210,7 @@ function updateDeviceParameters($db, $data) {
         
         // If device doesn't exist, create it
         if (!$device) {
+            writeLog("Device not found, creating new device record");
             $insertSql = "INSERT INTO devices (
                 serial_number, 
                 manufacturer, 
@@ -190,17 +227,26 @@ function updateDeviceParameters($db, $data) {
                 NOW()
             )";
             
+            writeLog("Executing SQL: " . $insertSql);
             $insertStmt = $db->prepare($insertSql);
-            $insertStmt->execute([
+            $result = $insertStmt->execute([
                 ':serialNumber' => $data['serialNumber'],
                 ':manufacturer' => $data['manufacturer'] ?? 'Unknown',
                 ':modelName' => $data['modelName'] ?? 'Unknown',
                 ':ipAddress' => $data['ipAddress'] ?? '0.0.0.0'
             ]);
             
+            if (!$result) {
+                writeLog("ERROR inserting device: " . print_r($insertStmt->errorInfo(), true));
+            } else {
+                writeLog("Device inserted successfully");
+            }
+            
             $deviceId = $db->lastInsertId();
+            writeLog("New device ID: " . $deviceId);
         } else {
             $deviceId = $device['id'];
+            writeLog("Device found with ID: " . $deviceId . ", updating");
             
             // Update device basic info
             $updateSql = "UPDATE devices SET 
@@ -211,17 +257,25 @@ function updateDeviceParameters($db, $data) {
                 last_contact = NOW()
                 WHERE id = :id";
             
+            writeLog("Executing update SQL: " . $updateSql);
             $updateStmt = $db->prepare($updateSql);
-            $updateStmt->execute([
+            $result = $updateStmt->execute([
                 ':manufacturer' => $data['manufacturer'] ?? 'Unknown',
                 ':modelName' => $data['modelName'] ?? 'Unknown',
                 ':ipAddress' => $data['ipAddress'] ?? '0.0.0.0',
                 ':id' => $deviceId
             ]);
+            
+            if (!$result) {
+                writeLog("ERROR updating device: " . print_r($updateStmt->errorInfo(), true));
+            } else {
+                writeLog("Device updated successfully");
+            }
         }
         
         // Store parameters if available
         if (isset($data['parameters']) && is_array($data['parameters'])) {
+            writeLog("Processing " . count($data['parameters']) . " parameters");
             foreach ($data['parameters'] as $param) {
                 if (isset($param['name']) && isset($param['value'])) {
                     // Check if parameter exists
@@ -242,11 +296,15 @@ function updateDeviceParameters($db, $data) {
                             WHERE id = :id";
                         
                         $updateParamStmt = $db->prepare($updateParamSql);
-                        $updateParamStmt->execute([
+                        $result = $updateParamStmt->execute([
                             ':value' => $param['value'],
                             ':type' => $param['type'] ?? 'string',
                             ':id' => $existingParam['id']
                         ]);
+                        
+                        if (!$result) {
+                            writeLog("ERROR updating parameter: " . $param['name'] . " - " . print_r($updateParamStmt->errorInfo(), true));
+                        }
                     } else {
                         // Insert new parameter
                         $insertParamSql = "INSERT INTO parameters (
@@ -262,12 +320,18 @@ function updateDeviceParameters($db, $data) {
                         )";
                         
                         $insertParamStmt = $db->prepare($insertParamSql);
-                        $insertParamStmt->execute([
+                        $result = $insertParamStmt->execute([
                             ':deviceId' => $deviceId,
                             ':name' => $param['name'],
                             ':value' => $param['value'],
                             ':type' => $param['type'] ?? 'string'
                         ]);
+                        
+                        if (!$result) {
+                            writeLog("ERROR inserting parameter: " . $param['name'] . " - " . print_r($insertParamStmt->errorInfo(), true));
+                        } else {
+                            writeLog("Parameter inserted: " . $param['name'] . " = " . $param['value']);
+                        }
                     }
                 }
             }
@@ -345,7 +409,7 @@ function updateDeviceParameters($db, $data) {
         ]);
         
     } catch (PDOException $e) {
-        error_log("Database error in updateDeviceParameters: " . $e->getMessage());
+        writeLog("Database error in updateDeviceParameters: " . $e->getMessage());
         http_response_code(500);
         echo json_encode(['error' => 'Failed to update device parameters: ' . $e->getMessage()]);
     }
