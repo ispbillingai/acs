@@ -12,6 +12,8 @@ $GLOBALS['discoveredParameters'] = []; // Track parameters we've already discove
 $GLOBALS['errorCounts'] = []; // Track error counts by type
 $GLOBALS['lastErrorTime'] = []; // Track last time an error was logged for throttling
 $GLOBALS['verifiedParameters'] = []; // Track parameters that were successfully retrieved
+$GLOBALS['hostCount'] = 0; // Track number of hosts discovered
+$GLOBALS['currentHostIndex'] = 1; // Track which host index we're currently fetching
 
 // Function to log with timestamp and priority level
 function logWithTimestamp($message, $level = 'INFO') {
@@ -41,6 +43,12 @@ function logRouterData($paramName, $paramValue) {
     if (strpos($existingContent, $parameterLine) !== false) {
         // Parameter already exists in file, skip logging it again
         return;
+    }
+    
+    // Check if this is the host count parameter
+    if (stripos($paramName, 'HostNumberOfEntries') !== false) {
+        $GLOBALS['hostCount'] = intval($paramValue);
+        logWithTimestamp("Found {$GLOBALS['hostCount']} hosts to retrieve", "INFO");
     }
     
     // Add to discovered parameters
@@ -168,6 +176,14 @@ if (!isset($_SESSION['successful_parameters'])) {
     $_SESSION['successful_parameters'] = [];
 }
 
+if (!isset($_SESSION['host_count'])) {
+    $_SESSION['host_count'] = 0;
+}
+
+if (!isset($_SESSION['current_host_index'])) {
+    $_SESSION['current_host_index'] = 1;
+}
+
 // Core parameters that are likely to work across most devices
 $coreParameters = [
     // Basic SSID for most routers - most likely to succeed
@@ -183,10 +199,11 @@ $extendedParameters = [
     ['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DNSServers'],
     
     // LAN Connected Devices - basic information
-    ['InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries'],
-    ['InternetGatewayDevice.LANDevice.1.Hosts.Host.1.IPAddress'],
-    ['InternetGatewayDevice.LANDevice.1.Hosts.Host.1.HostName']
+    ['InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries']
 ];
+
+// Dynamic parameters that will be populated based on host count
+$dynamicHostParameters = [];
 
 // Optional parameters that may fail on many devices - try these last and don't retry if they fail
 $optionalParameters = [
@@ -198,6 +215,23 @@ $optionalParameters = [
     ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDevice.1.MACAddress'],
     ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDevice.1.SignalStrength']
 ];
+
+// Function to dynamically generate host parameters based on the host count
+function generateHostParameters($hostCount) {
+    $hostParams = [];
+    // Iterate through each host index
+    for ($i = 1; $i <= $hostCount; $i++) {
+        // Add IP Address parameter
+        $hostParams[] = ["InternetGatewayDevice.LANDevice.1.Hosts.Host.{$i}.IPAddress"];
+        // Add HostName parameter
+        $hostParams[] = ["InternetGatewayDevice.LANDevice.1.Hosts.Host.{$i}.HostName"];
+        // Add MAC Address (PhysAddress) parameter
+        $hostParams[] = ["InternetGatewayDevice.LANDevice.1.Hosts.Host.{$i}.PhysAddress"];
+        // Add Active parameter (if it exists)
+        $hostParams[] = ["InternetGatewayDevice.LANDevice.1.Hosts.Host.{$i}.Active"];
+    }
+    return $hostParams;
+}
 
 // Function to generate a parameter request XML
 function generateParameterRequestXML($soapId, $parameters) {
@@ -250,6 +284,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (isset($_SESSION['successful_parameters'])) {
             $_SESSION['successful_parameters'] = [];
         }
+        
+        // Reset host tracking variables
+        $_SESSION['host_count'] = 0;
+        $_SESSION['current_host_index'] = 1;
+        $GLOBALS['hostCount'] = 0;
+        $GLOBALS['currentHostIndex'] = 1;
     }
     
     if (!empty($raw_post)) {
@@ -303,6 +343,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $foundSSIDs = false;
             $foundWANSettings = false;
             $foundConnectedDevices = false;
+            $foundHostNumberOfEntries = false;
             
             if (!empty($matches)) {
                 foreach ($matches as $match) {
@@ -317,6 +358,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Track this as a successful parameter retrieval
                     if (!in_array($paramName, $_SESSION['successful_parameters'])) {
                         $_SESSION['successful_parameters'][] = $paramName;
+                    }
+                    
+                    // Check if this is the host count parameter
+                    if (stripos($paramName, 'HostNumberOfEntries') !== false) {
+                        $foundHostNumberOfEntries = true;
+                        $_SESSION['host_count'] = intval($paramValue);
+                        $GLOBALS['hostCount'] = intval($paramValue);
+                        logWithTimestamp("Found {$GLOBALS['hostCount']} hosts to retrieve", "INFO");
                     }
                     
                     // Categorize the parameter by its name
@@ -354,18 +403,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Decide which parameter set to try next based on discovery progress
             $nextParam = null;
             
-            // First try all core parameters
-            foreach ($coreParameters as $param) {
-                $paramKey = implode(',', $param);
-                if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
-                    $nextParam = $param;
-                    break;
+            // If we just got the host count, prioritize getting all host details
+            if ($foundHostNumberOfEntries && $_SESSION['host_count'] > 0) {
+                // Generate all host parameters
+                $dynamicHostParameters = generateHostParameters($_SESSION['host_count']);
+                
+                // Check which host index we're currently on
+                if ($_SESSION['current_host_index'] <= $_SESSION['host_count']) {
+                    $nextParam = ["InternetGatewayDevice.LANDevice.1.Hosts.Host.{$_SESSION['current_host_index']}.IPAddress"];
+                    logWithTimestamp("Fetching details for host {$_SESSION['current_host_index']} of {$_SESSION['host_count']}", "INFO");
+                    $_SESSION['current_host_index']++;
+                }
+            }
+            
+            // If no host parameters to fetch, try core parameters
+            if ($nextParam === null) {
+                foreach ($coreParameters as $param) {
+                    $paramKey = implode(',', $param);
+                    if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
+                        $nextParam = $param;
+                        break;
+                    }
                 }
             }
             
             // If all core parameters have been tried, move to extended parameters
             if ($nextParam === null) {
                 foreach ($extendedParameters as $param) {
+                    $paramKey = implode(',', $param);
+                    if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
+                        $nextParam = $param;
+                        break;
+                    }
+                }
+            }
+            
+            // Check if we need to try host parameters after finding host count
+            if ($nextParam === null && $_SESSION['host_count'] > 0) {
+                // Generate host parameters if not already done
+                if (empty($dynamicHostParameters)) {
+                    $dynamicHostParameters = generateHostParameters($_SESSION['host_count']);
+                }
+                
+                // Find next untried host parameter
+                foreach ($dynamicHostParameters as $param) {
                     $paramKey = implode(',', $param);
                     if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
                         $nextParam = $param;
@@ -450,6 +531,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 // Log the error - but with minimal output for common errors
                 logError($faultCode, $faultString, $deviceType);
+                
+                // Check if we need to continue with host parameters
+                if ($_SESSION['host_count'] > 0 && $_SESSION['current_host_index'] <= $_SESSION['host_count']) {
+                    // Continue with the next host
+                    $nextParam = ["InternetGatewayDevice.LANDevice.1.Hosts.Host.{$_SESSION['current_host_index']}.IPAddress"];
+                    logWithTimestamp("Continuing with host {$_SESSION['current_host_index']} of {$_SESSION['host_count']}", "INFO");
+                    $_SESSION['attempted_parameters'][] = implode(',', $nextParam);
+                    $_SESSION['current_host_index']++;
+                    
+                    $nextRequest = generateParameterRequestXML($soapId, $nextParam);
+                    
+                    header('Content-Type: text/xml');
+                    echo $nextRequest;
+                    exit;
+                }
                 
                 // Now find the next parameter to try, skipping any parameters that have caused faults
                 $nextParam = null;

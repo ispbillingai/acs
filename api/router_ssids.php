@@ -58,6 +58,14 @@ if (file_exists($errorLogFile)) {
                 $detectedDeviceType = 'MikroTik';
             }
             
+            // Detect host count information
+            if (strpos($line, 'Found') !== false && strpos($line, 'hosts to retrieve') !== false) {
+                preg_match('/Found (\d+) hosts to retrieve/', $line, $matches);
+                if (isset($matches[1])) {
+                    $result['device_info']['host_count'] = intval($matches[1]);
+                }
+            }
+            
             // Count errors by device type - but only unique errors
             if (strpos($line, 'FAULT CODE DETECTED') !== false) {
                 if (preg_match('/FAULT CODE DETECTED: (\d+)/', $line, $matches)) {
@@ -125,6 +133,10 @@ if (file_exists($ssidsFile)) {
         $foundSsids = false;
         $foundPasswords = false;
         
+        // Arrays to track hosts by their index number
+        $hostsByIndex = [];
+        $totalHostCount = 0;
+        
         foreach ($lines as $key => $line) {
             // Skip comments
             if (strpos($line, '#') === 0) {
@@ -190,7 +202,7 @@ if (file_exists($ssidsFile)) {
                         'value' => $value
                     ];
                 }
-                // LAN/WiFi connected users detection
+                // WiFi connected users detection
                 else if (stripos($name, 'AssociatedDevice') !== false && 
                         stripos($name, 'MACAddress') !== false && 
                         stripos($name, 'WLANConfiguration.1') !== false) {
@@ -209,96 +221,40 @@ if (file_exists($ssidsFile)) {
                         $result['wifi_users'][$userIndex]['signal'] = trim($signal);
                     }
                 }
-                else if (stripos($name, 'Host') !== false && stripos($name, 'PhysAddress') !== false) {
-                    // This is a LAN user
-                    $mac = $value;
-                    $userIndex = count($result['lan_users']);
+                // Better host entry detection - matches Host.X.IPAddress pattern
+                else if (preg_match('/InternetGatewayDevice\.LANDevice\.1\.Hosts\.Host\.(\d+)\.([a-zA-Z]+)/', $name, $matches)) {
+                    $hostIndex = $matches[1];
+                    $paramType = $matches[2];
                     
-                    $result['lan_users'][$userIndex] = [
-                        'mac' => $mac,
-                        'ip' => '192.168.1.?' // Default placeholder
-                    ];
-                    
-                    // Look for IP address in surrounding lines
-                    foreach ($lines as $searchLine) {
-                        if (stripos($searchLine, $mac) !== false && stripos($searchLine, 'IPAddress') !== false) {
-                            list(, $ip) = explode(' = ', $searchLine, 2);
-                            $result['lan_users'][$userIndex]['ip'] = trim($ip);
-                            break;
-                        }
+                    // Make sure we have an entry for this host index
+                    if (!isset($hostsByIndex[$hostIndex])) {
+                        $hostsByIndex[$hostIndex] = [
+                            'index' => $hostIndex,
+                            'ip' => '',
+                            'mac' => '',
+                            'hostname' => ''
+                        ];
                     }
                     
-                    // Look for hostname
-                    foreach ($lines as $searchLine) {
-                        if (stripos($searchLine, $mac) !== false && stripos($searchLine, 'HostName') !== false) {
-                            list(, $hostname) = explode(' = ', $searchLine, 2);
-                            $result['lan_users'][$userIndex]['hostname'] = trim($hostname);
-                            break;
-                        }
+                    // Fill in the appropriate field
+                    if ($paramType === 'IPAddress') {
+                        $hostsByIndex[$hostIndex]['ip'] = $value;
                     }
-                }
-                // LAN hosts specific detection
-                else if (stripos($name, 'Hosts.Host') !== false) {
-                    // Parse host entries more intelligently
-                    if (stripos($name, 'IPAddress') !== false) {
-                        // Extract host index
-                        preg_match('/Host\.(\d+)\.IPAddress/', $name, $matches);
-                        if (!empty($matches[1])) {
-                            $hostIndex = $matches[1];
-                            
-                            // Look for matching hostname
-                            $hostname = '';
-                            $mac = '';
-                            
-                            foreach ($lines as $searchLine) {
-                                if (stripos($searchLine, "Host.{$hostIndex}.HostName") !== false) {
-                                    list(, $hostname) = explode(' = ', $searchLine, 2);
-                                    $hostname = trim($hostname);
-                                }
-                                
-                                if (stripos($searchLine, "Host.{$hostIndex}.PhysAddress") !== false) {
-                                    list(, $mac) = explode(' = ', $searchLine, 2);
-                                    $mac = trim($mac);
-                                }
-                            }
-                            
-                            // Add or update LAN user
-                            $existingUserIndex = -1;
-                            foreach ($result['lan_users'] as $idx => $user) {
-                                if (!empty($user['mac']) && $user['mac'] === $mac) {
-                                    $existingUserIndex = $idx;
-                                    break;
-                                }
-                            }
-                            
-                            if ($existingUserIndex >= 0) {
-                                // Update existing user
-                                $result['lan_users'][$existingUserIndex]['ip'] = $value;
-                                if (!empty($hostname)) {
-                                    $result['lan_users'][$existingUserIndex]['hostname'] = $hostname;
-                                }
-                            } else {
-                                // Add new user
-                                $newUser = [
-                                    'ip' => $value
-                                ];
-                                
-                                if (!empty($mac)) {
-                                    $newUser['mac'] = $mac;
-                                }
-                                
-                                if (!empty($hostname)) {
-                                    $newUser['hostname'] = $hostname;
-                                }
-                                
-                                $result['lan_users'][] = $newUser;
-                            }
-                        }
+                    else if ($paramType === 'HostName') {
+                        $hostsByIndex[$hostIndex]['hostname'] = $value;
+                    }
+                    else if ($paramType === 'PhysAddress') {
+                        $hostsByIndex[$hostIndex]['mac'] = $value;
+                    }
+                    else if ($paramType === 'Active') {
+                        $hostsByIndex[$hostIndex]['active'] = ($value === '1' || strtolower($value) === 'true');
                     }
                 }
+                // Host number of entries
                 else if (stripos($name, 'HostNumberOfEntries') !== false) {
                     // Store the total number of hosts
-                    $result['device_info']['connected_hosts'] = intval($value);
+                    $totalHostCount = intval($value);
+                    $result['device_info']['connected_hosts'] = $totalHostCount;
                 }
                 else if (stripos($name, 'Fault') !== false) {
                     // Log faults as errors only if they're not 9005 (Invalid parameter name)
@@ -311,6 +267,21 @@ if (file_exists($ssidsFile)) {
                     }
                 }
             }
+        }
+        
+        // Now process and add all the hosts we discovered to the lan_users array
+        if (!empty($hostsByIndex)) {
+            foreach ($hostsByIndex as $hostIndex => $hostData) {
+                // Only add if we have at least IP or hostname
+                if (!empty($hostData['ip']) || !empty($hostData['hostname'])) {
+                    $result['lan_users'][] = $hostData;
+                }
+            }
+        }
+        
+        // Update the device info with the actual number of hosts found
+        if (count($result['lan_users']) > 0) {
+            $result['device_info']['hosts_found'] = count($result['lan_users']);
         }
         
         // If we have SSIDs but no passwords, set the password_protected flag

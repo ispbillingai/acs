@@ -34,6 +34,7 @@ class InformMessageParser {
         // System Stats
         'Device.DeviceInfo.UpTime' => 'uptime',
         'Device.Hosts.HostNumberOfEntries' => 'dhcpHostCount',
+        'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries' => 'dhcpHostCount',
         
         // WiFi Parameters (may be null for non-WiFi models)
         'Device.WiFi.SSID.1.SSID' => 'ssid1',
@@ -46,6 +47,18 @@ class InformMessageParser {
         'Device.WiFi.AccessPoint.2.Security.ModeEnabled' => 'securityMode2',
         'Device.WiFi.AccessPoint.1.AssociatedDeviceNumberOfEntries' => 'connectedClients1',
         'Device.WiFi.AccessPoint.2.AssociatedDeviceNumberOfEntries' => 'connectedClients2'
+    ];
+
+    // Map for extracting host information with dynamic indices
+    private $hostParameterPattern = [
+        'InternetGatewayDevice.LANDevice.1.Hosts.Host.(\d+).IPAddress' => 'hostIpAddress',
+        'InternetGatewayDevice.LANDevice.1.Hosts.Host.(\d+).HostName' => 'hostName',
+        'InternetGatewayDevice.LANDevice.1.Hosts.Host.(\d+).PhysAddress' => 'hostMacAddress',
+        'InternetGatewayDevice.LANDevice.1.Hosts.Host.(\d+).Active' => 'hostActive',
+        'Device.Hosts.Host.(\d+).IPAddress' => 'hostIpAddress',
+        'Device.Hosts.Host.(\d+).HostName' => 'hostName',
+        'Device.Hosts.Host.(\d+).PhysAddress' => 'hostMacAddress',
+        'Device.Hosts.Host.(\d+).Active' => 'hostActive'
     ];
 
     public function parseInform($request) {
@@ -78,7 +91,8 @@ class InformMessageParser {
                 'connectedClients1' => 0,
                 'connectedClients2' => 0,
                 'tr069Password' => '',
-                'localAdminPassword' => ''
+                'localAdminPassword' => '',
+                'connectedHosts' => [] // Array to store connected host information
             ];
 
             if (!$request) {
@@ -113,6 +127,7 @@ class InformMessageParser {
                 $parameters = $inform->xpath('.//ParameterList/ParameterValueStruct');
 
                 if ($parameters) {
+                    // Parse regular parameters
                     foreach ($parameters as $param) {
                         $name = (string)$param->Name;
                         $value = (string)$param->Value;
@@ -123,11 +138,12 @@ class InformMessageParser {
                             strpos($name, 'Device.WiFi') !== false ||
                             strpos($name, 'Device.IP') !== false ||
                             strpos($name, 'Device.DHCPv4') !== false ||
-                            strpos($name, 'Device.Hosts') !== false) {
+                            strpos($name, 'Device.Hosts') !== false ||
+                            strpos($name, 'InternetGatewayDevice.LANDevice.1.Hosts') !== false) {
                             error_log("TR-069 Parameter - $name: $value");
                         }
 
-                        // Map parameters
+                        // Map standard parameters
                         if (isset($this->parameterMap[$name])) {
                             $key = $this->parameterMap[$name];
                             switch ($key) {
@@ -139,6 +155,42 @@ class InformMessageParser {
                                     break;
                                 default:
                                     $deviceInfo[$key] = empty($value) ? null : $value;
+                            }
+                        }
+
+                        // Check for host-related parameters with dynamic indices
+                        else {
+                            foreach ($this->hostParameterPattern as $pattern => $fieldName) {
+                                if (preg_match('/' . $pattern . '/', $name, $matches)) {
+                                    if (isset($matches[1])) { // This contains the host index
+                                        $hostIndex = $matches[1];
+                                        
+                                        if (!isset($deviceInfo['connectedHosts'][$hostIndex])) {
+                                            $deviceInfo['connectedHosts'][$hostIndex] = [
+                                                'index' => $hostIndex,
+                                                'ipAddress' => '',
+                                                'hostName' => '',
+                                                'macAddress' => '',
+                                                'active' => false
+                                            ];
+                                        }
+                                        
+                                        switch ($fieldName) {
+                                            case 'hostIpAddress':
+                                                $deviceInfo['connectedHosts'][$hostIndex]['ipAddress'] = $value;
+                                                break;
+                                            case 'hostName':
+                                                $deviceInfo['connectedHosts'][$hostIndex]['hostName'] = $value;
+                                                break;
+                                            case 'hostMacAddress':
+                                                $deviceInfo['connectedHosts'][$hostIndex]['macAddress'] = $value;
+                                                break;
+                                            case 'hostActive':
+                                                $deviceInfo['connectedHosts'][$hostIndex]['active'] = ($value === '1' || strtolower($value) === 'true');
+                                                break;
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -158,6 +210,14 @@ class InformMessageParser {
                 error_log("- WiFi Clients 1: " . $deviceInfo['connectedClients1']);
                 error_log("- WiFi Clients 2: " . $deviceInfo['connectedClients2']);
                 error_log("- DHCP Hosts: " . $deviceInfo['dhcpHostCount']);
+                
+                // Log connected hosts
+                if (!empty($deviceInfo['connectedHosts'])) {
+                    error_log("- Connected Hosts: " . count($deviceInfo['connectedHosts']));
+                    foreach ($deviceInfo['connectedHosts'] as $hostIndex => $host) {
+                        error_log("  - Host #{$hostIndex}: {$host['hostName']} ({$host['ipAddress']})");
+                    }
+                }
             }
 
             if (empty($deviceInfo['serialNumber'])) {
