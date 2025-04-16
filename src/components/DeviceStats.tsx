@@ -1,56 +1,81 @@
 
 import { Card } from "@/components/ui/card";
-import { WifiIcon, AlertCircle, CheckCircle2 } from "lucide-react";
-
-interface Device {
-  id: string;
-  status: string;
-}
+import { CircleIcon, WifiIcon, ClockIcon, CpuIcon, RouterIcon, PlugIcon } from "lucide-react";
+import { Device } from "@/types";
 
 interface DeviceStatsProps {
-  devices: Device[];
+  device: Device;
 }
 
-interface StatsCardProps {
-  title: string;
-  value: number;
-  icon: React.ReactNode;
-}
+export const DeviceStats = ({ device }: DeviceStatsProps) => {
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "online":
+        return "text-green-600";
+      case "offline":
+        return "text-red-600";
+      default:
+        return "text-orange-600";
+    }
+  };
 
-const StatsCard = ({ title, value, icon }: StatsCardProps) => (
-  <Card className="p-6 flex items-center justify-between animate-fade-down">
-    <div>
-      <p className="text-sm text-muted-foreground mb-1">{title}</p>
-      <p className="text-2xl font-semibold">{value}</p>
-    </div>
-    <div className="h-12 w-12 bg-accent rounded-full flex items-center justify-center">
-      {icon}
-    </div>
-  </Card>
-);
-
-export const DeviceStats = ({ devices }: DeviceStatsProps) => {
-  const totalDevices = devices?.length || 0;
-  const onlineDevices = devices?.filter(d => d.status === 'online').length || 0;
-  const alertDevices = devices?.filter(d => d.status === 'offline').length || 0;
+  // Format uptime from seconds to days, hours, minutes
+  const formatUptime = (uptimeSeconds: string | undefined): string => {
+    if (!uptimeSeconds) return 'N/A';
+    
+    const seconds = parseInt(uptimeSeconds, 10);
+    if (isNaN(seconds)) return 'N/A';
+    
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    
+    if (days > 0) {
+      return `${days}d ${hours}h ${minutes}m`;
+    } else if (hours > 0) {
+      return `${hours}h ${minutes}m`;
+    } else if (minutes > 0) {
+      return `${minutes}m`;
+    } else {
+      return `${seconds}s`;
+    }
+  };
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-      <StatsCard
-        title="Total Devices"
-        value={totalDevices}
-        icon={<WifiIcon className="h-6 w-6" />}
-      />
-      <StatsCard
-        title="Online"
-        value={onlineDevices}
-        icon={<CheckCircle2 className="h-6 w-6 text-success-dark" />}
-      />
-      <StatsCard
-        title="Offline"
-        value={alertDevices}
-        icon={<AlertCircle className="h-6 w-6 text-error-dark" />}
-      />
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <Card className="p-4 bg-gradient-to-br from-white to-blue-50 border border-blue-100 shadow-sm">
+        <div className="flex items-center mb-2">
+          <CircleIcon className={`h-3 w-3 mr-2 ${getStatusColor(device.status)}`} />
+          <h3 className="text-sm font-medium text-gray-500">Status</h3>
+        </div>
+        <p className={`text-2xl font-bold ${getStatusColor(device.status)}`}>
+          {device.status.charAt(0).toUpperCase() + device.status.slice(1)}
+        </p>
+      </Card>
+      
+      <Card className="p-4 bg-gradient-to-br from-white to-blue-50 border border-blue-100 shadow-sm">
+        <div className="flex items-center mb-2">
+          <WifiIcon className="h-4 w-4 mr-2 text-blue-500" />
+          <h3 className="text-sm font-medium text-gray-500">SSID</h3>
+        </div>
+        <p className="text-2xl font-bold">{device.ssid || 'N/A'}</p>
+      </Card>
+      
+      <Card className="p-4 bg-gradient-to-br from-white to-blue-50 border border-blue-100 shadow-sm">
+        <div className="flex items-center mb-2">
+          <RouterIcon className="h-4 w-4 mr-2 text-blue-500" />
+          <h3 className="text-sm font-medium text-gray-500">Connected Clients</h3>
+        </div>
+        <p className="text-2xl font-bold">{device.connectedClients || '0'}</p>
+      </Card>
+      
+      <Card className="p-4 bg-gradient-to-br from-white to-blue-50 border border-blue-100 shadow-sm">
+        <div className="flex items-center mb-2">
+          <ClockIcon className="h-4 w-4 mr-2 text-blue-500" />
+          <h3 className="text-sm font-medium text-gray-500">Uptime</h3>
+        </div>
+        <p className="text-2xl font-bold">{formatUptime(device.uptime)}</p>
+      </Card>
     </div>
   );
 };

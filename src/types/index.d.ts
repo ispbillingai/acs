@@ -1,33 +1,38 @@
 
 export interface Device {
   id: string;
-  status: string;
-  manufacturer: string;
-  model: string;
   serialNumber: string;
+  manufacturer?: string;
+  model?: string;
   softwareVersion?: string;
   hardwareVersion?: string;
-  ipAddress: string;
+  status: 'online' | 'offline' | 'warning';
   lastContact: string;
-  connectedClients: number;
-  uptime?: string;
+  ipAddress?: string;
   ssid?: string;
+  ssidPassword?: string;
+  uptime?: string;
+  connectedClients?: number;
+  txPower?: string;
+  rxPower?: string;
 }
 
-export interface DeviceParameter {
+export interface Client {
   id: string;
-  paramName: string;
-  paramValue: string;
-  paramType: string;
-  updatedAt: string;
-}
-
-export interface ConnectedClient {
-  id: string;
-  deviceId: string;
-  ipAddress: string;
   hostname: string;
+  ipAddress: string;
   macAddress: string;
   isActive: boolean;
   lastSeen: string;
+  connectionType: "wifi" | "lan";
+  deviceType: "mobile" | "computer" | "unknown";
+}
+
+export interface Parameter {
+  name: string;
+  value: string;
+  type: string;
+  writable: boolean;
+  category?: string;
+  network_type?: string;
 }

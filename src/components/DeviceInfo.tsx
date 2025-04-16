@@ -1,6 +1,6 @@
 
 import { Card } from "@/components/ui/card";
-import { CircleIcon, WifiIcon, ClockIcon, HardDriveIcon, ServerIcon, CpuIcon, RouterIcon } from "lucide-react";
+import { CircleIcon, WifiIcon, ClockIcon, HardDriveIcon, ServerIcon, CpuIcon, RouterIcon, ZapIcon, SignalIcon } from "lucide-react";
 import { Device } from "@/types";
 import { DebugLogger } from "@/components/DebugLogger";
 import { useState } from "react";
@@ -77,6 +77,16 @@ export const DeviceInfo = ({ device }: DeviceInfoProps) => {
       value: device.uptime,
       icon: <ClockIcon className="h-4 w-4 text-blue-500" />
     },
+    { 
+      label: "TX Power", 
+      value: device.txPower || "N/A",
+      icon: <SignalIcon className="h-4 w-4 text-green-600" />
+    },
+    { 
+      label: "RX Power", 
+      value: device.rxPower || "N/A",
+      icon: <ZapIcon className="h-4 w-4 text-amber-500" />
+    },
   ];
 
   return (
@@ -97,7 +107,7 @@ export const DeviceInfo = ({ device }: DeviceInfoProps) => {
       </div>
 
       {device && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {infoItems.map((item) => (
             <div key={item.label} className="space-y-1 bg-white p-3 rounded-lg border border-blue-50 shadow-sm hover:shadow transition-shadow">
               <p className="text-sm text-blue-500 font-medium">{item.label}</p>

@@ -1,68 +1,46 @@
 
 import { Button } from "@/components/ui/button";
-import { RefreshCw, RotateCw, Settings } from "lucide-react";
-import { useToast } from "@/components/ui/use-toast";
+import { DownloadIcon, RefreshIcon, PowerIcon } from "lucide-react";
+import { Device } from "@/types";
 
-interface DeviceActionsProps {
-  device: {
-    id: string;
-    serialNumber: string;
-  };
+export interface DeviceActionsProps {
+  device: Device;
 }
 
 export const DeviceActions = ({ device }: DeviceActionsProps) => {
-  const { toast } = useToast();
-
   const handleReboot = () => {
-    toast({
-      title: "Reboot Initiated",
-      description: `Device ${device.serialNumber} is rebooting...`,
-    });
+    if (window.confirm(`Are you sure you want to reboot device ${device.serialNumber}?`)) {
+      console.log("Rebooting device:", device.id);
+      // In a real application, this would be an API call
+      alert("Reboot command sent to device");
+    }
   };
 
-  const handleFactoryReset = () => {
-    toast({
-      title: "Factory Reset",
-      description: "This feature is coming soon...",
-      variant: "destructive",
-    });
+  const handleRefresh = () => {
+    console.log("Refreshing device data:", device.id);
+    // In a real application, this would refresh the device data
+    window.location.reload();
   };
 
-  const handleRefreshParams = () => {
-    toast({
-      title: "Refreshing Parameters",
-      description: "Fetching latest parameter values...",
-    });
+  const handleBackup = () => {
+    console.log("Backing up device configuration:", device.id);
+    // In a real application, this would initiate a backup download
+    alert("Backup initiated, download will start shortly");
   };
 
   return (
-    <div className="flex items-center gap-2">
-      <Button
-        variant="outline"
-        size="sm"
-        className="flex items-center gap-2"
-        onClick={handleRefreshParams}
-      >
-        <RefreshCw className="h-4 w-4" />
+    <div className="flex space-x-2">
+      <Button variant="outline" size="sm" onClick={handleRefresh}>
+        <RefreshIcon className="mr-2 h-4 w-4" />
         Refresh
       </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        className="flex items-center gap-2"
-        onClick={handleReboot}
-      >
-        <RotateCw className="h-4 w-4" />
-        Reboot
+      <Button variant="outline" size="sm" onClick={handleBackup}>
+        <DownloadIcon className="mr-2 h-4 w-4" />
+        Backup
       </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        className="flex items-center gap-2"
-        onClick={handleFactoryReset}
-      >
-        <Settings className="h-4 w-4" />
-        Factory Reset
+      <Button variant="outline" size="sm" onClick={handleReboot}>
+        <PowerIcon className="mr-2 h-4 w-4" />
+        Reboot
       </Button>
     </div>
   );

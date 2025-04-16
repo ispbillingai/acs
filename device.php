@@ -65,12 +65,15 @@ try {
         }
     }
 
-    // Get SSID from parameters table
-    function getSSID($db, $deviceId) {
+    // Get parameter value from parameters table
+    function getParameterValue($db, $deviceId, $paramName) {
         try {
-            $sql = "SELECT param_value FROM parameters WHERE device_id = :deviceId AND param_name LIKE '%SSID%' LIMIT 1";
+            $sql = "SELECT param_value FROM parameters WHERE device_id = :deviceId AND param_name LIKE :paramName LIMIT 1";
             $stmt = $db->prepare($sql);
-            $stmt->execute([':deviceId' => $deviceId]);
+            $stmt->execute([
+                ':deviceId' => $deviceId,
+                ':paramName' => "%$paramName%"
+            ]);
             $result = $stmt->fetch(PDO::FETCH_ASSOC);
             
             if ($result) {
@@ -78,44 +81,28 @@ try {
             }
             return null;
         } catch (PDOException $e) {
-            error_log("Database error in getSSID: " . $e->getMessage());
+            error_log("Database error in getParameterValue: " . $e->getMessage());
             return null;
         }
     }
     
-    // Get software version from parameters table
-    function getSoftwareVersion($db, $deviceId) {
-        try {
-            $sql = "SELECT param_value FROM parameters WHERE device_id = :deviceId AND param_name LIKE '%SoftwareVersion%' LIMIT 1";
-            $stmt = $db->prepare($sql);
-            $stmt->execute([':deviceId' => $deviceId]);
-            $result = $stmt->fetch(PDO::FETCH_ASSOC);
-            
-            if ($result) {
-                return $result['param_value'];
-            }
-            return null;
-        } catch (PDOException $e) {
-            error_log("Database error in getSoftwareVersion: " . $e->getMessage());
-            return null;
-        }
-    }
-    
-    // Get uptime from parameters table
-    function getUptime($db, $deviceId) {
-        try {
-            $sql = "SELECT param_value FROM parameters WHERE device_id = :deviceId AND param_name LIKE '%UpTime%' LIMIT 1";
-            $stmt = $db->prepare($sql);
-            $stmt->execute([':deviceId' => $deviceId]);
-            $result = $stmt->fetch(PDO::FETCH_ASSOC);
-            
-            if ($result) {
-                return $result['param_value'];
-            }
-            return null;
-        } catch (PDOException $e) {
-            error_log("Database error in getUptime: " . $e->getMessage());
-            return null;
+    // Format uptime from seconds to a more readable format
+    function formatUptime($seconds) {
+        if (!$seconds) return null;
+        
+        $seconds = intval($seconds);
+        $days = floor($seconds / 86400);
+        $hours = floor(($seconds % 86400) / 3600);
+        $minutes = floor(($seconds % 3600) / 60);
+        
+        if ($days > 0) {
+            return "$days days, $hours hours, $minutes minutes";
+        } else if ($hours > 0) {
+            return "$hours hours, $minutes minutes";
+        } else if ($minutes > 0) {
+            return "$minutes minutes";
+        } else {
+            return "$seconds seconds";
         }
     }
     
@@ -141,52 +128,73 @@ try {
         exit;
     }
 
-    // Check if SSID is empty in device table but exists in parameters
-    if (empty($device['ssid'])) {
-        $ssid = getSSID($db, $deviceId);
-        if ($ssid) {
-            $device['ssid'] = $ssid;
-            // Update the device table with the SSID
-            $updateSql = "UPDATE devices SET ssid = :ssid WHERE id = :id";
-            $updateStmt = $db->prepare($updateSql);
-            $updateStmt->execute([
-                ':ssid' => $ssid,
-                ':id' => $deviceId
-            ]);
-            error_log("Updated device SSID to: " . $ssid);
+    // Check for missing values in device table but exist in parameters
+    $keysToCheck = [
+        ['deviceKey' => 'ssid', 'paramName' => 'SSID', 'dbColumn' => 'ssid'],
+        ['deviceKey' => 'softwareVersion', 'paramName' => 'SoftwareVersion', 'dbColumn' => 'software_version'],
+        ['deviceKey' => 'hardwareVersion', 'paramName' => 'HardwareVersion', 'dbColumn' => 'hardware_version'],
+        ['deviceKey' => 'uptime', 'paramName' => 'UpTime', 'dbColumn' => 'uptime'],
+        ['deviceKey' => 'manufacturer', 'paramName' => 'Manufacturer', 'dbColumn' => 'manufacturer']
+    ];
+    
+    $needsUpdate = false;
+    $updateValues = [];
+    
+    foreach ($keysToCheck as $keyInfo) {
+        if (empty($device[$keyInfo['deviceKey']])) {
+            $paramValue = getParameterValue($db, $deviceId, $keyInfo['paramName']);
+            if ($paramValue) {
+                $device[$keyInfo['deviceKey']] = $paramValue;
+                $updateValues[$keyInfo['dbColumn']] = $paramValue;
+                $needsUpdate = true;
+                error_log("Found {$keyInfo['paramName']} in parameters: " . $paramValue);
+            }
         }
     }
     
-    // Check if software version is empty in device table but exists in parameters
-    if (empty($device['softwareVersion'])) {
-        $softwareVersion = getSoftwareVersion($db, $deviceId);
-        if ($softwareVersion) {
-            $device['softwareVersion'] = $softwareVersion;
-            // Update the device table with the software version
-            $updateSql = "UPDATE devices SET software_version = :softwareVersion WHERE id = :id";
+    // Also check for TX and RX power
+    $txPower = getParameterValue($db, $deviceId, 'TXPower');
+    $rxPower = getParameterValue($db, $deviceId, 'RXPower');
+    
+    if ($txPower) {
+        $device['txPower'] = $txPower;
+        error_log("Found TX Power: " . $txPower);
+    }
+    
+    if ($rxPower) {
+        $device['rxPower'] = $rxPower;
+        error_log("Found RX Power: " . $rxPower);
+    }
+    
+    // If we found values in parameters that aren't in the device table, update the device table
+    if ($needsUpdate) {
+        $updateSql = "UPDATE devices SET ";
+        $updateParams = [];
+        
+        foreach ($updateValues as $column => $value) {
+            $updateSql .= "$column = :$column, ";
+            $updateParams[":$column"] = $value;
+        }
+        
+        // Remove trailing comma and space
+        $updateSql = rtrim($updateSql, ", ");
+        $updateSql .= " WHERE id = :id";
+        $updateParams[':id'] = $deviceId;
+        
+        try {
             $updateStmt = $db->prepare($updateSql);
-            $updateStmt->execute([
-                ':softwareVersion' => $softwareVersion,
-                ':id' => $deviceId
-            ]);
-            error_log("Updated device software version to: " . $softwareVersion);
+            $updateStmt->execute($updateParams);
+            error_log("Updated device with missing values: " . print_r($updateValues, true));
+        } catch (PDOException $e) {
+            error_log("Error updating device: " . $e->getMessage());
         }
     }
     
-    // Check if uptime is empty in device table but exists in parameters
-    if (empty($device['uptime'])) {
-        $uptime = getUptime($db, $deviceId);
-        if ($uptime) {
-            $device['uptime'] = $uptime;
-            // Update the device table with the uptime
-            $updateSql = "UPDATE devices SET uptime = :uptime WHERE id = :id";
-            $updateStmt = $db->prepare($updateSql);
-            $updateStmt->execute([
-                ':uptime' => $uptime,
-                ':id' => $deviceId
-            ]);
-            error_log("Updated device uptime to: " . $uptime);
-        }
+    // Format the uptime for display
+    if (!empty($device['uptime'])) {
+        $device['formattedUptime'] = formatUptime($device['uptime']);
+    } else {
+        $device['formattedUptime'] = 'N/A';
     }
     
     // Get connected clients
@@ -463,7 +471,7 @@ try {
                                 <h5 class="card-title">Uptime</h5>
                                 <div class="d-flex align-items-center mt-3">
                                     <i class='bx bx-timer me-2 fs-1'></i>
-                                    <h2 class="display-6 mb-0"><?php echo htmlspecialchars($device['uptime'] ?: 'N/A'); ?></h2>
+                                    <h2 class="display-6 mb-0 fs-6"><?php echo htmlspecialchars($device['formattedUptime'] ?: 'N/A'); ?></h2>
                                 </div>
                             </div>
                         </div>
@@ -480,7 +488,7 @@ try {
                             <div class="col-md-6">
                                 <div class="mb-3">
                                     <label class="form-label text-muted mb-1">Manufacturer</label>
-                                    <p class="fw-medium"><?php echo htmlspecialchars($device['manufacturer'] ?: 'Huawei'); ?></p>
+                                    <p class="fw-medium"><?php echo htmlspecialchars($device['manufacturer'] ?: 'N/A'); ?></p>
                                 </div>
                                 <div class="mb-3">
                                     <label class="form-label text-muted mb-1">Model</label>
@@ -498,6 +506,12 @@ try {
                                     <label class="form-label text-muted mb-1">SSID</label>
                                     <p class="fw-medium"><?php echo htmlspecialchars($device['ssid'] ?: 'N/A'); ?></p>
                                 </div>
+                                <?php if (!empty($device['txPower'])): ?>
+                                <div class="mb-3">
+                                    <label class="form-label text-muted mb-1">TX Power</label>
+                                    <p class="fw-medium"><?php echo htmlspecialchars($device['txPower']); ?></p>
+                                </div>
+                                <?php endif; ?>
                             </div>
                             <div class="col-md-6">
                                 <div class="mb-3">
@@ -510,7 +524,7 @@ try {
                                 </div>
                                 <div class="mb-3">
                                     <label class="form-label text-muted mb-1">Uptime</label>
-                                    <p class="fw-medium"><?php echo htmlspecialchars($device['uptime'] ?: 'N/A'); ?></p>
+                                    <p class="fw-medium"><?php echo htmlspecialchars($device['formattedUptime'] ?: 'N/A'); ?></p>
                                 </div>
                                 <div class="mb-3">
                                     <label class="form-label text-muted mb-1">Connected Clients</label>
@@ -520,6 +534,12 @@ try {
                                     <label class="form-label text-muted mb-1">Last Contact</label>
                                     <p class="fw-medium"><?php echo date('Y-m-d H:i:s', strtotime($device['lastContact'])); ?></p>
                                 </div>
+                                <?php if (!empty($device['rxPower'])): ?>
+                                <div class="mb-3">
+                                    <label class="form-label text-muted mb-1">RX Power</label>
+                                    <p class="fw-medium"><?php echo htmlspecialchars($device['rxPower']); ?></p>
+                                </div>
+                                <?php endif; ?>
                             </div>
                         </div>
                     </div>
