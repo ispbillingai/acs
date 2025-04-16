@@ -15,19 +15,12 @@ function getDevices($db) {
                 FROM devices 
                 ORDER BY last_contact DESC";
         
-        error_log("Executing SQL query: " . $sql);
-        
         $stmt = $db->prepare($sql);
         $stmt->execute();
         $devices = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
-        error_log("Found " . count($devices) . " devices");
-        error_log("Devices data: " . print_r($devices, true));
-        
         return $devices;
     } catch (PDOException $e) {
-        error_log("Database error in getDevices: " . $e->getMessage());
-        error_log("SQL State: " . $e->getCode());
         return [];
     }
 }

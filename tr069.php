@@ -1,10 +1,9 @@
 
 <?php
-// Enable error reporting with maximum verbosity
-error_reporting(E_ALL | E_STRICT);
+// Disable all error logging
+error_reporting(0);
 ini_set('display_errors', 0);
-ini_set('log_errors', 1);
-ini_set('error_log', __DIR__ . '/tr069_error.log');
+ini_set('log_errors', 0);
 
 // Tracking variables
 $GLOBALS['knownDevices'] = []; // Store known device IPs to reduce duplicate logging
@@ -15,40 +14,16 @@ $GLOBALS['verifiedParameters'] = []; // Track parameters that were successfully 
 $GLOBALS['hostCount'] = 0; // Track number of hosts discovered
 $GLOBALS['currentHostIndex'] = 1; // Track which host index we're currently fetching
 
-// Function to log with timestamp and priority level
-function logWithTimestamp($message, $level = 'INFO') {
-    $timestamp = date('Y-m-d H:i:s');
-    $logFile = __DIR__ . '/wifi_discovery.log';
-    file_put_contents($logFile, "[{$timestamp}] [{$level}] {$message}\n", FILE_APPEND);
-    
-    // Only log errors to error_log
-    if ($level === 'ERROR') {
-        error_log("[{$timestamp}] {$message}");
-    }
-}
-
-// Function to log important router data without duplication
+// Function to log router data without duplication - disabled version
 function logRouterData($paramName, $paramValue) {
     // Skip if we've already discovered this parameter
     if (in_array("{$paramName}={$paramValue}", $GLOBALS['discoveredParameters'])) {
         return;
     }
     
-    $logFile = __DIR__ . '/wifi_discovery.log';
-    $timestamp = date('Y-m-d H:i:s');
-    
-    // Skip duplicate entries for the same parameter
-    $existingContent = file_exists(__DIR__ . '/router_ssids.txt') ? file_get_contents(__DIR__ . '/router_ssids.txt') : '';
-    $parameterLine = "{$paramName} = {$paramValue}";
-    if (strpos($existingContent, $parameterLine) !== false) {
-        // Parameter already exists in file, skip logging it again
-        return;
-    }
-    
     // Check if this is the host count parameter
     if (stripos($paramName, 'HostNumberOfEntries') !== false) {
         $GLOBALS['hostCount'] = intval($paramValue);
-        logWithTimestamp("Found {$GLOBALS['hostCount']} hosts to retrieve", "INFO");
     }
     
     // Add to discovered parameters
@@ -57,41 +32,8 @@ function logRouterData($paramName, $paramValue) {
     // Add to verified parameters list (successful retrievals)
     $GLOBALS['verifiedParameters'][] = $paramName;
     
-    // Log in a formatted way that's easy to spot
-    file_put_contents($logFile, "[{$timestamp}] ********************************\n", FILE_APPEND);
-    file_put_contents($logFile, "[{$timestamp}] [ROUTER DATA FOUND]\n", FILE_APPEND);
-    file_put_contents($logFile, "[{$timestamp}] {$paramName} = {$paramValue}\n", FILE_APPEND);
-    file_put_contents($logFile, "[{$timestamp}] ********************************\n", FILE_APPEND);
-    
     // Save to the dedicated router_ssids.txt file
     file_put_contents(__DIR__ . '/router_ssids.txt', "{$paramName} = {$paramValue}\n", FILE_APPEND);
-}
-
-// Error logging with throttling for repetitive errors - with minimal logging
-function logError($errorCode, $errorMessage, $deviceType = 'Unknown') {
-    // Only log certain error codes or first occurrence of others
-    if ($errorCode != '9005' && $errorCode != '9002') {
-        $timestamp = date('Y-m-d H:i:s');
-        $errorKey = "{$deviceType}-{$errorCode}";
-        $currentTime = time();
-        
-        // Initialize counters if not set
-        if (!isset($GLOBALS['errorCounts'][$errorKey])) {
-            $GLOBALS['errorCounts'][$errorKey] = 0;
-            $GLOBALS['lastErrorTime'][$errorKey] = 0;
-        }
-        
-        // Increment error count
-        $GLOBALS['errorCounts'][$errorKey]++;
-        
-        // Only log first occurrence or every 20th occurrence
-        if ($GLOBALS['errorCounts'][$errorKey] === 1 || 
-            ($GLOBALS['errorCounts'][$errorKey] % 20 === 0)) {
-            
-            logWithTimestamp("FAULT CODE DETECTED: {$errorCode} - {$errorMessage} (Device: {$deviceType})", "ERROR");
-            $GLOBALS['lastErrorTime'][$errorKey] = $currentTime;
-        }
-    }
 }
 
 // Set unlimited execution time for long-running sessions
@@ -100,16 +42,6 @@ set_time_limit(0);
 // Basic connection information
 $clientIP = $_SERVER['REMOTE_ADDR'];
 $isNewSession = !isset($GLOBALS['knownDevices'][$clientIP]);
-
-// Log new connections only once per IP
-if ($isNewSession) {
-    logWithTimestamp("=== NEW TR-069 REQUEST ===");
-    logWithTimestamp("Client IP: " . $clientIP);
-    if (isset($_SERVER['HTTP_USER_AGENT'])) {
-        logWithTimestamp("Device User-Agent: " . $_SERVER['HTTP_USER_AGENT']);
-    }
-    $GLOBALS['knownDevices'][$clientIP] = true;
-}
 
 // Enhanced Huawei device detection based on User-Agent
 $isHuawei = false;
@@ -122,7 +54,6 @@ if (isset($_SERVER['HTTP_USER_AGENT'])) {
     // Detect MikroTik devices
     if (stripos($userAgent, 'mikrotik') !== false) {
         $isMikroTik = true;
-        // Don't log every MikroTik device to reduce noise
     }
     
     // Detect Huawei devices (these are the ones we're interested in)
@@ -131,15 +62,9 @@ if (isset($_SERVER['HTTP_USER_AGENT'])) {
         stripos($userAgent, 'hg8') !== false) {
         $isHuawei = true;
         
-        // Only log the first time we see this device, not for every request
-        if ($isNewSession) {
-            logWithTimestamp("DETECTED HUAWEI DEVICE: " . $userAgent);
-            
-            // Try to detect specific model
-            if (stripos($userAgent, 'hg8546') !== false) {
-                $modelDetected = 'HG8546M';
-                logWithTimestamp("DETECTED HG8546M MODEL", "INFO");
-            }
+        // Try to detect specific model
+        if (stripos($userAgent, 'hg8546') !== false) {
+            $modelDetected = 'HG8546M';
         }
     }
 }
@@ -152,14 +77,9 @@ if (!$isHuawei && $_SERVER['REQUEST_METHOD'] === 'POST') {
             stripos($raw_post, 'hg8') !== false) {
             $isHuawei = true;
             
-            if ($isNewSession) {
-                logWithTimestamp("DETECTED HUAWEI DEVICE FROM XML CONTENT");
-                
-                // Check for HG8546M model in XML
-                if (stripos($raw_post, 'HG8546M') !== false) {
-                    $modelDetected = 'HG8546M';
-                    logWithTimestamp("DETECTED HG8546M MODEL FROM XML", "INFO");
-                }
+            // Check for HG8546M model in XML
+            if (stripos($raw_post, 'HG8546M') !== false) {
+                $modelDetected = 'HG8546M';
             }
         }
     }
@@ -258,6 +178,24 @@ function generateParameterRequestXML($soapId, $parameters) {
     return $response;
 }
 
+// Function to call API endpoint to save data
+function storeDataInDatabase() {
+    if (file_exists(__DIR__ . '/router_ssids.txt')) {
+        $url = 'http://' . $_SERVER['HTTP_HOST'] . '/backend/api/store_tr069_data.php';
+        
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_POST, 1);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+        
+        $result = curl_exec($ch);
+        curl_close($ch);
+        
+        return true;
+    }
+    return false;
+}
+
 // Skip processing for MikroTik devices entirely - they consistently fail
 if ($isMikroTik) {
     // Silent exit - don't even attempt TR-069 requests for MikroTik routers
@@ -295,8 +233,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!empty($raw_post)) {
         // Check if this is an Inform message
         if (stripos($raw_post, '<cwmp:Inform>') !== false) {
-            logWithTimestamp("Processing: Inform", "INFO");
-            
             // Extract the SOAP ID
             preg_match('/<cwmp:ID SOAP-ENV:mustUnderstand="1">(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
             $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
@@ -305,12 +241,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             preg_match('/<ProductClass>(.*?)<\/ProductClass>/s', $raw_post, $modelMatches);
             if (isset($modelMatches[1])) {
                 $model = trim($modelMatches[1]);
-                logWithTimestamp("Device Model: {$model}", "INFO");
                 
                 // Check for HG8546M model
                 if (stripos($model, 'HG8546M') !== false) {
                     $modelDetected = 'HG8546M';
-                    logWithTimestamp("CONFIRMED HG8546M MODEL", "INFO");
                 }
             }
             
@@ -319,7 +253,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (isset($deviceMatches[1]) && isset($deviceMatches[2])) {
                 $model = $deviceMatches[1];
                 $serial = $deviceMatches[2];
-                logWithTimestamp("Device info - Model: {$model}, Serial: {$serial}", "INFO");
+                // Save to the router_ssids.txt file
+                file_put_contents(__DIR__ . '/router_ssids.txt', "InternetGatewayDevice.DeviceInfo.ProductClass = {$model}\n", FILE_APPEND);
+                file_put_contents(__DIR__ . '/router_ssids.txt', "InternetGatewayDevice.DeviceInfo.SerialNumber = {$serial}\n", FILE_APPEND);
             }
             
             // If this is an Inform request, respond with InformResponse
@@ -329,14 +265,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             header('Content-Type: text/xml');
             echo $response;
-            logWithTimestamp("=== REQUEST COMPLETED ===", "INFO");
             exit;
         }
         
         // Check if this is a GetParameterValuesResponse (contains network data)
         if (stripos($raw_post, 'GetParameterValuesResponse') !== false) {
-            logWithTimestamp("=== DEVICE INFORMATION RESPONSE RECEIVED ===", "INFO");
-            
             // Extract information using regex
             preg_match_all('/<Name>(.*?)<\/Name>\s*<Value[^>]*>(.*?)<\/Value>/si', $raw_post, $matches, PREG_SET_ORDER);
             
@@ -365,13 +298,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $foundHostNumberOfEntries = true;
                         $_SESSION['host_count'] = intval($paramValue);
                         $GLOBALS['hostCount'] = intval($paramValue);
-                        logWithTimestamp("Found {$GLOBALS['hostCount']} hosts to retrieve", "INFO");
                     }
                     
                     // Categorize the parameter by its name
                     if (stripos($paramName, 'SSID') !== false && stripos($paramName, 'WLANConfiguration.1') !== false) {
                         $foundSSIDs = true;
-                        logWithTimestamp("Found SSID: {$paramValue}", "INFO");
                     } else if (
                         stripos($paramName, 'ExternalIPAddress') !== false || 
                         stripos($paramName, 'SubnetMask') !== false || 
@@ -379,21 +310,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         stripos($paramName, 'DNSServer') !== false
                     ) {
                         $foundWANSettings = true;
-                        logWithTimestamp("Found WAN Setting: {$paramName} = {$paramValue}", "INFO");
                     } else if (
                         stripos($paramName, 'Host') !== false
                     ) {
                         $foundConnectedDevices = true;
-                        logWithTimestamp("Found Connected Device Info: {$paramName} = {$paramValue}", "INFO");
                     }
                     
                     // Log the parameter
                     logRouterData($paramName, $paramValue);
                 }
-            }
-            
-            if (!$foundSSIDs && !$foundWANSettings && !$foundConnectedDevices) {
-                logWithTimestamp("No network information found in the response", "WARNING");
             }
             
             // Extract the SOAP ID for the next request
@@ -411,7 +336,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Check which host index we're currently on
                 if ($_SESSION['current_host_index'] <= $_SESSION['host_count']) {
                     $nextParam = ["InternetGatewayDevice.LANDevice.1.Hosts.Host.{$_SESSION['current_host_index']}.IPAddress"];
-                    logWithTimestamp("Fetching details for host {$_SESSION['current_host_index']} of {$_SESSION['host_count']}", "INFO");
                     $_SESSION['current_host_index']++;
                 }
             }
@@ -468,6 +392,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             // If we've tried everything, just complete the session
             if ($nextParam === null) {
+                // Store the data in the database before completing
+                storeDataInDatabase();
+                
                 header('Content-Type: text/xml');
                 echo '<?xml version="1.0" encoding="UTF-8"?>
 <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
@@ -481,7 +408,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
                 
-                logWithTimestamp("=== NETWORK DISCOVERY COMPLETED ===", "INFO");
                 exit;
             }
             
@@ -489,8 +415,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['attempted_parameters'][] = implode(',', $nextParam);
             
             $nextRequest = generateParameterRequestXML($soapId, $nextParam);
-            
-            logWithTimestamp("Trying next parameter set: " . implode(", ", $nextParam), "INFO");
             
             header('Content-Type: text/xml');
             echo $nextRequest;
@@ -504,9 +428,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!empty($faultMatches)) {
                 $faultCode = $faultMatches[1];
                 $faultString = $faultMatches[2];
-                
-                // Use the enhanced error logging for device-specific errors
-                $deviceType = $isMikroTik ? "MikroTik" : ($isHuawei ? "Huawei" : "Unknown");
                 
                 // Extract SOAP ID
                 preg_match('/<cwmp:ID SOAP-ENV:mustUnderstand="1">(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
@@ -522,21 +443,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     
                     $_SESSION['fault_parameters'][] = $faultParam;
-                    
-                    // Only log if this is not a common "Invalid parameter" error
-                    if ($faultCode != '9005') {
-                        logWithTimestamp("Parameter that caused fault: {$faultParam}", "INFO");
-                    }
                 }
-                
-                // Log the error - but with minimal output for common errors
-                logError($faultCode, $faultString, $deviceType);
                 
                 // Check if we need to continue with host parameters
                 if ($_SESSION['host_count'] > 0 && $_SESSION['current_host_index'] <= $_SESSION['host_count']) {
                     // Continue with the next host
                     $nextParam = ["InternetGatewayDevice.LANDevice.1.Hosts.Host.{$_SESSION['current_host_index']}.IPAddress"];
-                    logWithTimestamp("Continuing with host {$_SESSION['current_host_index']} of {$_SESSION['host_count']}", "INFO");
                     $_SESSION['attempted_parameters'][] = implode(',', $nextParam);
                     $_SESSION['current_host_index']++;
                     
@@ -583,6 +495,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 // If we've tried everything, just complete the session
                 if ($nextParam === null) {
+                    // Store the data in the database before completing
+                    storeDataInDatabase();
+                    
                     header('Content-Type: text/xml');
                     echo '<?xml version="1.0" encoding="UTF-8"?>
 <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
@@ -596,7 +511,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
                     
-                    logWithTimestamp("=== NETWORK DISCOVERY COMPLETED (all parameters attempted) ===", "INFO");
                     exit;
                 }
                 
@@ -605,14 +519,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 $nextRequest = generateParameterRequestXML($soapId, $nextParam);
                 
-                logWithTimestamp("Fault received, trying next parameter set: " . implode(", ", $nextParam), "INFO");
-                
                 header('Content-Type: text/xml');
                 echo $nextRequest;
                 exit;
-            } else {
-                // Couldn't parse the fault details
-                logWithTimestamp("FAULT DETECTED but couldn't parse details", "ERROR");
             }
             
             // For other fault codes, just acknowledge and complete
@@ -629,13 +538,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
             
-            logWithTimestamp("=== REQUEST COMPLETED ===", "INFO");
             exit;
         }
     } else {
         // Empty POST - start parameter discovery
-        logWithTimestamp("EMPTY POST RECEIVED - This should trigger network discovery", "INFO");
-        
         // Generate a session ID
         $sessionId = md5(uniqid(rand(), true));
         
@@ -643,15 +549,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $initialParameters = $coreParameters[0];
         $initialRequest = generateParameterRequestXML($sessionId, $initialParameters);
         
-        if ($isHuawei) {
-            logWithTimestamp("Starting network discovery with session ID: " . $sessionId, "INFO");
-            logWithTimestamp("Sending simplified SSID request for: " . implode(", ", $initialParameters), "INFO");
-        }
-        
         header('Content-Type: text/xml');
         echo $initialRequest;
         
-        logWithTimestamp("=== REQUEST COMPLETED ===", "INFO");
         exit;
     }
 }
@@ -673,9 +573,6 @@ try {
     // Handle the request
     $server->handleRequest();
 } catch (Exception $e) {
-    logWithTimestamp("ERROR: " . $e->getMessage(), "ERROR");
     header('HTTP/1.1 500 Internal Server Error');
     echo "Internal Server Error";
 }
-
-logWithTimestamp("=== REQUEST COMPLETED ===", "INFO");

@@ -7,21 +7,6 @@ header('Access-Control-Allow-Headers: Content-Type');
 
 require_once __DIR__ . '/../config/database.php';
 
-// Add error logging function - simpler version without excessive logging
-function logError($message, $data = null) {
-    $timestamp = date('Y-m-d H:i:s');
-    $logMessage = "[{$timestamp}] {$message}";
-    
-    if ($data !== null) {
-        $logMessage .= "\nData: " . print_r($data, true);
-    }
-    
-    $logMessage .= "\n--------------------------------------------------\n";
-    
-    // Log to PHP error log for backup
-    error_log("TR069 DATA: {$message}");
-}
-
 // Only allow POST requests
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
@@ -189,7 +174,7 @@ try {
             ]);
             
             if (!$insertResult) {
-                throw new Exception("Failed to insert device: " . implode(" ", $insertStmt->errorInfo()));
+                throw new Exception("Failed to insert device");
             }
             
             $deviceId = $db->lastInsertId();
@@ -214,7 +199,7 @@ try {
             ]);
             
             if (!$updateResult) {
-                throw new Exception("Failed to update device: " . implode(" ", $updateStmt->errorInfo()));
+                throw new Exception("Failed to update device");
             }
         }
         
@@ -362,10 +347,8 @@ try {
     
 } catch (PDOException $e) {
     http_response_code(500);
-    echo json_encode(['error' => 'Database error: ' . $e->getMessage()]);
-    error_log("Database error in store_tr069_data.php: " . $e->getMessage());
+    echo json_encode(['error' => 'Database error']);
 } catch (Exception $e) {
     http_response_code(500);
-    echo json_encode(['error' => 'Failed to store router data: ' . $e->getMessage()]);
-    error_log("Critical error in store_tr069_data.php: " . $e->getMessage());
+    echo json_encode(['error' => 'Failed to store router data']);
 }

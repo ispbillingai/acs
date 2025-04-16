@@ -20,7 +20,6 @@ class SessionManager {
             
             return true;
         } catch (PDOException $e) {
-            error_log("Error creating session: " . $e->getMessage());
             return false;
         }
     }
@@ -39,7 +38,6 @@ class SessionManager {
             
             return $session;
         } catch (PDOException $e) {
-            error_log("Error validating session: " . $e->getMessage());
             return false;
         }
     }
@@ -68,7 +66,6 @@ class SessionManager {
             
             return true;
         } catch (PDOException $e) {
-            error_log("Error updating session: " . $e->getMessage());
             return false;
         }
     }
@@ -101,7 +98,6 @@ class SessionManager {
             
             return true;
         } catch (PDOException $e) {
-            error_log("Error updating device status: " . $e->getMessage());
             return false;
         }
     }

@@ -1,85 +1,197 @@
 
-import { useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
-import { DeviceInfo } from "@/components/DeviceInfo";
-import { DeviceParameters } from "@/components/DeviceParameters";
-import { DeviceActions } from "@/components/DeviceActions";
-import { ConnectedHosts } from "@/components/ConnectedHosts";
-import { DeviceStats } from "@/components/DeviceStats";
+import React, { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import DeviceParameters from '@/components/DeviceParameters';
+import { API_BASE_URL } from '@/config';
+import { ArrowLeft, RefreshCw } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 
+// Define the Device interface for TypeScript
 interface Device {
   id: string;
-  serialNumber: string;
+  status: string;
   manufacturer: string;
   model: string;
-  status: string;
-  lastContact: string;
-  ipAddress: string;
+  serialNumber: string;
   softwareVersion?: string;
   hardwareVersion?: string;
-  connectedClients?: number;
+  ipAddress: string;
+  lastContact: string;
+  connectedClients: number;
   uptime?: string;
 }
 
 const DevicePage = () => {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [device, setDevice] = useState<Device | null>(null);
-  const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchDevice = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/devices/${id}`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch device: ${response.statusText}`);
+      }
+      const data = await response.json();
+      setDevice(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An unknown error occurred');
+      console.error('Error fetching device:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const refreshDevice = async () => {
+    setRefreshing(true);
+    try {
+      await fetchDevice();
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchDeviceData = async () => {
-      try {
-        // Fetch device data
-        const response = await fetch(`/api/devices.php?id=${id}`);
-        if (response.ok) {
-          const data = await response.json();
-          setDevice(data);
-          
-          // Also set the devices array with just this device
-          // This helps compatibility with components expecting an array
-          setDevices([data]);
-        } else {
-          console.error("Failed to fetch device data");
-        }
-      } catch (error) {
-        console.error("Error fetching device data:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (id) {
-      fetchDeviceData();
-    }
+    fetchDevice();
   }, [id]);
 
+  // Helper function for formatting dates
+  const formatDate = (dateString: string) => {
+    if (!dateString) return 'Unknown';
+    const date = new Date(dateString);
+    return date.toLocaleString();
+  };
+
   if (loading) {
-    return <div className="flex justify-center items-center min-h-screen">Loading device data...</div>;
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-4" />
+          <p>Loading device information...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="container mx-auto p-4">
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded relative" role="alert">
+          <strong className="font-bold">Error:</strong>
+          <span className="block sm:inline"> {error}</span>
+          <Button 
+            variant="outline" 
+            className="mt-2" 
+            onClick={() => navigate('/devices')}
+          >
+            <ArrowLeft className="mr-2 h-4 w-4" /> Back to Devices
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   if (!device) {
-    return <div className="flex justify-center items-center min-h-screen">Device not found</div>;
+    return (
+      <div className="container mx-auto p-4">
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded relative" role="alert">
+          <strong className="font-bold">Device Not Found:</strong>
+          <span className="block sm:inline"> The requested device could not be found.</span>
+          <Button 
+            variant="outline" 
+            className="mt-2" 
+            onClick={() => navigate('/devices')}
+          >
+            <ArrowLeft className="mr-2 h-4 w-4" /> Back to Devices
+          </Button>
+        </div>
+      </div>
+    );
   }
 
+  // Define the deviceSummary with properties that match the required type
+  const deviceSummary = {
+    status: device.status || 'unknown',
+    manufacturer: device.manufacturer || 'Unknown',
+    model: device.model || 'Unknown',
+    serialNumber: device.serialNumber || 'Unknown',
+    softwareVersion: device.softwareVersion || 'Unknown',
+    hardwareVersion: device.hardwareVersion || 'Unknown',
+    ipAddress: device.ipAddress || 'Unknown',
+    lastContact: device.lastContact || 'Unknown',
+    connectedClients: device.connectedClients || 0,
+    uptime: device.uptime || 'Unknown'
+  };
+
   return (
-    <div className="container mx-auto p-6 space-y-8">
-      <h1 className="text-2xl font-bold mb-8">
-        {device.manufacturer} {device.model} - {device.serialNumber}
-      </h1>
-
-      <DeviceStats devices={devices} />
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <DeviceInfo device={device} />
-        <DeviceActions device={device} />
+    <div className="container mx-auto p-4">
+      <div className="flex justify-between items-center mb-4">
+        <Button 
+          variant="outline" 
+          onClick={() => navigate('/devices')}
+        >
+          <ArrowLeft className="mr-2 h-4 w-4" /> Back to Devices
+        </Button>
+        <Button 
+          variant="outline" 
+          onClick={refreshDevice}
+          disabled={refreshing}
+        >
+          <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} /> 
+          {refreshing ? 'Refreshing...' : 'Refresh'}
+        </Button>
       </div>
 
-      <DeviceParameters deviceId={id || ""} />
+      <div className="grid gap-6 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <div className="flex justify-between items-center">
+              <CardTitle>{device.model}</CardTitle>
+              <Badge variant={device.status === 'online' ? 'success' : 'destructive'}>
+                {device.status === 'online' ? 'Online' : 'Offline'}
+              </Badge>
+            </div>
+            <CardDescription>
+              Serial: {device.serialNumber}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="text-sm font-medium">Manufacturer</div>
+                <div className="text-sm">{device.manufacturer}</div>
+                
+                <div className="text-sm font-medium">IP Address</div>
+                <div className="text-sm">{device.ipAddress}</div>
+                
+                <div className="text-sm font-medium">Software Version</div>
+                <div className="text-sm">{deviceSummary.softwareVersion}</div>
+                
+                <div className="text-sm font-medium">Hardware Version</div>
+                <div className="text-sm">{deviceSummary.hardwareVersion}</div>
+                
+                <div className="text-sm font-medium">Connected Clients</div>
+                <div className="text-sm">{device.connectedClients}</div>
+                
+                <div className="text-sm font-medium">Last Contact</div>
+                <div className="text-sm">{formatDate(device.lastContact)}</div>
+                
+                <div className="text-sm font-medium">Uptime</div>
+                <div className="text-sm">{deviceSummary.uptime}</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-      {device.connectedClients && device.connectedClients > 0 && (
-        <ConnectedHosts deviceId={id || ""} />
-      )}
+        <DeviceParameters deviceId={id || ''} />
+      </div>
     </div>
   );
 };

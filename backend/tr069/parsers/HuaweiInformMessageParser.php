@@ -62,7 +62,6 @@ class HuaweiInformMessageParser {
             ];
 
             if (!$request) {
-                error_log("ERROR: Huawei parser received empty request");
                 throw new Exception("Empty request received");
             }
 
@@ -108,32 +107,14 @@ class HuaweiInformMessageParser {
                 }
 
                 if (!empty($parameters)) {
-                    file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " Found " . count($parameters) . " parameters\n", FILE_APPEND);
-                    
                     foreach ($parameters as $param) {
                         $name = (string)$param->Name;
                         $value = (string)$param->Value;
-                        
-                        // Log all parameters to help with debugging
-                        file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " Parameter: $name = $value\n", FILE_APPEND);
                         
                         // Map the parameter if we know it
                         if (isset($this->parameterMap[$name])) {
                             $key = $this->parameterMap[$name];
                             $deviceInfo[$key] = $value;
-                            
-                            // Extra logging for important WiFi parameters
-                            if (stripos($key, 'ssid') !== false || stripos($key, 'password') !== false) {
-                                file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " !!! FOUND WIFI PARAMETER !!! $key = $value\n", FILE_APPEND);
-                            }
-                        }
-                        
-                        // Special case: look for any parameters with SSID, WPAKey, KeyPassphrase in the name
-                        if (stripos($name, 'SSID') !== false || 
-                            stripos($name, 'KeyPassphrase') !== false || 
-                            stripos($name, 'WPAKey') !== false ||
-                            stripos($name, 'PreSharedKey') !== false) {
-                            file_put_contents(__DIR__ . '/../../../wifi_discovery.log', date('Y-m-d H:i:s') . " !!! POSSIBLE WIFI PARAMETER !!! $name = $value\n", FILE_APPEND);
                         }
                     }
                 }
@@ -147,7 +128,6 @@ class HuaweiInformMessageParser {
             return $deviceInfo;
 
         } catch (Exception $e) {
-            error_log("ERROR parsing Huawei Inform message: " . $e->getMessage());
             throw $e;
         }
     }

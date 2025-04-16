@@ -132,17 +132,6 @@ class InformMessageParser {
                         $name = (string)$param->Name;
                         $value = (string)$param->Value;
 
-                        // Enhanced parameter logging
-                        if (strpos($name, 'Device.DeviceInfo') !== false ||
-                            strpos($name, 'Device.Ethernet') !== false ||
-                            strpos($name, 'Device.WiFi') !== false ||
-                            strpos($name, 'Device.IP') !== false ||
-                            strpos($name, 'Device.DHCPv4') !== false ||
-                            strpos($name, 'Device.Hosts') !== false ||
-                            strpos($name, 'InternetGatewayDevice.LANDevice.1.Hosts') !== false) {
-                            error_log("TR-069 Parameter - $name: $value");
-                        }
-
                         // Map standard parameters
                         if (isset($this->parameterMap[$name])) {
                             $key = $this->parameterMap[$name];
@@ -195,29 +184,6 @@ class InformMessageParser {
                         }
                     }
                 }
-
-                // Enhanced logging
-                error_log("TR-069 Device Parameters Summary:");
-                error_log("- Device Identity: " . ($deviceInfo['systemIdentity'] ?: 'Not provided'));
-                error_log("- Model: " . $deviceInfo['modelName']);
-                error_log("- Product Class: " . ($deviceInfo['productClass'] ?: 'Not provided'));
-                error_log("- MAC Address: " . ($deviceInfo['macAddress'] ?: 'Not provided'));
-                error_log("- IP Address: " . ($deviceInfo['ipAddress'] ?: 'Not provided'));
-                error_log("- DHCP IP: " . ($deviceInfo['dhcpIpAddress'] ?: 'Not provided'));
-                error_log("- Uptime: " . $deviceInfo['uptime'] . " seconds");
-                error_log("- SSID 1: " . ($deviceInfo['ssid1'] ?: 'Not provided'));
-                error_log("- SSID 2: " . ($deviceInfo['ssid2'] ?: 'Not provided'));
-                error_log("- WiFi Clients 1: " . $deviceInfo['connectedClients1']);
-                error_log("- WiFi Clients 2: " . $deviceInfo['connectedClients2']);
-                error_log("- DHCP Hosts: " . $deviceInfo['dhcpHostCount']);
-                
-                // Log connected hosts
-                if (!empty($deviceInfo['connectedHosts'])) {
-                    error_log("- Connected Hosts: " . count($deviceInfo['connectedHosts']));
-                    foreach ($deviceInfo['connectedHosts'] as $hostIndex => $host) {
-                        error_log("  - Host #{$hostIndex}: {$host['hostName']} ({$host['ipAddress']})");
-                    }
-                }
             }
 
             if (empty($deviceInfo['serialNumber'])) {
@@ -227,7 +193,6 @@ class InformMessageParser {
             return $deviceInfo;
 
         } catch (Exception $e) {
-            error_log("Error parsing Inform message: " . $e->getMessage());
             throw $e;
         }
     }
