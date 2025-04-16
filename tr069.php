@@ -90,10 +90,15 @@ if (!$isHuawei && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // Track which parameters have been attempted to avoid loops
 $attemptedParameters = [];
+session_start();
+if (!isset($_SESSION['attempted_parameters'])) {
+    $_SESSION['attempted_parameters'] = [];
+}
 
 // Array of parameter requests focused on SSIDs, WAN settings, and connected devices
+// IMPORTANT: Only request WLAN 1 configuration, not 2-5
 $parameterRequests = [
-    // Basic SSID for most routers (the only one that seems to work reliably)
+    // Basic SSID for most routers
     ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID'],
     
     // WAN IP Connection details
@@ -107,9 +112,14 @@ $parameterRequests = [
     
     // LAN Connected Devices
     ['InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries'],
+    ['InternetGatewayDevice.LANDevice.1.Hosts.Host.1.IPAddress'],
+    ['InternetGatewayDevice.LANDevice.1.Hosts.Host.1.PhysAddress'],
+    ['InternetGatewayDevice.LANDevice.1.Hosts.Host.1.HostName'],
     
-    // WiFi Connected Devices
-    ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDeviceNumberOfEntries']
+    // WiFi Connected Devices - Only for WLAN 1
+    ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDeviceNumberOfEntries'],
+    ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDevice.1.MACAddress'],
+    ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDevice.1.SignalStrength']
 ];
 
 // Function to generate a parameter request XML
@@ -150,7 +160,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         // Reset attempted parameters for new sessions
         if (isset($_SESSION['attempted_parameters'])) {
-            unset($_SESSION['attempted_parameters']);
+            $_SESSION['attempted_parameters'] = [];
         }
     }
     
@@ -269,7 +279,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (isset($_SESSION['request_index'])) {
                 $requestIndex = $_SESSION['request_index'];
             } else {
-                session_start();
                 $_SESSION['request_index'] = $requestIndex;
             }
             
@@ -362,7 +371,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($faultCode == '9002') {
                     logWithTimestamp("Internal error detected - switching to simplified request", "INFO");
                     
-                    // Try a very simple request for just the SSID
+                    // Try a very simple request for just the SSID of WLAN 1
                     $simpleParam = ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID'];
                     
                     // Store the current fault path so we don't retry it
@@ -375,6 +384,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $faultParam = $paramMatch[1];
                         $_SESSION['fault_parameters'][] = $faultParam;
                         logWithTimestamp("Parameter that caused fault: {$faultParam}", "INFO");
+                        
+                        // Skip any parameters related to WLAN 2-5 since we're focusing only on WLAN 1
+                        if (preg_match('/WLANConfiguration\.[2-5]/', $faultParam)) {
+                            logWithTimestamp("Skipping WLAN 2-5 parameter that caused fault", "INFO");
+                        }
                     }
                     
                     $simpleRequest = generateParameterRequestXML($soapId, $simpleParam);
@@ -390,7 +404,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (isset($_SESSION['fault_request_index'])) {
                     $faultRequestIndex = $_SESSION['fault_request_index'];
                 } else {
-                    session_start();
                     $_SESSION['fault_request_index'] = $faultRequestIndex;
                 }
                 
@@ -404,8 +417,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (isset($_SESSION['fault_parameters'])) {
                         $skipParams = false;
                         foreach ($nextParameters as $param) {
-                            if (in_array($param, $_SESSION['fault_parameters'])) {
+                            if (in_array($param, $_SESSION['fault_parameters']) || 
+                                preg_match('/WLANConfiguration\.[2-5]/', $param)) {
                                 $skipParams = true;
+                                logWithTimestamp("Skipping parameter that caused fault previously: {$param}", "INFO");
                                 break;
                             }
                         }
