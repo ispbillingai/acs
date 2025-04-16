@@ -1,13 +1,14 @@
 
 import { Button } from "@/components/ui/button";
-import { DownloadIcon, RefreshIcon, PowerIcon } from "lucide-react";
+import { DownloadIcon, RefreshCwIcon, PowerIcon } from "lucide-react";
 import { Device } from "@/types";
 
 export interface DeviceActionsProps {
   device: Device;
+  onRefresh?: () => void;
 }
 
-export const DeviceActions = ({ device }: DeviceActionsProps) => {
+export const DeviceActions = ({ device, onRefresh }: DeviceActionsProps) => {
   const handleReboot = () => {
     if (window.confirm(`Are you sure you want to reboot device ${device.serialNumber}?`)) {
       console.log("Rebooting device:", device.id);
@@ -17,9 +18,13 @@ export const DeviceActions = ({ device }: DeviceActionsProps) => {
   };
 
   const handleRefresh = () => {
-    console.log("Refreshing device data:", device.id);
-    // In a real application, this would refresh the device data
-    window.location.reload();
+    if (onRefresh) {
+      onRefresh();
+    } else {
+      console.log("Refreshing device data:", device.id);
+      // In a real application, this would refresh the device data
+      window.location.reload();
+    }
   };
 
   const handleBackup = () => {
@@ -31,7 +36,7 @@ export const DeviceActions = ({ device }: DeviceActionsProps) => {
   return (
     <div className="flex space-x-2">
       <Button variant="outline" size="sm" onClick={handleRefresh}>
-        <RefreshIcon className="mr-2 h-4 w-4" />
+        <RefreshCwIcon className="mr-2 h-4 w-4" />
         Refresh
       </Button>
       <Button variant="outline" size="sm" onClick={handleBackup}>

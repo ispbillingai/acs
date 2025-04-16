@@ -1,4 +1,3 @@
-
 <?php
 // Disable all error logging
 error_reporting(0);
@@ -7,11 +6,19 @@ ini_set('log_errors', 0);
 
 // Create debug log file
 $debugLogFile = __DIR__ . '/../tr069_debug.log';
-file_put_contents($debugLogFile, date('Y-m-d H:i:s') . " [DEBUG] === TR069 Backend Debug Log Initialized ===\n", FILE_APPEND);
+file_put_contents($debugLogFile, date('Y-m-d H:i:s') . " [DEBUG] === TR069 Optical Power Readings Log Initialized ===\n", FILE_APPEND);
 
 function writeDebugLog($message) {
     global $debugLogFile;
-    file_put_contents($debugLogFile, date('Y-m-d H:i:s') . " [DEBUG] " . $message . "\n", FILE_APPEND);
+    // Only log messages related to optical power readings
+    if (stripos($message, 'power') !== false || 
+        stripos($message, 'optical') !== false || 
+        stripos($message, 'txpower') !== false || 
+        stripos($message, 'rxpower') !== false ||
+        stripos($message, 'epon') !== false ||
+        stripos($message, 'gpon') !== false) {
+        file_put_contents($debugLogFile, date('Y-m-d H:i:s') . " [DEBUG] " . $message . "\n", FILE_APPEND);
+    }
 }
 
 // Tracking variables
@@ -159,8 +166,13 @@ if (!isset($_SESSION['current_host_index'])) {
 
 // Core parameters that are likely to work across most devices
 $coreParameters = [
+    // Optical power readings with high priority
+    ['InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.TXPower'],
+    ['InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.RXPower'],
+    ['InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.TXPower'],
+    ['InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.RXPower'],
+    // Regular parameters
     ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID'],
-    // Added the requested parameters with high priority
     ['InternetGatewayDevice.DeviceInfo.UpTime'],
     ['InternetGatewayDevice.DeviceInfo.SoftwareVersion'],
     ['InternetGatewayDevice.DeviceInfo.HardwareVersion'],
@@ -673,3 +685,21 @@ try {
     header('HTTP/1.1 500 Internal Server Error');
     echo "Internal Server Error";
 }
+
+// Enhance the SOAP request generation for optical power readings
+if (stripos($raw_post, '<cwmp:Inform>') !== false) {
+    // After regular Inform response, prioritize optical power readings
+    writeDebugLog("Prioritizing optical power readings for device");
+    
+    // Create a custom SOAP envelope for optical power readings
+    $opticalRequest = '<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <SOAP-ENV:Header>
+    <cwmp:ID SOAP-ENV:mustUnderstand="1">req-epower</cwmp:ID>
+  </SOAP-ENV:Header>
+  <SOAP-ENV:Body>
+    <cwmp:GetParameterValues>
+      <ParameterNames SOAP-ENC:arrayType="xsd:string[4]">
+        <string>InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.TXPower</string>
+        <string>InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.RXPower</string>
+        <string>InternetGatewayDevice.

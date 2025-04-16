@@ -6,7 +6,7 @@ export interface Device {
   model?: string;
   softwareVersion?: string;
   hardwareVersion?: string;
-  status: 'online' | 'offline' | 'warning';
+  status: 'online' | 'offline' | 'warning' | 'provisioning';
   lastContact: string;
   ipAddress?: string;
   ssid?: string;
