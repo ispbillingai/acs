@@ -23,6 +23,14 @@ function logRouterData($paramName, $paramValue) {
     $logFile = __DIR__ . '/wifi_discovery.log';
     $timestamp = date('Y-m-d H:i:s');
     
+    // Skip duplicate entries for the same parameter
+    $existingContent = file_exists(__DIR__ . '/router_ssids.txt') ? file_get_contents(__DIR__ . '/router_ssids.txt') : '';
+    $parameterLine = "{$paramName} = {$paramValue}";
+    if (strpos($existingContent, $parameterLine) !== false) {
+        // Parameter already exists in file, skip logging it again
+        return;
+    }
+    
     // Log in a formatted way that's easy to spot
     file_put_contents($logFile, "[{$timestamp}] ********************************\n", FILE_APPEND);
     file_put_contents($logFile, "[{$timestamp}] [ROUTER DATA FOUND]\n", FILE_APPEND);
@@ -80,13 +88,13 @@ if (!$isHuawei && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+// Track which parameters have been attempted to avoid loops
+$attemptedParameters = [];
+
 // Array of parameter requests focused on SSIDs, WAN settings, and connected devices
 $parameterRequests = [
-    // Basic SSID for most routers
+    // Basic SSID for most routers (the only one that seems to work reliably)
     ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID'],
-    
-    // 5GHz SSID
-    ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID'],
     
     // WAN IP Connection details
     ['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress'],
@@ -96,15 +104,12 @@ $parameterRequests = [
     
     // WAN PPP Connection details (for PPPoE connections)
     ['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress'],
-    ['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.DefaultGateway'],
-    ['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.DNSServers'],
     
     // LAN Connected Devices
     ['InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries'],
     
     // WiFi Connected Devices
-    ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDeviceNumberOfEntries'],
-    ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.AssociatedDeviceNumberOfEntries']
+    ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDeviceNumberOfEntries']
 ];
 
 // Function to generate a parameter request XML
@@ -141,6 +146,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (file_exists(__DIR__ . '/router_ssids.txt')) {
             unlink(__DIR__ . '/router_ssids.txt');
             file_put_contents(__DIR__ . '/router_ssids.txt', "# TR-069 WiFi Parameters Discovered " . date('Y-m-d H:i:s') . "\n", FILE_APPEND);
+        }
+        
+        // Reset attempted parameters for new sessions
+        if (isset($_SESSION['attempted_parameters'])) {
+            unset($_SESSION['attempted_parameters']);
         }
     }
     
@@ -266,20 +276,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $requestIndex++;
             $_SESSION['request_index'] = $requestIndex;
             
-            if ($requestIndex < count($parameterRequests)) {
-                $nextParameters = $parameterRequests[$requestIndex];
-                $nextRequest = generateParameterRequestXML($soapId, $nextParameters);
-                
-                logWithTimestamp("Trying next parameter set: " . implode(", ", $nextParameters), "INFO");
-                
+            // Make sure we don't go out of bounds
+            if ($requestIndex >= count($parameterRequests)) {
+                // If we've tried all parameter sets, just send completion response
                 header('Content-Type: text/xml');
-                echo $nextRequest;
-                exit;
-            }
-            
-            // Send a simple response to complete the transaction
-            header('Content-Type: text/xml');
-            echo '<?xml version="1.0" encoding="UTF-8"?>
+                echo '<?xml version="1.0" encoding="UTF-8"?>
 <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
   <SOAP-ENV:Header>
     <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
@@ -290,8 +291,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </cwmp:SetParameterValuesResponse>
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
+                
+                logWithTimestamp("=== NETWORK DISCOVERY COMPLETED ===", "INFO");
+                exit;
+            }
             
-            logWithTimestamp("=== NETWORK DISCOVERY COMPLETED ===", "INFO");
+            // Check if we've already attempted this parameter
+            if (!isset($_SESSION['attempted_parameters'])) {
+                $_SESSION['attempted_parameters'] = [];
+            }
+            
+            $nextParameters = $parameterRequests[$requestIndex];
+            $paramKey = implode(',', $nextParameters);
+            
+            if (in_array($paramKey, $_SESSION['attempted_parameters'])) {
+                // Skip parameters we've already attempted
+                logWithTimestamp("Skipping already attempted parameter: " . $paramKey, "INFO");
+                
+                // Move to the next parameters
+                $requestIndex++;
+                $_SESSION['request_index'] = $requestIndex;
+                
+                if ($requestIndex >= count($parameterRequests)) {
+                    // If we've tried all parameter sets, just send completion response
+                    header('Content-Type: text/xml');
+                    echo '<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <SOAP-ENV:Header>
+    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </SOAP-ENV:Header>
+  <SOAP-ENV:Body>
+    <cwmp:SetParameterValuesResponse>
+      <Status>0</Status>
+    </cwmp:SetParameterValuesResponse>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>';
+                    
+                    logWithTimestamp("=== NETWORK DISCOVERY COMPLETED (all parameters attempted) ===", "INFO");
+                    exit;
+                }
+                
+                $nextParameters = $parameterRequests[$requestIndex];
+            }
+            
+            $_SESSION['attempted_parameters'][] = $paramKey;
+            
+            $nextRequest = generateParameterRequestXML($soapId, $nextParameters);
+            
+            logWithTimestamp("Trying next parameter set: " . implode(", ", $nextParameters), "INFO");
+            
+            header('Content-Type: text/xml');
+            echo $nextRequest;
             exit;
         }
         
@@ -314,6 +364,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     
                     // Try a very simple request for just the SSID
                     $simpleParam = ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID'];
+                    
+                    // Store the current fault path so we don't retry it
+                    if (!isset($_SESSION['fault_parameters'])) {
+                        $_SESSION['fault_parameters'] = [];
+                    }
+                    
+                    // Extract what parameter caused the fault
+                    if (preg_match('/<cwmp:GetParameterValues>.*?<string>(.*?)<\/string>/s', $raw_post, $paramMatch)) {
+                        $faultParam = $paramMatch[1];
+                        $_SESSION['fault_parameters'][] = $faultParam;
+                        logWithTimestamp("Parameter that caused fault: {$faultParam}", "INFO");
+                    }
+                    
                     $simpleRequest = generateParameterRequestXML($soapId, $simpleParam);
                     
                     header('Content-Type: text/xml');
@@ -336,6 +399,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 if ($faultRequestIndex < count($parameterRequests)) {
                     $nextParameters = $parameterRequests[$faultRequestIndex];
+                    
+                    // Skip any parameters that have caused faults before
+                    if (isset($_SESSION['fault_parameters'])) {
+                        $skipParams = false;
+                        foreach ($nextParameters as $param) {
+                            if (in_array($param, $_SESSION['fault_parameters'])) {
+                                $skipParams = true;
+                                break;
+                            }
+                        }
+                        
+                        if ($skipParams) {
+                            logWithTimestamp("Skipping parameters that caused fault previously", "INFO");
+                            $faultRequestIndex++;
+                            $_SESSION['fault_request_index'] = $faultRequestIndex;
+                            
+                            if ($faultRequestIndex >= count($parameterRequests)) {
+                                logWithTimestamp("All parameter sets have been tried, completing session", "INFO");
+                                // End with a simple acknowledgement
+                                header('Content-Type: text/xml');
+                                echo '<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <SOAP-ENV:Header>
+    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </SOAP-ENV:Header>
+  <SOAP-ENV:Body>
+    <cwmp:SetParameterValuesResponse>
+      <Status>0</Status>
+    </cwmp:SetParameterValuesResponse>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>';
+                                exit;
+                            }
+                            
+                            $nextParameters = $parameterRequests[$faultRequestIndex];
+                        }
+                    }
+                    
                     $nextRequest = generateParameterRequestXML($soapId, $nextParameters);
                     
                     logWithTimestamp("Fault received, trying next parameter set: " . implode(", ", $nextParameters), "INFO");

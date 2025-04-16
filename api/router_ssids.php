@@ -25,7 +25,7 @@ if (file_exists($ssidsFile)) {
     $foundSsids = false;
     $foundPasswords = false;
     
-    foreach ($lines as $line) {
+    foreach ($lines as $key => $line) {
         // Skip comments
         if (strpos($line, '#') === 0) {
             continue;
@@ -36,6 +36,20 @@ if (file_exists($ssidsFile)) {
             list($name, $value) = explode(' = ', $line, 2);
             $name = trim($name);
             $value = trim($value);
+            
+            // Skip duplicate SSID entries
+            if (stripos($name, 'SSID') !== false) {
+                $isDuplicate = false;
+                foreach ($result['ssids'] as $existingSSID) {
+                    if ($existingSSID['parameter'] === $name && $existingSSID['value'] === $value) {
+                        $isDuplicate = true;
+                        break;
+                    }
+                }
+                if ($isDuplicate) {
+                    continue;
+                }
+            }
             
             // Add to the raw parameters list
             $result['raw_parameters'][] = [
@@ -135,6 +149,20 @@ if (file_exists($ssidsFile)) {
     if ($foundSsids && !$foundPasswords) {
         $result['password_protected'] = true;
     }
+    
+    // Remove duplicate entries from the raw_parameters array
+    $uniqueParams = [];
+    $seen = [];
+    
+    foreach ($result['raw_parameters'] as $param) {
+        $key = $param['name'] . '|' . $param['value'];
+        if (!isset($seen[$key])) {
+            $seen[$key] = true;
+            $uniqueParams[] = $param;
+        }
+    }
+    
+    $result['raw_parameters'] = $uniqueParams;
     
     echo json_encode($result, JSON_PRETTY_PRINT);
 } else {
