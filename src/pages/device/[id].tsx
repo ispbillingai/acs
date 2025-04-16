@@ -1,151 +1,171 @@
 
-import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { DeviceInfo } from '@/components/DeviceInfo';
-import { DeviceActions } from '@/components/DeviceActions';
-import { DeviceParameters } from '@/components/DeviceParameters';
-import { ConnectedClientsTable } from '@/components/ConnectedClientsTable';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Separator } from '@/components/ui/separator';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { CircleIcon, WifiIcon, ServerIcon } from 'lucide-react';
-import { toast } from 'sonner';
-import { Device } from '@/types';
+import { useState, useEffect } from "react";
+import { useParams } from "react-router-dom";
+import { HardDriveIcon, ServerIcon, RefreshCwIcon } from "lucide-react";
+import { DeviceInfo } from "@/components/DeviceInfo";
+import { DeviceParameters } from "@/components/DeviceParameters";
+import { ConnectedClientsTable } from "@/components/ConnectedClientsTable";
+import { DeviceActions } from "@/components/DeviceActions";
+import { DeviceStats } from "@/components/DeviceStats";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useToast } from "@/hooks/use-toast";
+import { useQuery } from "@tanstack/react-query";
 
-interface DeviceDetailProps {}
+// Function to fetch device details from backend
+const fetchDeviceDetails = async (id: string) => {
+  try {
+    console.log("Fetching device details for ID:", id);
+    const response = await fetch(`/backend/api/devices.php?id=${id}`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
 
-const DeviceDetail: React.FC<DeviceDetailProps> = () => {
+    if (!response.ok) {
+      throw new Error(`Failed to fetch device: ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log("Device data fetched:", data);
+    return data;
+  } catch (error) {
+    console.error("Error fetching device details:", error);
+    throw error;
+  }
+};
+
+export default function DeviceDetail() {
   const { id } = useParams<{ id: string }>();
-
-  const {
-    data: device,
-    isLoading,
-    error,
-    refetch
-  } = useQuery({
-    queryKey: ['device', id],
-    queryFn: async () => {
-      try {
-        const response = await fetch(`/backend/api/devices.php?id=${id}`);
-        if (!response.ok) {
-          throw new Error('Failed to fetch device');
-        }
-        return response.json();
-      } catch (err) {
-        console.error('Error fetching device:', err);
-        throw err;
-      }
-    },
+  const { toast } = useToast();
+  
+  // Default device state
+  const [device, setDevice] = useState<any>({
+    id: id,
+    status: "unknown",
+    manufacturer: "Loading...",
+    model: "Loading...",
+    serialNumber: "Loading...",
+    softwareVersion: "",
+    hardwareVersion: "",
+    ipAddress: "",
+    lastContact: "",
+    connectedClients: 0,
+    parameters: [],
   });
 
-  useEffect(() => {
-    if (error) {
-      toast.error('Failed to load device data');
-    }
-  }, [error]);
+  // Fetch device data using react-query
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ["device", id],
+    queryFn: () => fetchDeviceDetails(id || ""),
+    enabled: !!id,
+    retry: 2,
+    staleTime: 30000,
+  });
 
+  // Update device state when data is fetched
+  useEffect(() => {
+    if (data) {
+      console.log("Setting device data:", data);
+      
+      // Extract connected clients count if available
+      const connectedClientCount = data.connectedHosts 
+        ? data.connectedHosts.filter((host: any) => host.isActive).length 
+        : 0;
+      
+      setDevice({
+        ...data,
+        connectedClients: connectedClientCount,
+      });
+    }
+  }, [data]);
+
+  // Handle refetch button click
+  const handleRefresh = () => {
+    refetch();
+    toast({
+      title: "Refreshing device data",
+      description: "Fetching the latest information from the server",
+    });
+  };
+
+  // Show loading state
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-pulse space-y-4">
-          <div className="h-4 bg-blue-200 rounded w-32"></div>
-          <div className="h-4 bg-blue-200 rounded w-64"></div>
-          <div className="h-4 bg-blue-200 rounded w-48"></div>
+      <div className="w-full h-full flex items-center justify-center min-h-[400px]">
+        <div className="flex flex-col items-center gap-4">
+          <RefreshCwIcon className="h-12 w-12 text-blue-500 animate-spin" />
+          <p className="text-lg font-medium text-blue-950">Loading device data...</p>
         </div>
       </div>
     );
   }
 
-  if (error || !device) {
+  // Show error state
+  if (error) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen space-y-4">
-        <h2 className="text-2xl font-bold text-red-600">Error Loading Device</h2>
-        <p className="text-gray-600">Could not load device information.</p>
-        <button 
-          onClick={() => refetch()}
-          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-        >
-          Try Again
-        </button>
+      <div className="w-full h-full flex items-center justify-center min-h-[400px] bg-red-50 rounded-lg p-6">
+        <div className="flex flex-col items-center gap-4 max-w-md">
+          <ServerIcon className="h-12 w-12 text-red-500" />
+          <h2 className="text-xl font-bold text-red-700">Error Loading Device</h2>
+          <p className="text-center text-red-600">
+            {error instanceof Error ? error.message : "Failed to load device data"}
+          </p>
+          <Button onClick={handleRefresh} variant="outline">
+            <RefreshCwIcon className="mr-2 h-4 w-4" />
+            Try Again
+          </Button>
+        </div>
       </div>
     );
   }
 
+  // Render device details with tabs for different sections
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            Device Details
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+            <HardDriveIcon className="h-6 w-6 text-blue-600" />
+            {device.manufacturer || "Huawei"} {device.model || "Device"}
           </h1>
-          <p className="text-muted-foreground">
-            Model: {device.model || 'Unknown'} | Serial: {device.serialNumber}
-          </p>
+          <p className="text-gray-500">Serial Number: {device.serialNumber}</p>
         </div>
-        <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-md shadow-sm">
-          <CircleIcon 
-            className={`h-3 w-3 ${
-              device.status === 'online' ? 'text-green-600' : 'text-red-600'
-            }`} 
-          />
-          <span className="font-medium capitalize">
-            {device.status}
-          </span>
-          <span className="text-gray-400">|</span>
-          <WifiIcon className="h-4 w-4 text-blue-500" />
-          <span className="text-sm text-gray-600">
-            {device.ipAddress}
-          </span>
+        <Button onClick={handleRefresh} variant="outline" size="sm">
+          <RefreshCwIcon className="mr-2 h-4 w-4" />
+          Refresh
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="md:col-span-3">
+          <DeviceStats device={device} />
         </div>
       </div>
 
-      <Tabs defaultValue="overview" className="w-full">
-        <TabsList className="grid w-full grid-cols-4 mb-4">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
+      <Tabs defaultValue="info" className="w-full">
+        <TabsList className="grid grid-cols-3 mb-6">
+          <TabsTrigger value="info">Device Info</TabsTrigger>
           <TabsTrigger value="parameters">Parameters</TabsTrigger>
           <TabsTrigger value="clients">Connected Clients</TabsTrigger>
-          <TabsTrigger value="actions">Actions</TabsTrigger>
         </TabsList>
         
-        <TabsContent value="overview" className="space-y-4">
+        <TabsContent value="info" className="mt-0">
           <DeviceInfo device={device} />
-          
-          <Card className="bg-gradient-to-br from-white to-blue-50 border border-blue-100 shadow-md">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <ServerIcon className="h-5 w-5 text-blue-500" />
-                Device Information
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {device.parameters && device.parameters.map((param: any, index: number) => (
-                  <div key={index} className="space-y-1 bg-white p-3 rounded-lg border border-blue-50 shadow-sm hover:shadow transition-shadow">
-                    <p className="text-sm text-blue-500 font-medium">{param.name}</p>
-                    <p className="font-medium text-gray-800 truncate" title={param.value}>{param.value}</p>
-                    <p className="text-xs text-gray-500">{param.type}</p>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+          <div className="mt-6">
+            <DeviceActions deviceId={device.id} />
+          </div>
         </TabsContent>
         
-        <TabsContent value="parameters" className="space-y-4">
-          <DeviceParameters device={device} />
+        <TabsContent value="parameters" className="mt-0">
+          <DeviceParameters deviceId={device.id} />
         </TabsContent>
         
-        <TabsContent value="clients" className="space-y-4">
-          <ConnectedClientsTable device={device} />
-        </TabsContent>
-        
-        <TabsContent value="actions" className="space-y-4">
-          <DeviceActions device={device} />
+        <TabsContent value="clients" className="mt-0">
+          <ConnectedClientsTable deviceId={device.id} />
         </TabsContent>
       </Tabs>
     </div>
   );
-};
-
-export default DeviceDetail;
+}

@@ -10,10 +10,10 @@ import {
   SmartphoneIcon,
   LaptopIcon,
   RouterIcon,
-  ModemIcon,
+  MonitorIcon,
   TvIcon,
   PrinterIcon,
-  DevicesIcon
+  HardDriveIcon
 } from 'lucide-react';
 import { Card, CardContent, CardFooter } from '@/components/ui/card';
 import { Device } from '@/types';
@@ -29,7 +29,7 @@ const getDeviceIcon = (model: string | undefined, manufacturer: string | undefin
   if (modelLower.includes('router') || manufacturerLower.includes('router')) {
     return <RouterIcon className="h-5 w-5 text-blue-500" />;
   } else if (modelLower.includes('modem') || manufacturerLower.includes('modem')) {
-    return <ModemIcon className="h-5 w-5 text-blue-500" />;
+    return <HardDriveIcon className="h-5 w-5 text-blue-500" />;
   } else if (modelLower.includes('phone') || manufacturerLower.includes('phone')) {
     return <SmartphoneIcon className="h-5 w-5 text-blue-500" />;
   } else if (modelLower.includes('tv') || manufacturerLower.includes('tv')) {
@@ -39,11 +39,14 @@ const getDeviceIcon = (model: string | undefined, manufacturer: string | undefin
   } else if (modelLower.includes('laptop') || manufacturerLower.includes('laptop')) {
     return <LaptopIcon className="h-5 w-5 text-blue-500" />;
   } else {
-    return <DevicesIcon className="h-5 w-5 text-blue-500" />;
+    return <RouterIcon className="h-5 w-5 text-blue-500" />;
   }
 };
 
 export const DeviceCard = ({ device }: DeviceCardProps) => {
+  // Add console logging to help debug device data
+  console.log("Device Card Data:", device);
+  
   return (
     <Card className="overflow-hidden bg-white border-blue-100 shadow-sm hover:shadow-md transition-all">
       <div className={`h-1 ${device.status === 'online' ? 'bg-green-500' : device.status === 'offline' ? 'bg-red-500' : 'bg-orange-500'}`}></div>
@@ -54,7 +57,7 @@ export const DeviceCard = ({ device }: DeviceCardProps) => {
             {getDeviceIcon(device.model, device.manufacturer)}
             <div>
               <h3 className="font-semibold text-blue-900">
-                {device.manufacturer || 'Unknown Manufacturer'}
+                {device.manufacturer || 'Huawei'}
               </h3>
               <p className="text-sm text-gray-600">{device.model || 'Unknown Model'}</p>
             </div>
