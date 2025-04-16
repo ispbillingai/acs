@@ -17,7 +17,12 @@ function logError($message, $data = null) {
     }
     
     $logMessage .= "\n--------------------------------------------------\n";
-    file_put_contents(__DIR__ . '/../../database.log', $logMessage, FILE_APPEND);
+    // Use an absolute path to the log file in the root directory
+    $logFile = dirname(dirname(__DIR__)) . '/database.log';
+    file_put_contents($logFile, $logMessage, FILE_APPEND);
+    
+    // Also log to PHP error log for backup
+    error_log("TR069 DATA: {$message}");
 }
 
 // Log function start
@@ -38,7 +43,8 @@ try {
     logError("Database connection successful");
     
     // Path to the router_ssids.txt file
-    $filePath = __DIR__ . '/../../router_ssids.txt';
+    $filePath = dirname(dirname(__DIR__)) . '/router_ssids.txt';
+    logError("Looking for router_ssids.txt file at: {$filePath}");
     
     if (!file_exists($filePath)) {
         http_response_code(404);
