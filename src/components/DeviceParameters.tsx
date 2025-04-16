@@ -11,7 +11,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { InfoIcon, WifiIcon, KeyIcon, SignalIcon, LockIcon, ShieldIcon, UserIcon, GlobeIcon } from "lucide-react";
+import { InfoIcon, WifiIcon, KeyIcon, SignalIcon, LockIcon, ShieldIcon, UserIcon, GlobeIcon, ServerIcon, AlertCircleIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 
@@ -37,6 +37,16 @@ interface RouterSSIDsResponse {
   lan_users?: Array<{mac: string, ip: string, hostname?: string}>;
   wifi_users?: Array<{mac: string, signal?: string, connected_to?: string}>;
   wan_settings?: Array<{name: string, value: string}>;
+  errors?: Array<{type: string, message?: string, parameter?: string, value?: string}>;
+  device_info?: {
+    model?: string;
+    serial?: string;
+    type?: string;
+    connected_hosts?: number;
+  };
+  mikrotik_errors?: number;
+  huawei_errors?: number;
+  discovery_status?: string;
 }
 
 export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
@@ -81,6 +91,70 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
           if (response.ok) {
             const data: RouterSSIDsResponse = await response.json();
             setTr069Data(data);
+            
+            // Show device information if available
+            if (data.device_info) {
+              const deviceInfo = data.device_info;
+              if (deviceInfo.model || deviceInfo.type) {
+                const deviceType = deviceInfo.type || 'Unknown';
+                const model = deviceInfo.model || 'Unknown Model';
+                toast({
+                  title: `${deviceType} Router Detected`,
+                  description: `Model: ${model}${deviceInfo.serial ? ', Serial: ' + deviceInfo.serial : ''}`,
+                  duration: 5000,
+                });
+                
+                // Add device info to parameters
+                if (deviceInfo.model) {
+                  mockData.push({
+                    name: "Device.ModelName",
+                    value: deviceInfo.model,
+                    type: "string",
+                    writable: false,
+                    category: "device_info"
+                  });
+                }
+                
+                if (deviceInfo.serial) {
+                  mockData.push({
+                    name: "Device.SerialNumber",
+                    value: deviceInfo.serial,
+                    type: "string",
+                    writable: false,
+                    category: "device_info"
+                  });
+                }
+                
+                if (deviceInfo.connected_hosts) {
+                  mockData.push({
+                    name: "Device.ConnectedHosts",
+                    value: deviceInfo.connected_hosts.toString(),
+                    type: "unsignedInt",
+                    writable: false,
+                    category: "device_info"
+                  });
+                }
+              }
+            }
+            
+            // Show error information if available
+            if (data.mikrotik_errors && data.mikrotik_errors > 0) {
+              toast({
+                title: "MikroTik Errors Detected",
+                description: `Detected ${data.mikrotik_errors} MikroTik errors. These devices don't fully support TR-069 parameter discovery.`,
+                variant: "destructive",
+                duration: 5000,
+              });
+            }
+            
+            if (data.huawei_errors && data.huawei_errors > 0) {
+              toast({
+                title: "Huawei Device Errors",
+                description: `Encountered ${data.huawei_errors} errors during parameter discovery.`,
+                variant: "default",
+                duration: 5000,
+              });
+            }
             
             // Add SSIDs from the response
             if (data.ssids && data.ssids.length > 0) {
@@ -233,6 +307,15 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
                 duration: 8000,
               });
             }
+            
+            // Show discovery status if available
+            if (data.discovery_status === 'completed') {
+              toast({
+                title: "Network Discovery Completed",
+                description: "Router parameter discovery process has completed.",
+                duration: 5000,
+              });
+            }
           }
         } catch (error) {
           console.error("Error fetching router SSIDs:", error);
@@ -264,6 +347,7 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
   const hasLanUsers = parameters.some(param => param.category === 'lan_user');
   const hasWifiUsers = parameters.some(param => param.category === 'wifi_user');
   const hasWanSettings = parameters.some(param => param.category === 'wan');
+  const hasDeviceInfo = parameters.some(param => param.category === 'device_info');
   const passwordsProtected = tr069Data?.password_protected || false;
 
   const getCategoryIcon = (param: Parameter) => {
@@ -272,6 +356,7 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
     if (param.category === 'lan_user') return <UserIcon className="h-4 w-4 text-green-500" />;
     if (param.category === 'wifi_user') return <SignalIcon className="h-4 w-4 text-purple-500" />;
     if (param.category === 'wan') return <GlobeIcon className="h-4 w-4 text-indigo-500" />;
+    if (param.category === 'device_info') return <ServerIcon className="h-4 w-4 text-gray-500" />;
     return null;
   };
 
@@ -309,6 +394,9 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
     if (param.category === 'wan') {
       return <Badge className="bg-indigo-500">WAN Setting</Badge>;
     }
+    if (param.category === 'device_info') {
+      return <Badge className="bg-gray-500">Device Info</Badge>;
+    }
     return null;
   };
 
@@ -342,6 +430,35 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
           </button>
         )}
       </div>
+
+      {!loading && tr069Data?.device_info && (tr069Data.device_info.model || tr069Data.device_info.type) && (
+        <Alert className="mb-6 bg-gray-50 border-gray-200">
+          <ServerIcon className="h-4 w-4 text-gray-700" />
+          <AlertTitle className="text-gray-800">Router Information</AlertTitle>
+          <AlertDescription className="text-gray-700">
+            {tr069Data.device_info.type && <span className="font-medium">Type: {tr069Data.device_info.type}</span>}
+            {tr069Data.device_info.model && <span className="block mt-1">Model: {tr069Data.device_info.model}</span>}
+            {tr069Data.device_info.serial && <span className="block mt-1">Serial: {tr069Data.device_info.serial}</span>}
+            {tr069Data.device_info.connected_hosts && <span className="block mt-1">Connected Hosts: {tr069Data.device_info.connected_hosts}</span>}
+            
+            {/* Error counts if available */}
+            {(tr069Data.mikrotik_errors && tr069Data.mikrotik_errors > 0) && (
+              <span className="block mt-2 text-amber-600 flex items-center">
+                <AlertCircleIcon className="h-4 w-4 mr-1" />
+                MikroTik Errors: {tr069Data.mikrotik_errors} (These devices often don't support parameter discovery)
+              </span>
+            )}
+            
+            {(tr069Data.huawei_errors && tr069Data.huawei_errors > 0) && (
+              <span className="block mt-1 text-amber-600">Huawei Errors: {tr069Data.huawei_errors}</span>
+            )}
+            
+            {tr069Data.discovery_status === 'completed' && (
+              <span className="block mt-2 text-green-600">Network discovery completed successfully</span>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
 
       {!loading && hasSSIDs && (
         <Alert className="mb-6 bg-green-50 border-green-200">
@@ -406,7 +523,9 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
                             ? "bg-purple-50"
                             : param.category === 'wan'
                               ? "bg-indigo-50"
-                              : ""
+                              : param.category === 'device_info'
+                                ? "bg-gray-50"
+                                : ""
                   }
                 >
                   <TableCell className="font-mono text-sm flex items-center">

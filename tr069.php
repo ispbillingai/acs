@@ -6,6 +6,12 @@ ini_set('display_errors', 0);
 ini_set('log_errors', 1);
 ini_set('error_log', __DIR__ . '/tr069_error.log');
 
+// Tracking variables
+$GLOBALS['knownDevices'] = []; // Store known device IPs to reduce duplicate logging
+$GLOBALS['discoveredParameters'] = []; // Track parameters we've already discovered
+$GLOBALS['errorCounts'] = []; // Track error counts by type
+$GLOBALS['lastErrorTime'] = []; // Track last time an error was logged for throttling
+
 // Function to log with timestamp and priority level
 function logWithTimestamp($message, $level = 'INFO') {
     $timestamp = date('Y-m-d H:i:s');
@@ -18,8 +24,13 @@ function logWithTimestamp($message, $level = 'INFO') {
     }
 }
 
-// Function to log important router data
+// Function to log important router data without duplication
 function logRouterData($paramName, $paramValue) {
+    // Skip if we've already discovered this parameter
+    if (in_array("{$paramName}={$paramValue}", $GLOBALS['discoveredParameters'])) {
+        return;
+    }
+    
     $logFile = __DIR__ . '/wifi_discovery.log';
     $timestamp = date('Y-m-d H:i:s');
     
@@ -31,6 +42,9 @@ function logRouterData($paramName, $paramValue) {
         return;
     }
     
+    // Add to discovered parameters
+    $GLOBALS['discoveredParameters'][] = "{$paramName}={$paramValue}";
+    
     // Log in a formatted way that's easy to spot
     file_put_contents($logFile, "[{$timestamp}] ********************************\n", FILE_APPEND);
     file_put_contents($logFile, "[{$timestamp}] [ROUTER DATA FOUND]\n", FILE_APPEND);
@@ -41,31 +55,88 @@ function logRouterData($paramName, $paramValue) {
     file_put_contents(__DIR__ . '/router_ssids.txt', "{$paramName} = {$paramValue}\n", FILE_APPEND);
 }
 
+// Error logging with throttling for repetitive errors
+function logError($errorCode, $errorMessage, $deviceType = 'Unknown') {
+    $timestamp = date('Y-m-d H:i:s');
+    $errorKey = "{$deviceType}-{$errorCode}";
+    $currentTime = time();
+    
+    // Initialize counters if not set
+    if (!isset($GLOBALS['errorCounts'][$errorKey])) {
+        $GLOBALS['errorCounts'][$errorKey] = 0;
+        $GLOBALS['lastErrorTime'][$errorKey] = 0;
+    }
+    
+    // Increment error count
+    $GLOBALS['errorCounts'][$errorKey]++;
+    
+    // Only log detailed error if:
+    // 1. First occurrence
+    // 2. At least 60 seconds since last detailed log
+    // 3. Count is a multiple of 10 (for sampling)
+    if ($GLOBALS['errorCounts'][$errorKey] === 1 || 
+        ($currentTime - $GLOBALS['lastErrorTime'][$errorKey] > 60) ||
+        ($GLOBALS['errorCounts'][$errorKey] % 10 === 0)) {
+        
+        logWithTimestamp("FAULT CODE DETECTED: {$errorCode} - {$errorMessage} (Device: {$deviceType})", "ERROR");
+        $GLOBALS['lastErrorTime'][$errorKey] = $currentTime;
+    }
+    
+    // For every 10th occurrence, just log a count update
+    if ($GLOBALS['errorCounts'][$errorKey] % 10 === 0 && $GLOBALS['errorCounts'][$errorKey] > 1) {
+        logWithTimestamp("Received {$GLOBALS['errorCounts'][$errorKey]} occurrences of error {$errorCode} from {$deviceType} devices", "WARNING");
+    }
+}
+
 // Set unlimited execution time for long-running sessions
 set_time_limit(0);
 
 // Basic connection information
-logWithTimestamp("=== NEW TR-069 REQUEST ===");
-logWithTimestamp("Client IP: " . $_SERVER['REMOTE_ADDR']);
-if (isset($_SERVER['HTTP_USER_AGENT'])) {
-    logWithTimestamp("Device User-Agent: " . $_SERVER['HTTP_USER_AGENT']);
+$clientIP = $_SERVER['REMOTE_ADDR'];
+$isNewSession = !isset($GLOBALS['knownDevices'][$clientIP]);
+
+// Log new connections only once per IP
+if ($isNewSession) {
+    logWithTimestamp("=== NEW TR-069 REQUEST ===");
+    logWithTimestamp("Client IP: " . $clientIP);
+    if (isset($_SERVER['HTTP_USER_AGENT'])) {
+        logWithTimestamp("Device User-Agent: " . $_SERVER['HTTP_USER_AGENT']);
+    }
+    $GLOBALS['knownDevices'][$clientIP] = true;
+} else {
+    // For known devices, just log a simple continuation message if needed
+    // No need to log this to reduce noise
 }
 
 // Enhanced Huawei device detection based on User-Agent
 $isHuawei = false;
+$isMikroTik = false;
 $modelDetected = '';
+
 if (isset($_SERVER['HTTP_USER_AGENT'])) {
     $userAgent = $_SERVER['HTTP_USER_AGENT'];
+    
+    // Detect MikroTik devices
+    if (stripos($userAgent, 'mikrotik') !== false) {
+        $isMikroTik = true;
+        // Don't log every MikroTik device to reduce noise
+    }
+    
+    // Detect Huawei devices (these are the ones we're interested in)
     if (stripos($userAgent, 'huawei') !== false || 
         stripos($userAgent, 'hw_') !== false ||
         stripos($userAgent, 'hg8') !== false) {
         $isHuawei = true;
-        logWithTimestamp("DETECTED HUAWEI DEVICE: " . $userAgent);
         
-        // Try to detect specific model
-        if (stripos($userAgent, 'hg8546') !== false) {
-            $modelDetected = 'HG8546M';
-            logWithTimestamp("DETECTED HG8546M MODEL", "INFO");
+        // Only log the first time we see this device, not for every request
+        if ($isNewSession) {
+            logWithTimestamp("DETECTED HUAWEI DEVICE: " . $userAgent);
+            
+            // Try to detect specific model
+            if (stripos($userAgent, 'hg8546') !== false) {
+                $modelDetected = 'HG8546M';
+                logWithTimestamp("DETECTED HG8546M MODEL", "INFO");
+            }
         }
     }
 }
@@ -77,12 +148,15 @@ if (!$isHuawei && $_SERVER['REQUEST_METHOD'] === 'POST') {
         if (stripos($raw_post, 'huawei') !== false || 
             stripos($raw_post, 'hg8') !== false) {
             $isHuawei = true;
-            logWithTimestamp("DETECTED HUAWEI DEVICE FROM XML CONTENT");
             
-            // Check for HG8546M model in XML
-            if (stripos($raw_post, 'HG8546M') !== false) {
-                $modelDetected = 'HG8546M';
-                logWithTimestamp("DETECTED HG8546M MODEL FROM XML", "INFO");
+            if ($isNewSession) {
+                logWithTimestamp("DETECTED HUAWEI DEVICE FROM XML CONTENT");
+                
+                // Check for HG8546M model in XML
+                if (stripos($raw_post, 'HG8546M') !== false) {
+                    $modelDetected = 'HG8546M';
+                    logWithTimestamp("DETECTED HG8546M MODEL FROM XML", "INFO");
+                }
             }
         }
     }
@@ -147,11 +221,22 @@ function generateParameterRequestXML($soapId, $parameters) {
     return $response;
 }
 
+// Skip processing for MikroTik devices that repeatedly fail
+if ($isMikroTik) {
+    // Check if we've seen too many errors from this device
+    $mikrotikErrorKey = "MikroTik-9000";
+    if (isset($GLOBALS['errorCounts'][$mikrotikErrorKey]) && $GLOBALS['errorCounts'][$mikrotikErrorKey] > 5) {
+        // Silent exit - don't even log
+        header('Content-Length: 0');
+        exit;
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $raw_post = file_get_contents('php://input');
     
     // Start with a clean router_ssids.txt file for new connections
-    if (stripos($raw_post, '<cwmp:Inform>') !== false) {
+    if (stripos($raw_post, '<cwmp:Inform>') !== false && $isHuawei) {
         // Only delete the file if it's a new session
         if (file_exists(__DIR__ . '/router_ssids.txt')) {
             unlink(__DIR__ . '/router_ssids.txt');
@@ -227,7 +312,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     
                     // Categorize the parameter by its name
-                    if (stripos($paramName, 'SSID') !== false) {
+                    if (stripos($paramName, 'SSID') !== false && stripos($paramName, 'WLANConfiguration.1') !== false) {
                         $foundSSIDs = true;
                         logWithTimestamp("Found SSID: {$paramValue}", "INFO");
                     } else if (
@@ -239,7 +324,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $foundWANSettings = true;
                         logWithTimestamp("Found WAN Setting: {$paramName} = {$paramValue}", "INFO");
                     } else if (
-                        stripos($paramName, 'AssociatedDevice') !== false || 
                         stripos($paramName, 'Host') !== false
                     ) {
                         $foundConnectedDevices = true;
@@ -361,14 +445,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!empty($faultMatches)) {
                 $faultCode = $faultMatches[1];
                 $faultString = $faultMatches[2];
-                logWithTimestamp("FAULT CODE DETECTED: {$faultCode} - {$faultString}", "ERROR");
+                
+                // Use the enhanced error logging for device-specific errors
+                $deviceType = $isMikroTik ? "MikroTik" : ($isHuawei ? "Huawei" : "Unknown");
+                logError($faultCode, $faultString, $deviceType);
+                
+                // For MikroTik devices with Method not supported errors, just exit
+                if ($isMikroTik && $faultCode == '9000') {
+                    // Silent exit after logging
+                    exit;
+                }
                 
                 // Extract SOAP ID
                 preg_match('/<cwmp:ID SOAP-ENV:mustUnderstand="1">(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
                 $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
                 
-                // Handle Internal error (9002) specifically
-                if ($faultCode == '9002') {
+                // Handle Internal error (9002) specifically for Huawei devices
+                if ($faultCode == '9002' && $isHuawei) {
                     logWithTimestamp("Internal error detected - switching to simplified request", "INFO");
                     
                     // Try a very simple request for just the SSID of WLAN 1
@@ -485,21 +578,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
     } else {
-        logWithTimestamp("EMPTY POST RECEIVED - This should trigger network discovery", "INFO");
+        // Skip logging for MikroTik devices with error counts
+        if (!$isMikroTik || !isset($GLOBALS['errorCounts']["MikroTik-9000"]) || $GLOBALS['errorCounts']["MikroTik-9000"] <= 5) {
+            logWithTimestamp("EMPTY POST RECEIVED - This should trigger network discovery", "INFO");
+        }
         
         // If we receive an empty POST, this is an opportunity to request parameters
         // Generate a session ID
         $sessionId = md5(uniqid(rand(), true));
-        logWithTimestamp("Starting network discovery with session ID: " . $sessionId, "INFO");
+        
+        // Only log for Huawei devices to reduce noise
+        if ($isHuawei) {
+            logWithTimestamp("Starting network discovery with session ID: " . $sessionId, "INFO");
+        }
         
         // Start with a request for SSID
         $initialParameters = $parameterRequests[0]; // Just request one SSID to start
         $initialRequest = generateParameterRequestXML($sessionId, $initialParameters);
         
-        logWithTimestamp("Sending simplified SSID request for: " . implode(", ", $initialParameters), "INFO");
+        if ($isHuawei) {
+            logWithTimestamp("Sending simplified SSID request for: " . implode(", ", $initialParameters), "INFO");
+        }
+        
         header('Content-Type: text/xml');
         echo $initialRequest;
-        logWithTimestamp("=== REQUEST COMPLETED ===", "INFO");
+        
+        if ($isHuawei) {
+            logWithTimestamp("=== REQUEST COMPLETED ===", "INFO");
+        }
         exit;
     }
 }
@@ -526,4 +632,6 @@ try {
     echo "Internal Server Error";
 }
 
-logWithTimestamp("=== REQUEST COMPLETED ===", "INFO");
+if ($isHuawei) {
+    logWithTimestamp("=== REQUEST COMPLETED ===", "INFO");
+}

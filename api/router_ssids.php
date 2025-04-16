@@ -15,8 +15,83 @@ $result = [
     'lan_users' => [],
     'wifi_users' => [],
     'wan_settings' => [],
-    'errors' => []  // New array to track errors
+    'errors' => [],  // Array to track errors
+    'device_info' => [], // New array to track device model information
+    'mikrotik_errors' => 0, // Counter for MikroTik errors
+    'huawei_errors' => 0,   // Counter for Huawei errors
+    'discovery_status' => 'unknown' // Status of network discovery
 ];
+
+// Parse and count errors from the log file
+$errorLogFile = __DIR__ . '/../wifi_discovery.log';
+if (file_exists($errorLogFile)) {
+    try {
+        $logLines = file($errorLogFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        $mikrotikErrorCount = 0;
+        $huaweiErrorCount = 0;
+        $detectedDeviceType = '';
+        $detectedModel = '';
+        
+        foreach ($logLines as $line) {
+            // Extract device info
+            if (strpos($line, 'Device Model:') !== false) {
+                $modelInfo = trim(str_replace(['[INFO] Device Model:', '[INFO] Device info - Model:'], '', $line));
+                $result['device_info']['model'] = $modelInfo;
+            }
+            
+            if (strpos($line, 'Device info - Model:') !== false && strpos($line, 'Serial:') !== false) {
+                preg_match('/Device info - Model: (.*?), Serial: (.*?)$/', $line, $matches);
+                if (isset($matches[1]) && isset($matches[2])) {
+                    $result['device_info']['model'] = trim($matches[1]);
+                    $result['device_info']['serial'] = trim($matches[2]);
+                }
+            }
+            
+            // Detect device type
+            if (strpos($line, 'DETECTED HUAWEI DEVICE') !== false) {
+                $detectedDeviceType = 'Huawei';
+                if (strpos($line, 'HG8546M') !== false) {
+                    $detectedModel = 'HG8546M';
+                }
+            } else if (strpos($line, 'Device User-Agent: MikroTik') !== false) {
+                $detectedDeviceType = 'MikroTik';
+            }
+            
+            // Count errors by device type
+            if (strpos($line, 'FAULT CODE DETECTED') !== false) {
+                if (strpos($line, 'Device: MikroTik') !== false || 
+                    (strpos($line, 'MikroTik') !== false && strpos($line, 'Method not supported') !== false)) {
+                    $mikrotikErrorCount++;
+                } else if (strpos($line, 'Device: Huawei') !== false || 
+                           (strpos($line, 'HW_WAP_CWMP') !== false && strpos($line, 'FAULT CODE') !== false)) {
+                    $huaweiErrorCount++;
+                }
+            }
+            
+            // Check for network discovery status
+            if (strpos($line, 'NETWORK DISCOVERY COMPLETED') !== false) {
+                $result['discovery_status'] = 'completed';
+            }
+        }
+        
+        $result['mikrotik_errors'] = $mikrotikErrorCount;
+        $result['huawei_errors'] = $huaweiErrorCount;
+        
+        if (!empty($detectedDeviceType)) {
+            $result['device_info']['type'] = $detectedDeviceType;
+        }
+        
+        if (!empty($detectedModel)) {
+            $result['device_info']['model'] = $detectedModel;
+        }
+        
+    } catch (Exception $e) {
+        $result['errors'][] = [
+            'type' => 'log_parsing_error',
+            'message' => $e->getMessage()
+        ];
+    }
+}
 
 if (file_exists($ssidsFile)) {
     try {
@@ -138,6 +213,69 @@ if (file_exists($ssidsFile)) {
                             break;
                         }
                     }
+                }
+                // LAN hosts specific detection
+                else if (stripos($name, 'Hosts.Host') !== false) {
+                    // Parse host entries more intelligently
+                    if (stripos($name, 'IPAddress') !== false) {
+                        // Extract host index
+                        preg_match('/Host\.(\d+)\.IPAddress/', $name, $matches);
+                        if (!empty($matches[1])) {
+                            $hostIndex = $matches[1];
+                            
+                            // Look for matching hostname
+                            $hostname = '';
+                            $mac = '';
+                            
+                            foreach ($lines as $searchLine) {
+                                if (stripos($searchLine, "Host.{$hostIndex}.HostName") !== false) {
+                                    list(, $hostname) = explode(' = ', $searchLine, 2);
+                                    $hostname = trim($hostname);
+                                }
+                                
+                                if (stripos($searchLine, "Host.{$hostIndex}.PhysAddress") !== false) {
+                                    list(, $mac) = explode(' = ', $searchLine, 2);
+                                    $mac = trim($mac);
+                                }
+                            }
+                            
+                            // Add or update LAN user
+                            $existingUserIndex = -1;
+                            foreach ($result['lan_users'] as $idx => $user) {
+                                if (!empty($user['mac']) && $user['mac'] === $mac) {
+                                    $existingUserIndex = $idx;
+                                    break;
+                                }
+                            }
+                            
+                            if ($existingUserIndex >= 0) {
+                                // Update existing user
+                                $result['lan_users'][$existingUserIndex]['ip'] = $value;
+                                if (!empty($hostname)) {
+                                    $result['lan_users'][$existingUserIndex]['hostname'] = $hostname;
+                                }
+                            } else {
+                                // Add new user
+                                $newUser = [
+                                    'ip' => $value
+                                ];
+                                
+                                if (!empty($mac)) {
+                                    $newUser['mac'] = $mac;
+                                }
+                                
+                                if (!empty($hostname)) {
+                                    $newUser['hostname'] = $hostname;
+                                }
+                                
+                                $result['lan_users'][] = $newUser;
+                            }
+                        }
+                    }
+                }
+                else if (stripos($name, 'HostNumberOfEntries') !== false) {
+                    // Store the total number of hosts
+                    $result['device_info']['connected_hosts'] = intval($value);
                 }
                 else if (stripos($name, 'Fault') !== false) {
                     // Log faults as errors
