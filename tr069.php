@@ -11,6 +11,7 @@ $GLOBALS['knownDevices'] = []; // Store known device IPs to reduce duplicate log
 $GLOBALS['discoveredParameters'] = []; // Track parameters we've already discovered
 $GLOBALS['errorCounts'] = []; // Track error counts by type
 $GLOBALS['lastErrorTime'] = []; // Track last time an error was logged for throttling
+$GLOBALS['verifiedParameters'] = []; // Track parameters that were successfully retrieved
 
 // Function to log with timestamp and priority level
 function logWithTimestamp($message, $level = 'INFO') {
@@ -45,6 +46,9 @@ function logRouterData($paramName, $paramValue) {
     // Add to discovered parameters
     $GLOBALS['discoveredParameters'][] = "{$paramName}={$paramValue}";
     
+    // Add to verified parameters list (successful retrievals)
+    $GLOBALS['verifiedParameters'][] = $paramName;
+    
     // Log in a formatted way that's easy to spot
     file_put_contents($logFile, "[{$timestamp}] ********************************\n", FILE_APPEND);
     file_put_contents($logFile, "[{$timestamp}] [ROUTER DATA FOUND]\n", FILE_APPEND);
@@ -55,36 +59,30 @@ function logRouterData($paramName, $paramValue) {
     file_put_contents(__DIR__ . '/router_ssids.txt', "{$paramName} = {$paramValue}\n", FILE_APPEND);
 }
 
-// Error logging with throttling for repetitive errors
+// Error logging with throttling for repetitive errors - with minimal logging
 function logError($errorCode, $errorMessage, $deviceType = 'Unknown') {
-    $timestamp = date('Y-m-d H:i:s');
-    $errorKey = "{$deviceType}-{$errorCode}";
-    $currentTime = time();
-    
-    // Initialize counters if not set
-    if (!isset($GLOBALS['errorCounts'][$errorKey])) {
-        $GLOBALS['errorCounts'][$errorKey] = 0;
-        $GLOBALS['lastErrorTime'][$errorKey] = 0;
-    }
-    
-    // Increment error count
-    $GLOBALS['errorCounts'][$errorKey]++;
-    
-    // Only log detailed error if:
-    // 1. First occurrence
-    // 2. At least 60 seconds since last detailed log
-    // 3. Count is a multiple of 10 (for sampling)
-    if ($GLOBALS['errorCounts'][$errorKey] === 1 || 
-        ($currentTime - $GLOBALS['lastErrorTime'][$errorKey] > 60) ||
-        ($GLOBALS['errorCounts'][$errorKey] % 10 === 0)) {
+    // Only log certain error codes or first occurrence of others
+    if ($errorCode != '9005' && $errorCode != '9002') {
+        $timestamp = date('Y-m-d H:i:s');
+        $errorKey = "{$deviceType}-{$errorCode}";
+        $currentTime = time();
         
-        logWithTimestamp("FAULT CODE DETECTED: {$errorCode} - {$errorMessage} (Device: {$deviceType})", "ERROR");
-        $GLOBALS['lastErrorTime'][$errorKey] = $currentTime;
-    }
-    
-    // For every 10th occurrence, just log a count update
-    if ($GLOBALS['errorCounts'][$errorKey] % 10 === 0 && $GLOBALS['errorCounts'][$errorKey] > 1) {
-        logWithTimestamp("Received {$GLOBALS['errorCounts'][$errorKey]} occurrences of error {$errorCode} from {$deviceType} devices", "WARNING");
+        // Initialize counters if not set
+        if (!isset($GLOBALS['errorCounts'][$errorKey])) {
+            $GLOBALS['errorCounts'][$errorKey] = 0;
+            $GLOBALS['lastErrorTime'][$errorKey] = 0;
+        }
+        
+        // Increment error count
+        $GLOBALS['errorCounts'][$errorKey]++;
+        
+        // Only log first occurrence or every 20th occurrence
+        if ($GLOBALS['errorCounts'][$errorKey] === 1 || 
+            ($GLOBALS['errorCounts'][$errorKey] % 20 === 0)) {
+            
+            logWithTimestamp("FAULT CODE DETECTED: {$errorCode} - {$errorMessage} (Device: {$deviceType})", "ERROR");
+            $GLOBALS['lastErrorTime'][$errorKey] = $currentTime;
+        }
     }
 }
 
@@ -103,9 +101,6 @@ if ($isNewSession) {
         logWithTimestamp("Device User-Agent: " . $_SERVER['HTTP_USER_AGENT']);
     }
     $GLOBALS['knownDevices'][$clientIP] = true;
-} else {
-    // For known devices, just log a simple continuation message if needed
-    // No need to log this to reduce noise
 }
 
 // Enhanced Huawei device detection based on User-Agent
@@ -169,26 +164,34 @@ if (!isset($_SESSION['attempted_parameters'])) {
     $_SESSION['attempted_parameters'] = [];
 }
 
-// Array of parameter requests focused on SSIDs, WAN settings, and connected devices
-// IMPORTANT: Only request WLAN 1 configuration, not 2-5
-$parameterRequests = [
-    // Basic SSID for most routers
-    ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID'],
-    
+if (!isset($_SESSION['successful_parameters'])) {
+    $_SESSION['successful_parameters'] = [];
+}
+
+// Core parameters that are likely to work across most devices
+$coreParameters = [
+    // Basic SSID for most routers - most likely to succeed
+    ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID']
+];
+
+// Extended parameters to try after core parameters succeed
+$extendedParameters = [
     // WAN IP Connection details
     ['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress'],
     ['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.SubnetMask'],
     ['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DefaultGateway'],
     ['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DNSServers'],
     
-    // WAN PPP Connection details (for PPPoE connections)
-    ['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress'],
-    
-    // LAN Connected Devices
+    // LAN Connected Devices - basic information
     ['InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries'],
     ['InternetGatewayDevice.LANDevice.1.Hosts.Host.1.IPAddress'],
-    ['InternetGatewayDevice.LANDevice.1.Hosts.Host.1.PhysAddress'],
-    ['InternetGatewayDevice.LANDevice.1.Hosts.Host.1.HostName'],
+    ['InternetGatewayDevice.LANDevice.1.Hosts.Host.1.HostName']
+];
+
+// Optional parameters that may fail on many devices - try these last and don't retry if they fail
+$optionalParameters = [
+    // WAN PPP Connection details (for PPPoE connections)
+    ['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress'],
     
     // WiFi Connected Devices - Only for WLAN 1
     ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDeviceNumberOfEntries'],
@@ -221,15 +224,11 @@ function generateParameterRequestXML($soapId, $parameters) {
     return $response;
 }
 
-// Skip processing for MikroTik devices that repeatedly fail
+// Skip processing for MikroTik devices entirely - they consistently fail
 if ($isMikroTik) {
-    // Check if we've seen too many errors from this device
-    $mikrotikErrorKey = "MikroTik-9000";
-    if (isset($GLOBALS['errorCounts'][$mikrotikErrorKey]) && $GLOBALS['errorCounts'][$mikrotikErrorKey] > 5) {
-        // Silent exit - don't even log
-        header('Content-Length: 0');
-        exit;
-    }
+    // Silent exit - don't even attempt TR-069 requests for MikroTik routers
+    header('Content-Length: 0');
+    exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -246,6 +245,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Reset attempted parameters for new sessions
         if (isset($_SESSION['attempted_parameters'])) {
             $_SESSION['attempted_parameters'] = [];
+        }
+        
+        if (isset($_SESSION['successful_parameters'])) {
+            $_SESSION['successful_parameters'] = [];
         }
     }
     
@@ -311,6 +314,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         continue;
                     }
                     
+                    // Track this as a successful parameter retrieval
+                    if (!in_array($paramName, $_SESSION['successful_parameters'])) {
+                        $_SESSION['successful_parameters'][] = $paramName;
+                    }
+                    
                     // Categorize the parameter by its name
                     if (stripos($paramName, 'SSID') !== false && stripos($paramName, 'WLANConfiguration.1') !== false) {
                         $foundSSIDs = true;
@@ -337,41 +345,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             if (!$foundSSIDs && !$foundWANSettings && !$foundConnectedDevices) {
                 logWithTimestamp("No network information found in the response", "WARNING");
-                
-                // Try to find any parameter that was returned
-                preg_match_all('/<Name>(.*?)<\/Name>\s*<Value[^>]*>(.*?)<\/Value>/si', $raw_post, $allParams, PREG_SET_ORDER);
-                
-                if (!empty($allParams)) {
-                    logWithTimestamp("Found " . count($allParams) . " other parameters in response", "INFO");
-                    
-                    // Log a few samples to help with debugging
-                    $sampleCount = min(3, count($allParams));
-                    for ($i = 0; $i < $sampleCount; $i++) {
-                        $paramName = $allParams[$i][1];
-                        $paramValue = $allParams[$i][2];
-                        logWithTimestamp("Sample parameter: {$paramName} = {$paramValue}", "DEBUG");
-                    }
-                }
             }
             
             // Extract the SOAP ID for the next request
             preg_match('/<cwmp:ID SOAP-ENV:mustUnderstand="1">(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
             $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
             
-            // Try the next parameter set if available
-            static $requestIndex = 0;
-            if (isset($_SESSION['request_index'])) {
-                $requestIndex = $_SESSION['request_index'];
-            } else {
-                $_SESSION['request_index'] = $requestIndex;
+            // Decide which parameter set to try next based on discovery progress
+            $nextParam = null;
+            
+            // First try all core parameters
+            foreach ($coreParameters as $param) {
+                $paramKey = implode(',', $param);
+                if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
+                    $nextParam = $param;
+                    break;
+                }
             }
             
-            $requestIndex++;
-            $_SESSION['request_index'] = $requestIndex;
+            // If all core parameters have been tried, move to extended parameters
+            if ($nextParam === null) {
+                foreach ($extendedParameters as $param) {
+                    $paramKey = implode(',', $param);
+                    if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
+                        $nextParam = $param;
+                        break;
+                    }
+                }
+            }
             
-            // Make sure we don't go out of bounds
-            if ($requestIndex >= count($parameterRequests)) {
-                // If we've tried all parameter sets, just send completion response
+            // If all extended parameters have been tried, try optional ones
+            if ($nextParam === null) {
+                foreach ($optionalParameters as $param) {
+                    $paramKey = implode(',', $param);
+                    if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
+                        $nextParam = $param;
+                        break;
+                    }
+                }
+            }
+            
+            // If we've tried everything, just complete the session
+            if ($nextParam === null) {
                 header('Content-Type: text/xml');
                 echo '<?xml version="1.0" encoding="UTF-8"?>
 <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
@@ -389,24 +404,89 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
             
-            // Check if we've already attempted this parameter
-            if (!isset($_SESSION['attempted_parameters'])) {
-                $_SESSION['attempted_parameters'] = [];
-            }
+            // Mark this parameter set as attempted
+            $_SESSION['attempted_parameters'][] = implode(',', $nextParam);
             
-            $nextParameters = $parameterRequests[$requestIndex];
-            $paramKey = implode(',', $nextParameters);
+            $nextRequest = generateParameterRequestXML($soapId, $nextParam);
             
-            if (in_array($paramKey, $_SESSION['attempted_parameters'])) {
-                // Skip parameters we've already attempted
-                logWithTimestamp("Skipping already attempted parameter: " . $paramKey, "INFO");
+            logWithTimestamp("Trying next parameter set: " . implode(", ", $nextParam), "INFO");
+            
+            header('Content-Type: text/xml');
+            echo $nextRequest;
+            exit;
+        }
+        
+        // Check for fault messages - now with smarter handling
+        if (stripos($raw_post, '<SOAP-ENV:Fault>') !== false || stripos($raw_post, '<cwmp:Fault>') !== false) {
+            preg_match('/<FaultCode>(.*?)<\/FaultCode>.*?<FaultString>(.*?)<\/FaultString>/s', $raw_post, $faultMatches);
+            
+            if (!empty($faultMatches)) {
+                $faultCode = $faultMatches[1];
+                $faultString = $faultMatches[2];
                 
-                // Move to the next parameters
-                $requestIndex++;
-                $_SESSION['request_index'] = $requestIndex;
+                // Use the enhanced error logging for device-specific errors
+                $deviceType = $isMikroTik ? "MikroTik" : ($isHuawei ? "Huawei" : "Unknown");
                 
-                if ($requestIndex >= count($parameterRequests)) {
-                    // If we've tried all parameter sets, just send completion response
+                // Extract SOAP ID
+                preg_match('/<cwmp:ID SOAP-ENV:mustUnderstand="1">(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
+                $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
+                
+                // Extract what parameter caused the fault - for future reference
+                if (preg_match('/<cwmp:GetParameterValues>.*?<string>(.*?)<\/string>/s', $raw_post, $paramMatch)) {
+                    $faultParam = $paramMatch[1];
+                    
+                    // Add to a session list of parameters that cause faults - to avoid in future
+                    if (!isset($_SESSION['fault_parameters'])) {
+                        $_SESSION['fault_parameters'] = [];
+                    }
+                    
+                    $_SESSION['fault_parameters'][] = $faultParam;
+                    
+                    // Only log if this is not a common "Invalid parameter" error
+                    if ($faultCode != '9005') {
+                        logWithTimestamp("Parameter that caused fault: {$faultParam}", "INFO");
+                    }
+                }
+                
+                // Log the error - but with minimal output for common errors
+                logError($faultCode, $faultString, $deviceType);
+                
+                // Now find the next parameter to try, skipping any parameters that have caused faults
+                $nextParam = null;
+                
+                // First try all core parameters
+                foreach ($coreParameters as $param) {
+                    $paramKey = implode(',', $param);
+                    if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
+                        $nextParam = $param;
+                        break;
+                    }
+                }
+                
+                // If all core parameters have been tried, move to extended parameters
+                if ($nextParam === null) {
+                    foreach ($extendedParameters as $param) {
+                        $paramKey = implode(',', $param);
+                        if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
+                            $nextParam = $param;
+                            break;
+                        }
+                    }
+                }
+                
+                // If all extended parameters have been tried, try optional ones
+                if ($nextParam === null) {
+                    foreach ($optionalParameters as $param) {
+                        $paramKey = implode(',', $param);
+                        if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
+                            $nextParam = $param;
+                            break;
+                        }
+                    }
+                }
+                
+                // If we've tried everything, just complete the session
+                if ($nextParam === null) {
                     header('Content-Type: text/xml');
                     echo '<?xml version="1.0" encoding="UTF-8"?>
 <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
@@ -424,139 +504,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     exit;
                 }
                 
-                $nextParameters = $parameterRequests[$requestIndex];
-            }
-            
-            $_SESSION['attempted_parameters'][] = $paramKey;
-            
-            $nextRequest = generateParameterRequestXML($soapId, $nextParameters);
-            
-            logWithTimestamp("Trying next parameter set: " . implode(", ", $nextParameters), "INFO");
-            
-            header('Content-Type: text/xml');
-            echo $nextRequest;
-            exit;
-        }
-        
-        // Check for fault messages
-        if (stripos($raw_post, '<SOAP-ENV:Fault>') !== false || stripos($raw_post, '<cwmp:Fault>') !== false) {
-            preg_match('/<FaultCode>(.*?)<\/FaultCode>.*?<FaultString>(.*?)<\/FaultString>/s', $raw_post, $faultMatches);
-            
-            if (!empty($faultMatches)) {
-                $faultCode = $faultMatches[1];
-                $faultString = $faultMatches[2];
+                // Mark this parameter set as attempted
+                $_SESSION['attempted_parameters'][] = implode(',', $nextParam);
                 
-                // Use the enhanced error logging for device-specific errors
-                $deviceType = $isMikroTik ? "MikroTik" : ($isHuawei ? "Huawei" : "Unknown");
-                logError($faultCode, $faultString, $deviceType);
+                $nextRequest = generateParameterRequestXML($soapId, $nextParam);
                 
-                // For MikroTik devices with Method not supported errors, just exit
-                if ($isMikroTik && $faultCode == '9000') {
-                    // Silent exit after logging
-                    exit;
-                }
+                logWithTimestamp("Fault received, trying next parameter set: " . implode(", ", $nextParam), "INFO");
                 
-                // Extract SOAP ID
-                preg_match('/<cwmp:ID SOAP-ENV:mustUnderstand="1">(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
-                $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
-                
-                // Handle Internal error (9002) specifically for Huawei devices
-                if ($faultCode == '9002' && $isHuawei) {
-                    logWithTimestamp("Internal error detected - switching to simplified request", "INFO");
-                    
-                    // Try a very simple request for just the SSID of WLAN 1
-                    $simpleParam = ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID'];
-                    
-                    // Store the current fault path so we don't retry it
-                    if (!isset($_SESSION['fault_parameters'])) {
-                        $_SESSION['fault_parameters'] = [];
-                    }
-                    
-                    // Extract what parameter caused the fault
-                    if (preg_match('/<cwmp:GetParameterValues>.*?<string>(.*?)<\/string>/s', $raw_post, $paramMatch)) {
-                        $faultParam = $paramMatch[1];
-                        $_SESSION['fault_parameters'][] = $faultParam;
-                        logWithTimestamp("Parameter that caused fault: {$faultParam}", "INFO");
-                        
-                        // Skip any parameters related to WLAN 2-5 since we're focusing only on WLAN 1
-                        if (preg_match('/WLANConfiguration\.[2-5]/', $faultParam)) {
-                            logWithTimestamp("Skipping WLAN 2-5 parameter that caused fault", "INFO");
-                        }
-                    }
-                    
-                    $simpleRequest = generateParameterRequestXML($soapId, $simpleParam);
-                    
-                    header('Content-Type: text/xml');
-                    echo $simpleRequest;
-                    logWithTimestamp("Sent simplified SSID request after error", "INFO");
-                    exit;
-                }
-                
-                // Try the next parameter set
-                static $faultRequestIndex = 0;
-                if (isset($_SESSION['fault_request_index'])) {
-                    $faultRequestIndex = $_SESSION['fault_request_index'];
-                } else {
-                    $_SESSION['fault_request_index'] = $faultRequestIndex;
-                }
-                
-                $faultRequestIndex++;
-                $_SESSION['fault_request_index'] = $faultRequestIndex;
-                
-                if ($faultRequestIndex < count($parameterRequests)) {
-                    $nextParameters = $parameterRequests[$faultRequestIndex];
-                    
-                    // Skip any parameters that have caused faults before
-                    if (isset($_SESSION['fault_parameters'])) {
-                        $skipParams = false;
-                        foreach ($nextParameters as $param) {
-                            if (in_array($param, $_SESSION['fault_parameters']) || 
-                                preg_match('/WLANConfiguration\.[2-5]/', $param)) {
-                                $skipParams = true;
-                                logWithTimestamp("Skipping parameter that caused fault previously: {$param}", "INFO");
-                                break;
-                            }
-                        }
-                        
-                        if ($skipParams) {
-                            logWithTimestamp("Skipping parameters that caused fault previously", "INFO");
-                            $faultRequestIndex++;
-                            $_SESSION['fault_request_index'] = $faultRequestIndex;
-                            
-                            if ($faultRequestIndex >= count($parameterRequests)) {
-                                logWithTimestamp("All parameter sets have been tried, completing session", "INFO");
-                                // End with a simple acknowledgement
-                                header('Content-Type: text/xml');
-                                echo '<?xml version="1.0" encoding="UTF-8"?>
-<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-  <SOAP-ENV:Header>
-    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </SOAP-ENV:Header>
-  <SOAP-ENV:Body>
-    <cwmp:SetParameterValuesResponse>
-      <Status>0</Status>
-    </cwmp:SetParameterValuesResponse>
-  </SOAP-ENV:Body>
-</SOAP-ENV:Envelope>';
-                                exit;
-                            }
-                            
-                            $nextParameters = $parameterRequests[$faultRequestIndex];
-                        }
-                    }
-                    
-                    $nextRequest = generateParameterRequestXML($soapId, $nextParameters);
-                    
-                    logWithTimestamp("Fault received, trying next parameter set: " . implode(", ", $nextParameters), "INFO");
-                    
-                    header('Content-Type: text/xml');
-                    echo $nextRequest;
-                    exit;
-                }
-                
-                // If we've tried all parameter sets, send a simple acknowledgement
-                logWithTimestamp("Tried all parameter sets without success, completing session", "WARNING");
+                header('Content-Type: text/xml');
+                echo $nextRequest;
+                exit;
             } else {
+                // Couldn't parse the fault details
                 logWithTimestamp("FAULT DETECTED but couldn't parse details", "ERROR");
             }
             
@@ -578,34 +537,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
     } else {
-        // Skip logging for MikroTik devices with error counts
-        if (!$isMikroTik || !isset($GLOBALS['errorCounts']["MikroTik-9000"]) || $GLOBALS['errorCounts']["MikroTik-9000"] <= 5) {
-            logWithTimestamp("EMPTY POST RECEIVED - This should trigger network discovery", "INFO");
-        }
+        // Empty POST - start parameter discovery
+        logWithTimestamp("EMPTY POST RECEIVED - This should trigger network discovery", "INFO");
         
-        // If we receive an empty POST, this is an opportunity to request parameters
         // Generate a session ID
         $sessionId = md5(uniqid(rand(), true));
         
-        // Only log for Huawei devices to reduce noise
-        if ($isHuawei) {
-            logWithTimestamp("Starting network discovery with session ID: " . $sessionId, "INFO");
-        }
-        
-        // Start with a request for SSID
-        $initialParameters = $parameterRequests[0]; // Just request one SSID to start
+        // Start with a request for SSID - the most likely parameter to succeed
+        $initialParameters = $coreParameters[0];
         $initialRequest = generateParameterRequestXML($sessionId, $initialParameters);
         
         if ($isHuawei) {
+            logWithTimestamp("Starting network discovery with session ID: " . $sessionId, "INFO");
             logWithTimestamp("Sending simplified SSID request for: " . implode(", ", $initialParameters), "INFO");
         }
         
         header('Content-Type: text/xml');
         echo $initialRequest;
         
-        if ($isHuawei) {
-            logWithTimestamp("=== REQUEST COMPLETED ===", "INFO");
-        }
+        logWithTimestamp("=== REQUEST COMPLETED ===", "INFO");
         exit;
     }
 }
@@ -632,6 +582,4 @@ try {
     echo "Internal Server Error";
 }
 
-if ($isHuawei) {
-    logWithTimestamp("=== REQUEST COMPLETED ===", "INFO");
-}
+logWithTimestamp("=== REQUEST COMPLETED ===", "INFO");

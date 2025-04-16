@@ -16,13 +16,13 @@ $result = [
     'wifi_users' => [],
     'wan_settings' => [],
     'errors' => [],  // Array to track errors
-    'device_info' => [], // New array to track device model information
+    'device_info' => [], // Array to track device model information
     'mikrotik_errors' => 0, // Counter for MikroTik errors
     'huawei_errors' => 0,   // Counter for Huawei errors
     'discovery_status' => 'unknown' // Status of network discovery
 ];
 
-// Parse and count errors from the log file
+// Parse and count errors from the log file - but only count unique errors
 $errorLogFile = __DIR__ . '/../wifi_discovery.log';
 if (file_exists($errorLogFile)) {
     try {
@@ -31,6 +31,7 @@ if (file_exists($errorLogFile)) {
         $huaweiErrorCount = 0;
         $detectedDeviceType = '';
         $detectedModel = '';
+        $processedErrors = []; // To prevent duplicate error counting
         
         foreach ($logLines as $line) {
             // Extract device info
@@ -57,14 +58,36 @@ if (file_exists($errorLogFile)) {
                 $detectedDeviceType = 'MikroTik';
             }
             
-            // Count errors by device type
+            // Count errors by device type - but only unique errors
             if (strpos($line, 'FAULT CODE DETECTED') !== false) {
-                if (strpos($line, 'Device: MikroTik') !== false || 
-                    (strpos($line, 'MikroTik') !== false && strpos($line, 'Method not supported') !== false)) {
-                    $mikrotikErrorCount++;
-                } else if (strpos($line, 'Device: Huawei') !== false || 
+                if (preg_match('/FAULT CODE DETECTED: (\d+)/', $line, $matches)) {
+                    $errorCode = $matches[1];
+                    
+                    // Skip 9005 (Invalid parameter) errors as they're expected during discovery
+                    if ($errorCode == '9005') {
+                        continue;
+                    }
+                    
+                    // Create a unique key for this error
+                    $errorKey = '';
+                    
+                    if (strpos($line, 'Device: MikroTik') !== false || 
+                        (strpos($line, 'MikroTik') !== false && strpos($line, 'Method not supported') !== false)) {
+                        // Only count once per error code for MikroTik
+                        $errorKey = "MikroTik-{$errorCode}";
+                        if (!in_array($errorKey, $processedErrors)) {
+                            $mikrotikErrorCount++;
+                            $processedErrors[] = $errorKey;
+                        }
+                    } else if (strpos($line, 'Device: Huawei') !== false || 
                            (strpos($line, 'HW_WAP_CWMP') !== false && strpos($line, 'FAULT CODE') !== false)) {
-                    $huaweiErrorCount++;
+                        // Only count once per error code for Huawei
+                        $errorKey = "Huawei-{$errorCode}";
+                        if (!in_array($errorKey, $processedErrors)) {
+                            $huaweiErrorCount++;
+                            $processedErrors[] = $errorKey;
+                        }
+                    }
                 }
             }
             
@@ -278,12 +301,14 @@ if (file_exists($ssidsFile)) {
                     $result['device_info']['connected_hosts'] = intval($value);
                 }
                 else if (stripos($name, 'Fault') !== false) {
-                    // Log faults as errors
-                    $result['errors'][] = [
-                        'type' => 'fault',
-                        'parameter' => $name,
-                        'value' => $value
-                    ];
+                    // Log faults as errors only if they're not 9005 (Invalid parameter name)
+                    if (stripos($name, '9005') === false) {
+                        $result['errors'][] = [
+                            'type' => 'fault',
+                            'parameter' => $name,
+                            'value' => $value
+                        ];
+                    }
                 }
             }
         }
