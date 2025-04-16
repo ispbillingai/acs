@@ -25,6 +25,26 @@ try {
     $devices = getDevices($db);
     $tenMinutesAgo = date('Y-m-d H:i:s', strtotime('-10 minutes'));
     
+    // Update device status based on last contact time
+    foreach ($devices as $key => $device) {
+        $isOnline = strtotime($device['lastContact']) >= strtotime($tenMinutesAgo);
+        $devices[$key]['status'] = $isOnline ? 'online' : 'offline';
+        
+        // Also update status in database to ensure consistency
+        $updateStmt = $db->prepare("UPDATE devices SET status = :status WHERE id = :id");
+        $updateStmt->execute([
+            ':status' => $isOnline ? 'online' : 'offline',
+            ':id' => $device['id']
+        ]);
+    }
+    
+    // Count online and offline devices for footer stats
+    $onlineDevices = count(array_filter($devices, function($d) use ($tenMinutesAgo) {
+        return strtotime($d['lastContact']) >= strtotime($tenMinutesAgo);
+    }));
+    
+    $offlineDevices = count($devices) - $onlineDevices;
+    
     // Filter devices based on status
     if ($status !== 'all') {
         $devices = array_filter($devices, function($device) use ($status, $tenMinutesAgo) {
