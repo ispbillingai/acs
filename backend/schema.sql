@@ -21,6 +21,19 @@ CREATE TABLE IF NOT EXISTS devices (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
+-- Parameters table to store TR-069 parameters
+CREATE TABLE IF NOT EXISTS parameters (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    device_id INT,
+    param_name VARCHAR(255) NOT NULL,
+    param_value TEXT,
+    param_type VARCHAR(32) DEFAULT 'string',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
+    UNIQUE KEY device_param (device_id, param_name)
+);
+
 -- WiFi Connected Clients table with enhanced details
 CREATE TABLE IF NOT EXISTS connected_clients (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -31,7 +44,8 @@ CREATE TABLE IF NOT EXISTS connected_clients (
     signal_strength INT,
     connected_since DATETIME,
     last_seen DATETIME,
-    FOREIGN KEY (device_id) REFERENCES devices(id)
+    is_active BOOLEAN DEFAULT TRUE,
+    FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
 );
 
 -- Sessions table remains unchanged
@@ -85,3 +99,6 @@ CREATE INDEX idx_device_mac ON devices(mac_address);
 CREATE INDEX idx_username ON users(username);
 CREATE INDEX idx_user_timezone ON users(timezone);
 CREATE INDEX idx_user_display_name ON users(display_name);
+CREATE INDEX idx_parameter_name ON parameters(param_name);
+CREATE INDEX idx_client_ip ON connected_clients(ip_address);
+CREATE INDEX idx_client_hostname ON connected_clients(hostname);

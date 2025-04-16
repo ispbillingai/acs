@@ -1,108 +1,103 @@
 
-import { useParams } from "react-router-dom";
-import { Card } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { DeviceInfo } from "@/components/DeviceInfo";
-import { DeviceParameters } from "@/components/DeviceParameters";
-import { DeviceActions } from "@/components/DeviceActions";
-import { useQuery } from "@tanstack/react-query";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertCircle } from "lucide-react";
+import React, { useState, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
+import { DeviceInfo } from '../../components/DeviceInfo';
+import { DeviceParameters } from '../../components/DeviceParameters';
+import { DeviceActions } from '../../components/DeviceActions';
+import { ConnectedHosts } from '../../components/ConnectedHosts';
+import { useToast } from '@/hooks/use-toast';
 
-// Fetch device details with cache busting
-const fetchDevice = async (id: string) => {
-  const timestamp = new Date().getTime();
-  const response = await fetch(`/backend/api/devices.php?id=${id}&t=${timestamp}`, {
-    headers: {
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0'
+interface Device {
+  id: string;
+  serialNumber: string;
+  manufacturer: string;
+  model: string;
+  status: 'online' | 'offline' | 'provisioning';
+  lastContact: string;
+  ipAddress: string;
+  parameters: any[];
+}
+
+const DeviceDetail = () => {
+  const { id } = useParams<{ id: string }>();
+  const [device, setDevice] = useState<Device | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    const fetchDevice = async () => {
+      try {
+        setLoading(true);
+        const response = await fetch(`/backend/api/devices.php?id=${id}`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch device');
+        }
+        const data = await response.json();
+        setDevice(data);
+      } catch (error) {
+        console.error('Error fetching device:', error);
+        toast({
+          title: "Error",
+          description: "Failed to load device details",
+          variant: "destructive",
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (id) {
+      fetchDevice();
     }
-  });
-  
-  if (!response.ok) {
-    throw new Error('Failed to fetch device details');
-  }
-  
-  const data = await response.json();
-  console.log('Fetched device details:', data);
-  return data;
-};
+  }, [id, refreshTrigger, toast]);
 
-const DevicePage = () => {
-  const { id } = useParams();
-  
-  const { data: device, isLoading, error } = useQuery({
-    queryKey: ['device', id],
-    queryFn: () => fetchDevice(id!),
-    refetchInterval: 5000,
-    refetchOnWindowFocus: true,
-    staleTime: 0,
-    gcTime: 0
-  });
+  const handleRefresh = () => {
+    setRefreshTrigger(prev => prev + 1);
+  };
 
-  if (isLoading) {
+  if (loading) {
     return (
-      <div className="min-h-screen bg-background p-6">
-        <div className="max-w-7xl mx-auto space-y-6">
-          <Skeleton className="h-12 w-1/3" />
-          <Skeleton className="h-[200px] w-full" />
+      <div className="p-6">
+        <div className="max-w-7xl mx-auto">
+          <p>Loading device...</p>
         </div>
       </div>
     );
   }
 
-  if (error) {
+  if (!device) {
     return (
-      <div className="min-h-screen bg-background p-6">
+      <div className="p-6">
         <div className="max-w-7xl mx-auto">
-          <Alert variant="destructive">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>
-              Error loading device details. Please try again later.
-              {error instanceof Error ? ` (${error.message})` : ''}
-            </AlertDescription>
-          </Alert>
+          <p>Device not found</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background p-6">
+    <div className="p-6">
       <div className="max-w-7xl mx-auto space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight mb-1">
-              {device.model}
-            </h1>
-            <p className="text-muted-foreground">{device.serialNumber}</p>
-          </div>
-          <DeviceActions device={device} />
+        <div className="space-y-2">
+          <h1 className="text-3xl font-semibold tracking-tight">
+            Device Details
+          </h1>
+          <p className="text-gray-600">
+            View and manage this TR-069 device
+          </p>
         </div>
 
-        <Tabs defaultValue="info" className="w-full">
-          <TabsList>
-            <TabsTrigger value="info">Device Info</TabsTrigger>
-            <TabsTrigger value="parameters">Parameters</TabsTrigger>
-            <TabsTrigger value="logs">Logs</TabsTrigger>
-          </TabsList>
-          <TabsContent value="info">
-            <DeviceInfo device={device} />
-          </TabsContent>
-          <TabsContent value="parameters">
-            <DeviceParameters deviceId={device.id} />
-          </TabsContent>
-          <TabsContent value="logs">
-            <Card className="p-6">
-              <p className="text-muted-foreground">Coming soon...</p>
-            </Card>
-          </TabsContent>
-        </Tabs>
+        <DeviceInfo device={device} onRefresh={handleRefresh} />
+        
+        <ConnectedHosts deviceId={id || ''} refreshTrigger={refreshTrigger} />
+        
+        <DeviceParameters deviceId={id || ''} />
+        
+        <DeviceActions device={device} />
       </div>
     </div>
   );
 };
 
-export default DevicePage;
+export default DeviceDetail;
