@@ -11,7 +11,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { InfoIcon, WifiIcon, KeyIcon, ExternalLinkIcon } from "lucide-react";
+import { InfoIcon, WifiIcon, KeyIcon, SignalIcon, ExternalLinkIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 interface DeviceParametersProps {
@@ -24,12 +24,13 @@ interface Parameter {
   type: string;
   writable: boolean;
   category?: string;
+  network_type?: string;
 }
 
 interface RouterSSIDsResponse {
   timestamp: string;
-  ssids: Array<{parameter: string, value: string}>;
-  passwords: Array<{parameter: string, value: string}>;
+  ssids: Array<{parameter: string, value: string, network_type?: string}>;
+  passwords: Array<{parameter: string, value: string, network_type?: string}>;
   raw_parameters: Array<{name: string, value: string}>;
 }
 
@@ -38,6 +39,7 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
   const [parameters, setParameters] = useState<Parameter[]>([]);
   const [loading, setLoading] = useState(true);
   const [tr069Data, setTr069Data] = useState<RouterSSIDsResponse | null>(null);
+  const [showPasswords, setShowPasswords] = useState(false);
 
   useEffect(() => {
     // This function fetches both mock data and checks for router SSIDs
@@ -82,7 +84,8 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
                   value: ssid.value,
                   type: "string",
                   writable: false,
-                  category: "ssid"
+                  category: "ssid",
+                  network_type: ssid.network_type
                 });
               });
             }
@@ -95,7 +98,8 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
                   value: password.value,
                   type: "string",
                   writable: false,
-                  category: "password"
+                  category: "password",
+                  network_type: password.network_type
                 });
               });
             }
@@ -146,20 +150,62 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
   };
 
   const getCategoryBadge = (param: Parameter) => {
-    if (param.category === 'ssid') return <Badge className="bg-blue-500">SSID</Badge>;
-    if (param.category === 'password') return <Badge className="bg-amber-500">Password</Badge>;
+    if (param.category === 'ssid') {
+      return (
+        <div className="flex items-center gap-1">
+          <Badge className="bg-blue-500">SSID</Badge>
+          {param.network_type && (
+            <Badge className={param.network_type === '5GHz' ? 'bg-purple-500' : 'bg-green-500'}>
+              {param.network_type}
+            </Badge>
+          )}
+        </div>
+      );
+    }
+    if (param.category === 'password') {
+      return (
+        <div className="flex items-center gap-1">
+          <Badge className="bg-amber-500">Password</Badge>
+          {param.network_type && (
+            <Badge className={param.network_type === '5GHz' ? 'bg-purple-500' : 'bg-green-500'}>
+              {param.network_type}
+            </Badge>
+          )}
+        </div>
+      );
+    }
     return null;
+  };
+
+  // Function to display password value
+  const displayValue = (param: Parameter) => {
+    if (param.category === 'password' && !showPasswords) {
+      return "••••••••••••••";
+    }
+    return param.value;
   };
 
   return (
     <Card className="p-6">
-      <div className="mb-6">
+      <div className="mb-6 flex flex-wrap gap-4 justify-between items-center">
         <Input
           placeholder="Search parameters..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           className="max-w-sm"
         />
+        
+        {hasPasswords && (
+          <button 
+            onClick={() => setShowPasswords(!showPasswords)}
+            className={`px-4 py-2 rounded-md font-medium flex items-center gap-2 ${
+              showPasswords ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
+            }`}
+          >
+            <KeyIcon size={16} />
+            {showPasswords ? 'Hide Passwords' : 'Show Passwords'}
+          </button>
+        )}
       </div>
 
       {!loading && hasSSIDs && (
@@ -168,6 +214,13 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
           <AlertTitle className="text-green-700">WiFi Information Retrieved!</AlertTitle>
           <AlertDescription className="text-green-600">
             Successfully retrieved {tr069Data?.ssids.length || 0} SSID(s) and {tr069Data?.passwords.length || 0} password(s) from the router.
+            {hasPasswords && (
+              <span className="block mt-1">
+                {showPasswords ? 
+                  "Passwords are currently visible. Click 'Hide Passwords' for security." : 
+                  "For security, passwords are hidden. Click 'Show Passwords' to view them."}
+              </span>
+            )}
           </AlertDescription>
         </Alert>
       )}
@@ -209,7 +262,9 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
                     {getCategoryIcon(param)}
                     <span className="ml-2">{param.name}</span>
                   </TableCell>
-                  <TableCell className="font-medium">{param.value}</TableCell>
+                  <TableCell className="font-medium">
+                    {displayValue(param)}
+                  </TableCell>
                   <TableCell>{param.type}</TableCell>
                   <TableCell>{getCategoryBadge(param)}</TableCell>
                 </TableRow>
@@ -218,6 +273,17 @@ export const DeviceParameters = ({ deviceId }: DeviceParametersProps) => {
           </TableBody>
         </Table>
       </div>
+
+      {!loading && !hasSSIDs && (
+        <Alert className="mt-6 bg-blue-50 border-blue-200">
+          <InfoIcon className="h-4 w-4 text-blue-500" />
+          <AlertTitle className="text-blue-700">No WiFi Information Yet</AlertTitle>
+          <AlertDescription className="text-blue-600">
+            No WiFi SSIDs or passwords have been retrieved from a router yet. 
+            Connect a TR-069 enabled router to discover WiFi credentials.
+          </AlertDescription>
+        </Alert>
+      )}
     </Card>
   );
 };

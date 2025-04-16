@@ -33,17 +33,23 @@ if (file_exists($ssidsFile)) {
                 'value' => trim($value)
             ];
             
-            // Categorize by type
-            if (strpos($name, 'SSID') !== false) {
+            // Categorize by type with improved detection
+            if (stripos($name, 'SSID') !== false) {
                 $result['ssids'][] = [
                     'parameter' => trim($name),
-                    'value' => trim($value)
+                    'value' => trim($value),
+                    'network_type' => (stripos($name, 'Configuration.5') !== false) ? '5GHz' : 
+                                     ((stripos($name, 'Configuration.2') !== false) ? '5GHz' : '2.4GHz')
                 ];
             } 
-            else if (strpos($name, 'KeyPassphrase') !== false || strpos($name, 'WPAKey') !== false) {
+            else if (stripos($name, 'KeyPassphrase') !== false || 
+                    stripos($name, 'WPAKey') !== false || 
+                    stripos($name, 'PreSharedKey') !== false) {
                 $result['passwords'][] = [
                     'parameter' => trim($name),
-                    'value' => trim($value)
+                    'value' => trim($value),
+                    'network_type' => (stripos($name, 'Configuration.5') !== false) ? '5GHz' : 
+                                     ((stripos($name, 'Configuration.2') !== false) ? '5GHz' : '2.4GHz')
                 ];
             }
         }
