@@ -1,6 +1,7 @@
 
 <?php
 header('Content-Type: application/json');
+header('Access-Control-Allow-Origin: *');
 
 // Check if the SSIDs file exists
 $ssidsFile = __DIR__ . '/../router_ssids.txt';
@@ -33,7 +34,7 @@ if (file_exists($ssidsFile)) {
             ];
             
             // Categorize by type
-            if (strpos($name, 'SSID') !== false && strpos($name, '.SSID') !== false) {
+            if (strpos($name, 'SSID') !== false) {
                 $result['ssids'][] = [
                     'parameter' => trim($name),
                     'value' => trim($value)
@@ -53,4 +54,3 @@ if (file_exists($ssidsFile)) {
     // Return empty result if no SSIDs found
     echo json_encode($result);
 }
-
