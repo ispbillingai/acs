@@ -321,6 +321,37 @@ try {
         .dropdown-item:active {
             background-color: #3b82f6;
         }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1050;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.4);
+        }
+        .modal-content {
+            background-color: #fefefe;
+            margin: 10% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            border-radius: 10px;
+            width: 80%;
+            max-width: 600px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        .close-modal {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .close-modal:hover {
+            color: #000;
+        }
     </style>
 </head>
 <body>
@@ -439,7 +470,7 @@ try {
                             <button type="button" class="btn btn-sm btn-outline-primary" id="refresh-data-btn"><i class='bx bx-refresh me-1'></i>Refresh</button>
                             <button type="button" class="btn btn-sm btn-outline-primary"><i class='bx bx-edit me-1'></i>Edit</button>
                         </div>
-                        <button type="button" class="btn btn-sm btn-primary"><i class='bx bx-cog me-1'></i>Configure</button>
+                        <button type="button" class="btn btn-sm btn-primary" id="configure-device-btn"><i class='bx bx-cog me-1'></i>Configure</button>
                     </div>
                 </div>
 
@@ -662,7 +693,20 @@ try {
         </div>
     </div>
 
+    <!-- Configuration Modal -->
+    <div id="configurationModal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal">&times;</span>
+            <h2 class="mb-4">Configure Device: <?php echo htmlspecialchars($device['model'] ?: 'Device'); ?></h2>
+            <div id="configuration-panel" data-device-id="<?php echo htmlspecialchars($deviceId); ?>"></div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sonner@1.5.0/dist/sonner.js"></script>
+    <script src="dist/device-config-panel.js"></script>
     <script>
         // Initialize tooltips
         var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
@@ -679,6 +723,38 @@ try {
                     sidebar.classList.add('collapse');
                 }
             }
+            
+            // Configuration modal functionality
+            const modal = document.getElementById("configurationModal");
+            const configBtn = document.getElementById("configure-device-btn");
+            const closeBtn = document.querySelector(".close-modal");
+            
+            configBtn.addEventListener("click", function() {
+                console.log("Configure button clicked");
+                modal.style.display = "block";
+                
+                // Get device ID from the configuration panel element
+                const configPanel = document.getElementById("configuration-panel");
+                const deviceId = configPanel.getAttribute("data-device-id");
+                
+                // Initialize React component
+                try {
+                    console.log("Initializing DeviceConfigurationPanel with deviceId:", deviceId);
+                    window.renderDeviceConfigPanel(deviceId);
+                } catch (error) {
+                    console.error("Error rendering configuration panel:", error);
+                }
+            });
+            
+            closeBtn.addEventListener("click", function() {
+                modal.style.display = "none";
+            });
+            
+            window.addEventListener("click", function(event) {
+                if (event.target == modal) {
+                    modal.style.display = "none";
+                }
+            });
             
             // Add optical readings refresh handler
             const refreshOpticalBtn = document.getElementById('refresh-optical');
