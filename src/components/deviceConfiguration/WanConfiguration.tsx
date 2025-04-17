@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
+import { useConfigurationPolling } from '@/hooks/useConfigurationPolling';
 
 interface WanConfigurationProps {
   deviceId?: string;
@@ -18,6 +18,21 @@ export function WanConfiguration({ deviceId }: WanConfigurationProps) {
   const [taskStatus, setTaskStatus] = useState<string | null>(null);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
   const [pollingInterval, setPollingInterval] = useState<number | null>(null);
+
+  // Add real-time configuration polling
+  const { configuration, error } = useConfigurationPolling(deviceId);
+
+  // Update local state when new configuration arrives
+  React.useEffect(() => {
+    if (configuration.wan) {
+      setConnectionType(configuration.wan.connectionType || 'DHCP');
+      // Update form state if needed based on WAN configuration
+      setFormState(prev => ({
+        ...prev,
+        staticIp: configuration.wan.ipAddress || '',
+      }));
+    }
+  }, [configuration]);
 
   // Form state
   const [formState, setFormState] = useState({

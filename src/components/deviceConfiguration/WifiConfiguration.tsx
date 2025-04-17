@@ -1,5 +1,5 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import { useConfigurationPolling } from '@/hooks/useConfigurationPolling';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,6 +35,16 @@ const WifiConfiguration: React.FC<WifiConfigurationProps> = ({
   const [taskId, setTaskId] = useState<number | null>(null);
   const [taskStatus, setTaskStatus] = useState<string | null>(null);
 
+  const { configuration, error } = useConfigurationPolling(deviceId);
+
+  React.useEffect(() => {
+    if (configuration.wifi) {
+      setSsid(configuration.wifi.ssid || '');
+      setSecurity(configuration.wifi.security || 'WPA2-PSK');
+      setExistingSettings(configuration.wifi);
+    }
+  }, [configuration]);
+
   useEffect(() => {
     const fetchWifiSettings = async () => {
       try {
@@ -63,7 +73,6 @@ const WifiConfiguration: React.FC<WifiConfigurationProps> = ({
     fetchWifiSettings();
   }, [deviceId]);
 
-  // Poll for task status if we have a task ID
   useEffect(() => {
     if (!taskId) return;
     
@@ -75,7 +84,6 @@ const WifiConfiguration: React.FC<WifiConfigurationProps> = ({
         if (result.success && result.task) {
           setTaskStatus(result.task.status);
           
-          // If the task is completed or failed, stop polling
           if (result.task.status === 'completed') {
             toast.success("WiFi configuration applied successfully!");
             setTaskId(null);
@@ -89,13 +97,10 @@ const WifiConfiguration: React.FC<WifiConfigurationProps> = ({
       }
     };
     
-    // Check immediately
     checkTaskStatus();
     
-    // Then set up interval to check every 5 seconds
     const interval = setInterval(checkTaskStatus, 5000);
     
-    // Clean up on unmount
     return () => clearInterval(interval);
   }, [taskId]);
 
