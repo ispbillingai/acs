@@ -28,17 +28,24 @@ class WifiTaskGenerator {
         
         // Only add password parameter if provided
         if ($password) {
-            // Try both common password parameter paths
+            // For Huawei devices, only use KeyPassphrase (not both)
             $parameters[] = [
                 'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
                 'value' => $password,
                 'type' => 'xsd:string'
             ];
             
-            // Some devices use PreSharedKey instead of KeyPassphrase
+            // Add security mode parameter to ensure password is applied
             $parameters[] = [
-                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.PreSharedKey',
-                'value' => $password,
+                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
+                'value' => 'WPAand11i',
+                'type' => 'xsd:string'
+            ];
+            
+            // Make sure encryption is enabled
+            $parameters[] = [
+                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.WPAEncryptionModes',
+                'value' => 'AESEncryption',
                 'type' => 'xsd:string'
             ];
         }

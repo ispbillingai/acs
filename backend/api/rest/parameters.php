@@ -1,3 +1,4 @@
+
 <?php
 // Enable error reporting for development
 error_reporting(E_ALL);
@@ -358,6 +359,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->execute();
                 
                 $taskId = $db->lastInsertId();
+                
+                // Also update the devices table with the new SSID and password for reference
+                try {
+                    $updateStmt = $db->prepare("
+                        UPDATE devices 
+                        SET ssid = :ssid, wifi_password = :password
+                        WHERE id = :device_id
+                    ");
+                    $updateStmt->bindParam(':ssid', $ssid);
+                    $updateStmt->bindParam(':password', $password);
+                    $updateStmt->bindParam(':device_id', $deviceId);
+                    $updateStmt->execute();
+                    
+                    writeLog("Updated device record with new SSID: $ssid");
+                } catch (PDOException $e) {
+                    writeLog("Database error updating device record: " . $e->getMessage());
+                }
                 
                 echo json_encode([
                     'success' => true,

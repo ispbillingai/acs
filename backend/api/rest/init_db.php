@@ -50,6 +50,16 @@ try {
         $db->exec($insertDefault);
     }
     
+    // Add wifi_password column to devices table if it doesn't exist
+    try {
+        $checkColumn = $db->query("SHOW COLUMNS FROM devices LIKE 'wifi_password'");
+        if ($checkColumn->rowCount() == 0) {
+            $db->exec("ALTER TABLE devices ADD COLUMN wifi_password VARCHAR(64) NULL AFTER ssid");
+        }
+    } catch (PDOException $e) {
+        // This is expected to fail if devices table doesn't exist yet - that's OK
+    }
+    
     // Success
     echo json_encode([
         'success' => true,
