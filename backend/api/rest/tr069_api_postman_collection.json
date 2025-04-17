@@ -11,6 +11,23 @@
       "name": "Device Parameters",
       "item": [
         {
+          "name": "List All Devices",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/parameters.php?list_all_devices=1",
+              "host": ["{{base_url}}"],
+              "path": ["parameters.php"],
+              "query": [
+                {
+                  "key": "list_all_devices",
+                  "value": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Get All Parameters",
           "request": {
             "method": "GET",
@@ -22,6 +39,23 @@
                 {
                   "key": "device_id",
                   "value": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get All Parameters By Serial",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/parameters.php?serial=ABCD1234",
+              "host": ["{{base_url}}"],
+              "path": ["parameters.php"],
+              "query": [
+                {
+                  "key": "serial",
+                  "value": "ABCD1234"
                 }
               ]
             }

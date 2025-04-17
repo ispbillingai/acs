@@ -31,7 +31,7 @@ if (file_exists(__DIR__ . '/../../tr069/device_manager.php')) {
     function storeDeviceParameter($db, $deviceId, $paramName, $paramValue, $paramType = 'string') {
         try {
             // Check if parameter exists
-            $checkSql = "SELECT id FROM parameters WHERE device_id = :device_id AND param_name = :param_name";
+            $checkSql = "SELECT id FROM device_parameters WHERE device_id = :device_id AND param_name = :param_name";
             $checkStmt = $db->prepare($checkSql);
             $checkStmt->execute([
                 ':device_id' => $deviceId,
@@ -41,7 +41,7 @@ if (file_exists(__DIR__ . '/../../tr069/device_manager.php')) {
             
             if ($existingParam) {
                 // Update existing parameter
-                $sql = "UPDATE parameters SET 
+                $sql = "UPDATE device_parameters SET 
                     param_value = :param_value,
                     param_type = :param_type,
                     updated_at = NOW()
@@ -54,7 +54,7 @@ if (file_exists(__DIR__ . '/../../tr069/device_manager.php')) {
                 ]);
             } else {
                 // Insert new parameter
-                $sql = "INSERT INTO parameters (
+                $sql = "INSERT INTO device_parameters (
                     device_id, 
                     param_name, 
                     param_value, 
@@ -96,21 +96,62 @@ function writeLog($message) {
 }
 
 writeLog("REST API Request: " . $_SERVER['REQUEST_METHOD'] . " " . $_SERVER['REQUEST_URI']);
+writeLog("Request parameters: " . print_r($_REQUEST, true));
+writeLog("Headers: " . print_r(getallheaders(), true));
 
 // Parse JSON input for POST/PUT requests
 $inputData = null;
 if ($_SERVER['REQUEST_METHOD'] === 'POST' || $_SERVER['REQUEST_METHOD'] === 'PUT') {
     $inputJSON = file_get_contents('php://input');
-    $inputData = json_decode($inputJSON, true);
+    writeLog("Raw input: " . $inputJSON);
     
-    if ($inputData === null && json_last_error() !== JSON_ERROR_NONE) {
-        writeLog("JSON Parse Error: " . json_last_error_msg());
-        http_response_code(400);
-        echo json_encode(['error' => 'Invalid JSON data provided', 'details' => json_last_error_msg()]);
+    if (!empty($inputJSON)) {
+        $inputData = json_decode($inputJSON, true);
+        
+        if ($inputData === null && json_last_error() !== JSON_ERROR_NONE) {
+            writeLog("JSON Parse Error: " . json_last_error_msg());
+            http_response_code(400);
+            echo json_encode(['error' => 'Invalid JSON data provided', 'details' => json_last_error_msg()]);
+            exit;
+        }
+        
+        writeLog("Input data: " . print_r($inputData, true));
+    } else {
+        // If no JSON was provided, use normal POST data
+        $inputData = $_POST;
+        writeLog("Using POST data: " . print_r($inputData, true));
+    }
+}
+
+// If no device ID is specified but we just need a list of all devices
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['list_all_devices'])) {
+    try {
+        $stmt = $db->prepare("
+            SELECT 
+                id,
+                serial_number as serialNumber,
+                manufacturer,
+                model_name as model,
+                status,
+                last_contact as lastContact,
+                ip_address as ipAddress
+            FROM devices
+            ORDER BY last_contact DESC
+        ");
+        $stmt->execute();
+        $devices = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        echo json_encode([
+            'success' => true,
+            'devices' => $devices
+        ]);
+        exit;
+    } catch (PDOException $e) {
+        writeLog("Database error: " . $e->getMessage());
+        http_response_code(500);
+        echo json_encode(['error' => 'Database error', 'details' => $e->getMessage()]);
         exit;
     }
-    
-    writeLog("Input data: " . print_r($inputData, true));
 }
 
 // Process GET request - retrieve parameters
@@ -148,7 +189,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         if ($paramName) {
             $stmt = $db->prepare("
                 SELECT param_name, param_value, param_type, updated_at
-                FROM parameters
+                FROM device_parameters
                 WHERE device_id = :device_id AND param_name = :param_name
             ");
             $stmt->execute([
@@ -178,7 +219,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         // Get all parameters for the device
         $stmt = $db->prepare("
             SELECT param_name, param_value, param_type, updated_at
-            FROM parameters
+            FROM device_parameters
             WHERE device_id = :device_id
             ORDER BY param_name
         ");
