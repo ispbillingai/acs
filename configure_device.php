@@ -1,4 +1,3 @@
-
 <?php
 // Enable error reporting
 error_reporting(E_ALL);
@@ -63,6 +62,50 @@ try {
     $tenMinutesAgo = date('Y-m-d H:i:s', strtotime('-10 minutes'));
     $isOnline = strtotime($device['lastContact']) >= strtotime($tenMinutesAgo);
     $device['status'] = $isOnline ? 'online' : 'offline';
+
+    // Get pending or in progress tasks for this device
+    function getActiveTasks($db, $deviceId) {
+        try {
+            $sql = "SELECT * FROM device_tasks 
+                    WHERE device_id = :device_id 
+                    AND status IN ('pending', 'in_progress') 
+                    ORDER BY created_at DESC";
+            
+            $stmt = $db->prepare($sql);
+            $stmt->execute([':device_id' => $deviceId]);
+            $tasks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+            return $tasks;
+        } catch (PDOException $e) {
+            error_log("Error fetching active tasks: " . $e->getMessage());
+            return [];
+        }
+    }
+
+    // Get completed or failed tasks for this device
+    function getCompletedTasks($db, $deviceId, $limit = 5) {
+        try {
+            $sql = "SELECT * FROM device_tasks 
+                    WHERE device_id = :device_id 
+                    AND status IN ('completed', 'failed') 
+                    ORDER BY updated_at DESC 
+                    LIMIT :limit";
+            
+            $stmt = $db->prepare($sql);
+            $stmt->bindParam(':device_id', $deviceId, PDO::PARAM_INT);
+            $stmt->bindParam(':limit', $limit, PDO::PARAM_INT);
+            $stmt->execute();
+            $tasks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+            return $tasks;
+        } catch (PDOException $e) {
+            error_log("Error fetching completed tasks: " . $e->getMessage());
+            return [];
+        }
+    }
+
+    $activeTasks = getActiveTasks($db, $deviceId);
+    $completedTasks = getCompletedTasks($db, $deviceId);
 
 } catch (Exception $e) {
     die("An error occurred");
@@ -263,6 +306,13 @@ try {
                         </div>
                         <?php endif; ?>
                         
+                        <?php if (!empty($activeTasks)): ?>
+                        <div class="alert alert-info" role="alert">
+                            <i class='bx bx-info-circle me-2'></i>
+                            There are pending configuration tasks for this device. They will be applied during the next TR-069 session.
+                        </div>
+                        <?php endif; ?>
+                        
                         <!-- Configuration Panel Integration -->
                         <div id="configuration-panel">
                             <!-- WiFi Configuration -->
@@ -277,7 +327,7 @@ try {
                                     </div>
                                     <div class="col-md-6">
                                         <label for="wifi-password" class="form-label">WiFi Password</label>
-                                        <input type="password" class="form-control" id="wifi-password" value="<?php echo htmlspecialchars($device['ssidPassword'] ?? ''); ?>" placeholder="Enter password">
+                                        <input type="password" class="form-control" id="wifi-password" value="<?php echo htmlspecialchars($device['ssid_password'] ?? ''); ?>" placeholder="Enter password">
                                     </div>
                                     <div class="col-12">
                                         <button type="button" class="btn btn-primary" id="update-wifi-btn">
@@ -295,7 +345,7 @@ try {
                                 <div class="row g-3">
                                     <div class="col-md-6">
                                         <label for="wan-ip" class="form-label">IP Address</label>
-                                        <input type="text" class="form-control" id="wan-ip" value="<?php echo htmlspecialchars($device['ipAddress'] ?? ''); ?>" placeholder="e.g., 192.168.1.1">
+                                        <input type="text" class="form-control" id="wan-ip" value="<?php echo htmlspecialchars($device['ip_address'] ?? ''); ?>" placeholder="e.g., 192.168.1.1">
                                     </div>
                                     <div class="col-md-6">
                                         <label for="wan-gateway" class="form-label">Gateway</label>
@@ -310,7 +360,7 @@ try {
                             </div>
 
                             <!-- Device Control -->
-                            <div>
+                            <div class="mb-4">
                                 <h3 class="h5 mb-3 d-flex align-items-center">
                                     <i class='bx bx-power-off me-2 text-danger'></i>Device Control
                                 </h3>
@@ -322,6 +372,142 @@ try {
                                     <i class='bx bx-refresh me-1'></i>Reboot Device
                                 </button>
                             </div>
+                            
+                            <!-- Task Status -->
+                            <?php if (!empty($activeTasks) || !empty($completedTasks)): ?>
+                            <div class="mt-5">
+                                <h3 class="h5 mb-3 d-flex align-items-center">
+                                    <i class='bx bx-list-check me-2 text-primary'></i>Task Status
+                                </h3>
+                                
+                                <?php if (!empty($activeTasks)): ?>
+                                <div class="mb-4">
+                                    <h6 class="font-weight-bold">Pending Tasks</h6>
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-hover">
+                                            <thead class="table-light">
+                                                <tr>
+                                                    <th>ID</th>
+                                                    <th>Type</th>
+                                                    <th>Status</th>
+                                                    <th>Created</th>
+                                                    <th>Details</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <?php foreach ($activeTasks as $task): ?>
+                                                <tr>
+                                                    <td><?php echo $task['id']; ?></td>
+                                                    <td>
+                                                        <?php
+                                                        $taskIcon = 'bx-cog';
+                                                        $taskLabel = ucfirst($task['task_type']);
+                                                        
+                                                        switch ($task['task_type']) {
+                                                            case 'wifi':
+                                                                $taskIcon = 'bx-wifi';
+                                                                break;
+                                                            case 'wan':
+                                                                $taskIcon = 'bx-globe';
+                                                                break;
+                                                            case 'reboot':
+                                                                $taskIcon = 'bx-power-off';
+                                                                break;
+                                                        }
+                                                        ?>
+                                                        <span><i class='bx <?php echo $taskIcon; ?> me-1'></i><?php echo $taskLabel; ?></span>
+                                                    </td>
+                                                    <td>
+                                                        <?php
+                                                        $statusClass = 'bg-warning';
+                                                        $statusLabel = 'Pending';
+                                                        
+                                                        if ($task['status'] == 'in_progress') {
+                                                            $statusClass = 'bg-info';
+                                                            $statusLabel = 'In Progress';
+                                                        }
+                                                        ?>
+                                                        <span class="badge <?php echo $statusClass; ?>"><?php echo $statusLabel; ?></span>
+                                                    </td>
+                                                    <td><?php echo date('Y-m-d H:i', strtotime($task['created_at'])); ?></td>
+                                                    <td>
+                                                        <?php
+                                                        $taskData = json_decode($task['task_data'], true);
+                                                        if ($task['task_type'] == 'wifi' && isset($taskData['ssid'])) {
+                                                            echo "SSID: " . htmlspecialchars($taskData['ssid']);
+                                                        } elseif ($task['task_type'] == 'wan' && isset($taskData['ip_address'])) {
+                                                            echo "IP: " . htmlspecialchars($taskData['ip_address']);
+                                                        } else {
+                                                            echo $task['message'] ?? "Waiting for device";
+                                                        }
+                                                        ?>
+                                                    </td>
+                                                </tr>
+                                                <?php endforeach; ?>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                <?php endif; ?>
+                                
+                                <?php if (!empty($completedTasks)): ?>
+                                <div>
+                                    <h6 class="font-weight-bold">Recent Tasks</h6>
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-hover">
+                                            <thead class="table-light">
+                                                <tr>
+                                                    <th>ID</th>
+                                                    <th>Type</th>
+                                                    <th>Status</th>
+                                                    <th>Completed</th>
+                                                    <th>Result</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <?php foreach ($completedTasks as $task): ?>
+                                                <tr>
+                                                    <td><?php echo $task['id']; ?></td>
+                                                    <td>
+                                                        <?php
+                                                        $taskIcon = 'bx-cog';
+                                                        $taskLabel = ucfirst($task['task_type']);
+                                                        
+                                                        switch ($task['task_type']) {
+                                                            case 'wifi':
+                                                                $taskIcon = 'bx-wifi';
+                                                                break;
+                                                            case 'wan':
+                                                                $taskIcon = 'bx-globe';
+                                                                break;
+                                                            case 'reboot':
+                                                                $taskIcon = 'bx-power-off';
+                                                                break;
+                                                        }
+                                                        ?>
+                                                        <span><i class='bx <?php echo $taskIcon; ?> me-1'></i><?php echo $taskLabel; ?></span>
+                                                    </td>
+                                                    <td>
+                                                        <?php
+                                                        $statusClass = 'bg-success';
+                                                        
+                                                        if ($task['status'] == 'failed') {
+                                                            $statusClass = 'bg-danger';
+                                                        }
+                                                        ?>
+                                                        <span class="badge <?php echo $statusClass; ?>"><?php echo ucfirst($task['status']); ?></span>
+                                                    </td>
+                                                    <td><?php echo date('Y-m-d H:i', strtotime($task['updated_at'])); ?></td>
+                                                    <td><?php echo $task['message'] ?? "No details available"; ?></td>
+                                                </tr>
+                                                <?php endforeach; ?>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                <?php endif; ?>
+                            </div>
+                            <?php endif; ?>
                         </div>
                     </div>
                 </div>
@@ -395,6 +581,8 @@ try {
                     // Show success or error message
                     if (result.success) {
                         alert(result.message);
+                        // Reload the page to show the new task
+                        window.location.reload();
                     } else {
                         alert('Error: ' + (result.message || 'Configuration failed'));
                     }

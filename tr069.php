@@ -1,635 +1,353 @@
 
 <?php
-// Disable all error logging
-error_reporting(0);
+// Enable error logging to Apache error log
+error_reporting(E_ALL);
 ini_set('display_errors', 0);
-ini_set('log_errors', 0);
+ini_set('log_errors', 1);
 
 // Tracking variables
-$GLOBALS['knownDevices'] = []; // Store known device IPs to reduce duplicate logging
-$GLOBALS['discoveredParameters'] = []; // Track parameters we've already discovered
-$GLOBALS['errorCounts'] = []; // Track error counts by type
-$GLOBALS['lastErrorTime'] = []; // Track last time an error was logged for throttling
-$GLOBALS['verifiedParameters'] = []; // Track parameters that were successfully retrieved
-$GLOBALS['hostCount'] = 0; // Track number of hosts discovered
-$GLOBALS['currentHostIndex'] = 1; // Track which host index we're currently fetching
+$GLOBALS['session_id'] = 'session-' . substr(md5(time()), 0, 8);
+$GLOBALS['current_task'] = null;
 
-// Helper function to log router data without duplication
-function logRouterData($paramName, $paramValue) {
-    // Skip if we've already discovered this parameter
-    if (in_array("{$paramName}={$paramValue}", $GLOBALS['discoveredParameters'])) {
-        return;
-    }
+// Log detailed information to Apache error log
+function tr069_log($message, $level = 'INFO') {
+    $logMessage = "[TR-069][$level][{$GLOBALS['session_id']}] $message";
+    error_log($logMessage, 0);
     
-    // Check if this is the host count parameter
-    if (stripos($paramName, 'HostNumberOfEntries') !== false) {
-        $GLOBALS['hostCount'] = intval($paramValue);
-    }
-    
-    // Add to discovered parameters
-    $GLOBALS['discoveredParameters'][] = "{$paramName}={$paramValue}";
-    
-    // Add to verified parameters list (successful retrievals)
-    $GLOBALS['verifiedParameters'][] = $paramName;
-    
-    // Save to the dedicated router_ssids.txt file
-    file_put_contents(__DIR__ . '/router_ssids.txt', "{$paramName} = {$paramValue}\n", FILE_APPEND);
-}
-
-// Set unlimited execution time for long-running sessions
-set_time_limit(0);
-
-// Basic connection information
-$clientIP = $_SERVER['REMOTE_ADDR'];
-$isNewSession = !isset($GLOBALS['knownDevices'][$clientIP]);
-
-// Enhanced Huawei device detection based on User-Agent
-$isHuawei = false;
-$isMikroTik = false;
-$modelDetected = '';
-
-if (isset($_SERVER['HTTP_USER_AGENT'])) {
-    $userAgent = $_SERVER['HTTP_USER_AGENT'];
-    
-    // Detect MikroTik devices
-    if (stripos($userAgent, 'mikrotik') !== false) {
-        $isMikroTik = true;
-    }
-    
-    // Detect Huawei devices (these are the ones we're interested in)
-    if (stripos($userAgent, 'huawei') !== false || 
-        stripos($userAgent, 'hw_') !== false ||
-        stripos($userAgent, 'hg8') !== false) {
-        $isHuawei = true;
-        
-        // Try to detect specific model
-        if (stripos($userAgent, 'hg8546') !== false) {
-            $modelDetected = 'HG8546M';
-        }
+    // Also append to our custom log file if directory exists
+    $logDir = __DIR__ . '/logs';
+    if (is_dir($logDir)) {
+        $logFile = $logDir . '/tr069_' . date('Y-m-d') . '.log';
+        file_put_contents($logFile, date('Y-m-d H:i:s') . " $logMessage\n", FILE_APPEND);
     }
 }
 
-// Additional check in raw POST data for Huawei identifiers
-if (!$isHuawei && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $raw_post = file_get_contents('php://input');
-    if (!empty($raw_post)) {
-        if (stripos($raw_post, 'huawei') !== false || 
-            stripos($raw_post, 'hg8') !== false) {
-            $isHuawei = true;
-            
-            // Check for HG8546M model in XML
-            if (stripos($raw_post, 'HG8546M') !== false) {
-                $modelDetected = 'HG8546M';
-            }
-        }
-    }
-}
+// Include required files
+require_once __DIR__ . '/backend/config/database.php';
+require_once __DIR__ . '/backend/tr069/auth/AuthenticationHandler.php';
+require_once __DIR__ . '/backend/tr069/responses/InformResponseGenerator.php';
+require_once __DIR__ . '/backend/tr069/tasks/TaskHandler.php';
 
-// Track which parameters have been attempted to avoid loops
-$attemptedParameters = [];
-session_start();
-if (!isset($_SESSION['attempted_parameters'])) {
-    $_SESSION['attempted_parameters'] = [];
-}
-
-if (!isset($_SESSION['successful_parameters'])) {
-    $_SESSION['successful_parameters'] = [];
-}
-
-if (!isset($_SESSION['host_count'])) {
-    $_SESSION['host_count'] = 0;
-}
-
-if (!isset($_SESSION['current_host_index'])) {
-    $_SESSION['current_host_index'] = 1;
-}
-
-// Core parameters that are likely to work across most devices
-$coreParameters = [
-    // Basic SSID for most routers - most likely to succeed
-    ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID'],
-    // Add DeviceInfo parameters that were specifically requested
-    ['InternetGatewayDevice.DeviceInfo.UpTime'],
-    ['InternetGatewayDevice.DeviceInfo.SoftwareVersion'],
-    ['InternetGatewayDevice.DeviceInfo.HardwareVersion'],
-    // Try to get Manufacturer information explicitly
-    ['InternetGatewayDevice.DeviceInfo.Manufacturer']
-];
-
-// Extended parameters to try after core parameters succeed
-$extendedParameters = [
-    // WAN IP Connection details
-    ['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress'],
-    ['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.SubnetMask'],
-    ['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DefaultGateway'],
-    ['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DNSServers'],
+// Process the TR-069 request
+try {
+    // Create database connection
+    $database = new Database();
+    $db = $database->getConnection();
     
-    // LAN Connected Devices - basic information
-    ['InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries']
-];
-
-// Dynamic parameters that will be populated based on host count
-$dynamicHostParameters = [];
-
-// Optional parameters that may fail on many devices - try these last and don't retry if they fail
-$optionalParameters = [
-    // WAN PPP Connection details (for PPPoE connections)
-    ['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress'],
-    
-    // WiFi Connected Devices - Only for WLAN 1
-    ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDeviceNumberOfEntries'],
-    ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDevice.1.MACAddress'],
-    ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDevice.1.SignalStrength']
-];
-
-// Function to dynamically generate host parameters based on the host count
-function generateHostParameters($hostCount) {
-    $hostParams = [];
-    // Iterate through each host index
-    for ($i = 1; $i <= $hostCount; $i++) {
-        // Add IP Address parameter
-        $hostParams[] = ["InternetGatewayDevice.LANDevice.1.Hosts.Host.{$i}.IPAddress"];
-        // Add HostName parameter
-        $hostParams[] = ["InternetGatewayDevice.LANDevice.1.Hosts.Host.{$i}.HostName"];
-        // Add MAC Address (PhysAddress) parameter
-        $hostParams[] = ["InternetGatewayDevice.LANDevice.1.Hosts.Host.{$i}.PhysAddress"];
-        // Add Active parameter (if it exists)
-        $hostParams[] = ["InternetGatewayDevice.LANDevice.1.Hosts.Host.{$i}.Active"];
-    }
-    return $hostParams;
-}
-
-// Function to generate a parameter request XML
-function generateParameterRequestXML($soapId, $parameters) {
-    $arraySize = count($parameters);
-    $parameterStrings = '';
-    
-    foreach ($parameters as $param) {
-        $parameterStrings .= "        <string>" . htmlspecialchars($param) . "</string>\n";
-    }
-    
-    $response = '<?xml version="1.0" encoding="UTF-8"?>
-<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-  <SOAP-ENV:Header>
-    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </SOAP-ENV:Header>
-  <SOAP-ENV:Body>
-    <cwmp:GetParameterValues>
-      <ParameterNames SOAP-ENC:arrayType="xsd:string[' . $arraySize . ']">
-' . $parameterStrings . '      </ParameterNames>
-    </cwmp:GetParameterValues>
-  </SOAP-ENV:Body>
-</SOAP-ENV:Envelope>';
-
-    return $response;
-}
-
-// Function to call API endpoint to save data
-function storeDataInDatabase() {
-    if (file_exists(__DIR__ . '/router_ssids.txt')) {
-        $url = 'http://' . $_SERVER['HTTP_HOST'] . '/backend/api/store_tr069_data.php';
-        
-        $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_POST, 1);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-        
-        $result = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        
-        return true;
-    }
-    return false;
-}
-
-// Skip processing for MikroTik devices entirely - they consistently fail
-if ($isMikroTik) {
-    // Silent exit - don't even attempt TR-069 requests for MikroTik routers
-    header('Content-Length: 0');
-    exit;
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $raw_post = file_get_contents('php://input');
-    
-    // Start with a clean router_ssids.txt file for new connections
-    if (stripos($raw_post, '<cwmp:Inform>') !== false && $isHuawei) {
-        // Only delete the file if it's a new session
-        if (file_exists(__DIR__ . '/router_ssids.txt')) {
-            unlink(__DIR__ . '/router_ssids.txt');
-            file_put_contents(__DIR__ . '/router_ssids.txt', "# TR-069 WiFi Parameters Discovered " . date('Y-m-d H:i:s') . "\n", FILE_APPEND);
-        }
-        
-        // Reset attempted parameters for new sessions
-        if (isset($_SESSION['attempted_parameters'])) {
-            $_SESSION['attempted_parameters'] = [];
-        }
-        
-        if (isset($_SESSION['successful_parameters'])) {
-            $_SESSION['successful_parameters'] = [];
-        }
-        
-        // Reset host tracking variables
-        $_SESSION['host_count'] = 0;
-        $_SESSION['current_host_index'] = 1;
-        $GLOBALS['hostCount'] = 0;
-        $GLOBALS['currentHostIndex'] = 1;
-    }
-    
-    if (!empty($raw_post)) {
-        // Check if this is an Inform message
-        if (stripos($raw_post, '<cwmp:Inform>') !== false) {
-            // Extract the SOAP ID
-            preg_match('/<cwmp:ID SOAP-ENV:mustUnderstand="1">(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
-            $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
-            
-            // Extract model information
-            preg_match('/<ProductClass>(.*?)<\/ProductClass>/s', $raw_post, $modelMatches);
-            if (isset($modelMatches[1])) {
-                $model = trim($modelMatches[1]);
-                
-                // Check for HG8546M model
-                if (stripos($model, 'HG8546M') !== false) {
-                    $modelDetected = 'HG8546M';
-                }
-            }
-            
-            // Log device model if possible
-            preg_match('/<ProductClass>(.*?)<\/ProductClass>.*?<SerialNumber>(.*?)<\/SerialNumber>/s', $raw_post, $deviceMatches);
-            if (isset($deviceMatches[1]) && isset($deviceMatches[2])) {
-                $model = $deviceMatches[1];
-                $serial = $deviceMatches[2];
-                // Save to the router_ssids.txt file
-                file_put_contents(__DIR__ . '/router_ssids.txt', "InternetGatewayDevice.DeviceInfo.ProductClass = {$model}\n", FILE_APPEND);
-                file_put_contents(__DIR__ . '/router_ssids.txt', "InternetGatewayDevice.DeviceInfo.SerialNumber = {$serial}\n", FILE_APPEND);
-            }
-            
-            // Log manufacturer if present in the Inform message
-            if (preg_match('/<Manufacturer>(.*?)<\/Manufacturer>/s', $raw_post, $mfrMatches)) {
-                $manufacturer = trim($mfrMatches[1]);
-                file_put_contents(__DIR__ . '/router_ssids.txt', "InternetGatewayDevice.DeviceInfo.Manufacturer = {$manufacturer}\n", FILE_APPEND);
-            }
-            
-            // If this is an Inform request, respond with InformResponse
-            require_once __DIR__ . '/backend/tr069/responses/InformResponseGenerator.php';
-            $responseGenerator = new InformResponseGenerator();
-            $response = $responseGenerator->createResponse($soapId);
-            
-            header('Content-Type: text/xml');
-            echo $response;
-            exit;
-        }
-        
-        // Check if this is a GetParameterValuesResponse (contains network data)
-        if (stripos($raw_post, 'GetParameterValuesResponse') !== false) {
-            // Extract information using regex
-            preg_match_all('/<Name>(.*?)<\/Name>\s*<Value[^>]*>(.*?)<\/Value>/si', $raw_post, $matches, PREG_SET_ORDER);
-            
-            $foundSSIDs = false;
-            $foundWANSettings = false;
-            $foundConnectedDevices = false;
-            $foundHostNumberOfEntries = false;
-            $foundDeviceInfoParams = false;
-            
-            if (!empty($matches)) {
-                foreach ($matches as $match) {
-                    $paramName = $match[1];
-                    $paramValue = $match[2];
-                    
-                    // Skip empty values
-                    if (empty($paramValue) || $paramValue === '(null)') {
-                        continue;
-                    }
-                    
-                    // Track this as a successful parameter retrieval
-                    if (!in_array($paramName, $_SESSION['successful_parameters'])) {
-                        $_SESSION['successful_parameters'][] = $paramName;
-                    }
-                    
-                    // Check if this is the host count parameter
-                    if (stripos($paramName, 'HostNumberOfEntries') !== false) {
-                        $foundHostNumberOfEntries = true;
-                        $_SESSION['host_count'] = intval($paramValue);
-                        $GLOBALS['hostCount'] = intval($paramValue);
-                    }
-                    
-                    // Check for device info parameters
-                    if (stripos($paramName, 'DeviceInfo.UpTime') !== false ||
-                        stripos($paramName, 'DeviceInfo.SoftwareVersion') !== false ||
-                        stripos($paramName, 'DeviceInfo.HardwareVersion') !== false ||
-                        stripos($paramName, 'DeviceInfo.Manufacturer') !== false) {
-                        $foundDeviceInfoParams = true;
-                    }
-                    
-                    // Categorize the parameter by its name
-                    if (stripos($paramName, 'SSID') !== false && stripos($paramName, 'WLANConfiguration.1') !== false) {
-                        $foundSSIDs = true;
-                    } else if (
-                        stripos($paramName, 'ExternalIPAddress') !== false || 
-                        stripos($paramName, 'SubnetMask') !== false || 
-                        stripos($paramName, 'DefaultGateway') !== false || 
-                        stripos($paramName, 'DNSServer') !== false
-                    ) {
-                        $foundWANSettings = true;
-                    } else if (
-                        stripos($paramName, 'Host') !== false
-                    ) {
-                        $foundConnectedDevices = true;
-                    }
-                    
-                    // Log the parameter
-                    logRouterData($paramName, $paramValue);
-                }
-            }
-            
-            // Extract the SOAP ID for the next request
-            preg_match('/<cwmp:ID SOAP-ENV:mustUnderstand="1">(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
-            $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
-            
-            // Decide which parameter set to try next based on discovery progress
-            $nextParam = null;
-            
-            // If we just got the host count, prioritize getting all host details
-            if ($foundHostNumberOfEntries && $_SESSION['host_count'] > 0) {
-                // Generate all host parameters
-                $dynamicHostParameters = generateHostParameters($_SESSION['host_count']);
-                
-                // Check which host index we're currently on
-                if ($_SESSION['current_host_index'] <= $_SESSION['host_count']) {
-                    $nextParam = ["InternetGatewayDevice.LANDevice.1.Hosts.Host.{$_SESSION['current_host_index']}.IPAddress"];
-                    $_SESSION['current_host_index']++;
-                }
-            }
-            
-            // If we haven't found device info parameters yet, prioritize them
-            if ($nextParam === null && !$foundDeviceInfoParams) {
-                foreach ($coreParameters as $param) {
-                    if (
-                        (stripos($param[0], 'DeviceInfo.UpTime') !== false ||
-                        stripos($param[0], 'DeviceInfo.SoftwareVersion') !== false ||
-                        stripos($param[0], 'DeviceInfo.HardwareVersion') !== false ||
-                        stripos($param[0], 'DeviceInfo.Manufacturer') !== false) &&
-                        !in_array(implode(',', $param), $_SESSION['attempted_parameters'])
-                    ) {
-                        $nextParam = $param;
-                        break;
-                    }
-                }
-            }
-            
-            // If no special parameters to fetch, try core parameters
-            if ($nextParam === null) {
-                foreach ($coreParameters as $param) {
-                    $paramKey = implode(',', $param);
-                    if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
-                        $nextParam = $param;
-                        break;
-                    }
-                }
-            }
-            
-            // If all core parameters have been tried, move to extended parameters
-            if ($nextParam === null) {
-                foreach ($extendedParameters as $param) {
-                    $paramKey = implode(',', $param);
-                    if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
-                        $nextParam = $param;
-                        break;
-                    }
-                }
-            }
-            
-            // Check if we need to try host parameters after finding host count
-            if ($nextParam === null && $_SESSION['host_count'] > 0) {
-                // Generate host parameters if not already done
-                if (empty($dynamicHostParameters)) {
-                    $dynamicHostParameters = generateHostParameters($_SESSION['host_count']);
-                }
-                
-                // Find next untried host parameter
-                foreach ($dynamicHostParameters as $param) {
-                    $paramKey = implode(',', $param);
-                    if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
-                        $nextParam = $param;
-                        break;
-                    }
-                }
-            }
-            
-            // If all extended parameters have been tried, try optional ones
-            if ($nextParam === null) {
-                foreach ($optionalParameters as $param) {
-                    $paramKey = implode(',', $param);
-                    if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
-                        $nextParam = $param;
-                        break;
-                    }
-                }
-            }
-            
-            // If we've tried everything, just complete the session
-            if ($nextParam === null) {
-                // Store the data in the database before completing
-                storeDataInDatabase();
-                
-                header('Content-Type: text/xml');
-                echo '<?xml version="1.0" encoding="UTF-8"?>
-<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-  <SOAP-ENV:Header>
-    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </SOAP-ENV:Header>
-  <SOAP-ENV:Body>
-    <cwmp:SetParameterValuesResponse>
-      <Status>0</Status>
-    </cwmp:SetParameterValuesResponse>
-  </SOAP-ENV:Body>
-</SOAP-ENV:Envelope>';
-                
-                exit;
-            }
-            
-            // Mark this parameter set as attempted
-            $_SESSION['attempted_parameters'][] = implode(',', $nextParam);
-            
-            $nextRequest = generateParameterRequestXML($soapId, $nextParam);
-            
-            header('Content-Type: text/xml');
-            echo $nextRequest;
-            exit;
-        }
-        
-        // Check for fault messages - now with smarter handling
-        if (stripos($raw_post, '<SOAP-ENV:Fault>') !== false || stripos($raw_post, '<cwmp:Fault>') !== false) {
-            preg_match('/<FaultCode>(.*?)<\/FaultCode>.*?<FaultString>(.*?)<\/FaultString>/s', $raw_post, $faultMatches);
-            
-            if (!empty($faultMatches)) {
-                $faultCode = $faultMatches[1];
-                $faultString = $faultMatches[2];
-                
-                // Extract SOAP ID
-                preg_match('/<cwmp:ID SOAP-ENV:mustUnderstand="1">(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
-                $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
-                
-                // Extract what parameter caused the fault - for future reference
-                if (preg_match('/<cwmp:GetParameterValues>.*?<string>(.*?)<\/string>/s', $raw_post, $paramMatch)) {
-                    $faultParam = $paramMatch[1];
-                    
-                    // Add to a session list of parameters that cause faults - to avoid in future
-                    if (!isset($_SESSION['fault_parameters'])) {
-                        $_SESSION['fault_parameters'] = [];
-                    }
-                    
-                    $_SESSION['fault_parameters'][] = $faultParam;
-                }
-                
-                // Check if we need to continue with host parameters
-                if ($_SESSION['host_count'] > 0 && $_SESSION['current_host_index'] <= $_SESSION['host_count']) {
-                    // Continue with the next host
-                    $nextParam = ["InternetGatewayDevice.LANDevice.1.Hosts.Host.{$_SESSION['current_host_index']}.IPAddress"];
-                    $_SESSION['attempted_parameters'][] = implode(',', $nextParam);
-                    $_SESSION['current_host_index']++;
-                    
-                    $nextRequest = generateParameterRequestXML($soapId, $nextParam);
-                    
-                    header('Content-Type: text/xml');
-                    echo $nextRequest;
-                    exit;
-                }
-                
-                // Try one of the new parameters that were requested
-                foreach ($coreParameters as $param) {
-                    if (
-                        (stripos($param[0], 'DeviceInfo.UpTime') !== false ||
-                        stripos($param[0], 'DeviceInfo.SoftwareVersion') !== false ||
-                        stripos($param[0], 'DeviceInfo.HardwareVersion') !== false ||
-                        stripos($param[0], 'DeviceInfo.Manufacturer') !== false) &&
-                        !in_array(implode(',', $param), $_SESSION['attempted_parameters'])
-                    ) {
-                        $nextParam = $param;
-                        $_SESSION['attempted_parameters'][] = implode(',', $nextParam);
-                        $nextRequest = generateParameterRequestXML($soapId, $nextParam);
-                        
-                        header('Content-Type: text/xml');
-                        echo $nextRequest;
-                        exit;
-                    }
-                }
-                
-                // Now find the next parameter to try, skipping any parameters that have caused faults
-                $nextParam = null;
-                
-                // First try all core parameters
-                foreach ($coreParameters as $param) {
-                    $paramKey = implode(',', $param);
-                    if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
-                        $nextParam = $param;
-                        break;
-                    }
-                }
-                
-                // If all core parameters have been tried, move to extended parameters
-                if ($nextParam === null) {
-                    foreach ($extendedParameters as $param) {
-                        $paramKey = implode(',', $param);
-                        if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
-                            $nextParam = $param;
-                            break;
-                        }
-                    }
-                }
-                
-                // If all extended parameters have been tried, try optional ones
-                if ($nextParam === null) {
-                    foreach ($optionalParameters as $param) {
-                        $paramKey = implode(',', $param);
-                        if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
-                            $nextParam = $param;
-                            break;
-                        }
-                    }
-                }
-                
-                // If we've tried everything, just complete the session
-                if ($nextParam === null) {
-                    // Store the data in the database before completing
-                    storeDataInDatabase();
-                    
-                    header('Content-Type: text/xml');
-                    echo '<?xml version="1.0" encoding="UTF-8"?>
-<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-  <SOAP-ENV:Header>
-    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </SOAP-ENV:Header>
-  <SOAP-ENV:Body>
-    <cwmp:SetParameterValuesResponse>
-      <Status>0</Status>
-    </cwmp:SetParameterValuesResponse>
-  </SOAP-ENV:Body>
-</SOAP-ENV:Envelope>';
-                    
-                    exit;
-                }
-                
-                // Mark this parameter set as attempted
-                $_SESSION['attempted_parameters'][] = implode(',', $nextParam);
-                
-                $nextRequest = generateParameterRequestXML($soapId, $nextParam);
-                
-                header('Content-Type: text/xml');
-                echo $nextRequest;
-                exit;
-            }
-            
-            // For other fault codes, just acknowledge and complete
-            header('Content-Type: text/xml');
-            echo '<?xml version="1.0" encoding="UTF-8"?>
-<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-  <SOAP-ENV:Header>
-    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </SOAP-ENV:Header>
-  <SOAP-ENV:Body>
-    <cwmp:SetParameterValuesResponse>
-      <Status>0</Status>
-    </cwmp:SetParameterValuesResponse>
-  </SOAP-ENV:Body>
-</SOAP-ENV:Envelope>';
-            
-            exit;
-        }
-    } else {
-        // Empty POST - start parameter discovery
-        // Generate a session ID
-        $sessionId = md5(uniqid(rand(), true));
-        
-        // Start with a request for SSID - the most likely parameter to succeed
-        $initialParameters = $coreParameters[0];
-        $initialRequest = generateParameterRequestXML($sessionId, $initialParameters);
-        
-        header('Content-Type: text/xml');
-        echo $initialRequest;
-        
+    // Authenticate the device
+    $auth = new AuthenticationHandler();
+    if (!$auth->authenticate()) {
+        tr069_log("Authentication failed", "ERROR");
+        header('HTTP/1.1 401 Unauthorized');
+        header('WWW-Authenticate: Basic realm="TR-069 ACS"');
         exit;
     }
-}
-
-// If we haven't sent a parameter request yet, use backend TR-069 server
-try {
-    require_once __DIR__ . '/backend/config/database.php';
-    require_once __DIR__ . '/backend/tr069/server.php';
-    $server = new TR069Server();
     
-    // Pass the Huawei detection flag to the server
-    $server->setHuaweiDetection($isHuawei);
+    // Get the raw POST data
+    $raw_post = file_get_contents('php://input');
+    tr069_log("Received request: " . substr($raw_post, 0, 200) . "...", "DEBUG");
     
-    // Pass model information if detected
-    if (!empty($modelDetected)) {
-        $server->setModelHint($modelDetected);
+    // Initialize response generator
+    $responseGenerator = new InformResponseGenerator();
+    
+    // Initialize task handler
+    $taskHandler = new TaskHandler();
+    
+    // Check if this is an Inform message
+    if (stripos($raw_post, '<cwmp:Inform>') !== false) {
+        // Extract the SOAP ID
+        preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
+        $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
+        
+        // Extract device serial number
+        preg_match('/<SerialNumber>(.*?)<\/SerialNumber>/s', $raw_post, $serialMatches);
+        $serialNumber = isset($serialMatches[1]) ? trim($serialMatches[1]) : null;
+        
+        if ($serialNumber) {
+            tr069_log("Device inform received - Serial: $serialNumber", "INFO");
+            
+            // Update device status in database
+            try {
+                $stmt = $db->prepare("
+                    INSERT INTO devices 
+                        (serial_number, status, last_contact) 
+                    VALUES 
+                        (:serial, 'online', NOW()) 
+                    ON DUPLICATE KEY UPDATE 
+                        status = 'online', 
+                        last_contact = NOW()
+                ");
+                $stmt->execute([':serial' => $serialNumber]);
+                tr069_log("Updated device status to online - Serial: $serialNumber", "INFO");
+            } catch (PDOException $e) {
+                tr069_log("Database error updating device status: " . $e->getMessage(), "ERROR");
+            }
+            
+            // Extract more device information if available
+            preg_match('/<ProductClass>(.*?)<\/ProductClass>/s', $raw_post, $modelMatches);
+            $model = isset($modelMatches[1]) ? trim($modelMatches[1]) : null;
+            
+            preg_match('/<Manufacturer>(.*?)<\/Manufacturer>/s', $raw_post, $mfrMatches);
+            $manufacturer = isset($mfrMatches[1]) ? trim($mfrMatches[1]) : null;
+            
+            if ($model || $manufacturer) {
+                try {
+                    $updateFields = [];
+                    $params = [':serial' => $serialNumber];
+                    
+                    if ($model) {
+                        $updateFields[] = "model_name = :model";
+                        $params[':model'] = $model;
+                    }
+                    
+                    if ($manufacturer) {
+                        $updateFields[] = "manufacturer = :manufacturer";
+                        $params[':manufacturer'] = $manufacturer;
+                    }
+                    
+                    if (!empty($updateFields)) {
+                        $sql = "UPDATE devices SET " . implode(", ", $updateFields) . " WHERE serial_number = :serial";
+                        $stmt = $db->prepare($sql);
+                        $stmt->execute($params);
+                        tr069_log("Updated device details - Model: $model, Manufacturer: $manufacturer", "INFO");
+                    }
+                } catch (PDOException $e) {
+                    tr069_log("Database error updating device details: " . $e->getMessage(), "ERROR");
+                }
+            }
+            
+            // Look for pending tasks for this device
+            $pendingTasks = $taskHandler->getPendingTasks($serialNumber);
+            
+            if (!empty($pendingTasks)) {
+                // Store the first task to process after Inform
+                $GLOBALS['current_task'] = $pendingTasks[0];
+                tr069_log("Found pending task: " . $pendingTasks[0]['task_type'] . " - ID: " . $pendingTasks[0]['id'], "INFO");
+            }
+        }
+        
+        // Respond with InformResponse
+        $response = $responseGenerator->createResponse($soapId);
+        tr069_log("Sending InformResponse", "DEBUG");
+        
+        header('Content-Type: text/xml');
+        echo $response;
+        exit;
     }
     
-    // Handle the request
-    $server->handleRequest();
+    // Check if this is an empty post (device asking for more commands)
+    if (empty(trim($raw_post)) || $raw_post === "\r\n" || stripos($raw_post, '<cwmp:GetParameterValuesResponse>') !== false) {
+        // Extract the SOAP ID if available
+        $soapId = '1';
+        if (!empty($raw_post)) {
+            preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
+            $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
+        }
+        
+        // Process pending task if we have one
+        if ($GLOBALS['current_task']) {
+            $task = $GLOBALS['current_task'];
+            tr069_log("Processing task: {$task['task_type']} - ID: {$task['id']}", "INFO");
+            
+            // Generate parameters for this task
+            $parameterRequest = $taskHandler->generateParameterValues($task['task_type'], $task['task_data']);
+            
+            if ($parameterRequest) {
+                // Log what we're about to do
+                tr069_log("Sending {$parameterRequest['method']} request for task {$task['id']}", "INFO");
+                
+                // Build the appropriate request
+                if ($parameterRequest['method'] === 'SetParameterValues') {
+                    $paramXml = '';
+                    $paramCount = count($parameterRequest['parameters']);
+                    
+                    foreach ($parameterRequest['parameters'] as $param) {
+                        $paramXml .= "        <ParameterValueStruct>\n";
+                        $paramXml .= "          <Name>" . htmlspecialchars($param['name']) . "</Name>\n";
+                        $paramXml .= "          <Value xsi:type=\"" . $param['type'] . "\">" . htmlspecialchars($param['value']) . "</Value>\n";
+                        $paramXml .= "        </ParameterValueStruct>\n";
+                        
+                        tr069_log("Setting parameter: {$param['name']} = {$param['value']}", "DEBUG");
+                    }
+                    
+                    $setParamRequest = '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:SetParameterValues>
+      <ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[' . $paramCount . ']">
+' . $paramXml . '      </ParameterList>
+      <ParameterKey>Task-' . $task['id'] . '-' . substr(md5(time()), 0, 8) . '</ParameterKey>
+    </cwmp:SetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>';
+
+                    header('Content-Type: text/xml');
+                    echo $setParamRequest;
+                    
+                    // Mark task as in progress
+                    $taskHandler->updateTaskStatus($task['id'], 'in_progress', 'Sent parameters to device');
+                    
+                    exit;
+                } elseif ($parameterRequest['method'] === 'Reboot') {
+                    $rebootRequest = '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:Reboot>
+      <CommandKey>' . $parameterRequest['commandKey'] . '</CommandKey>
+    </cwmp:Reboot>
+  </soapenv:Body>
+</soapenv:Envelope>';
+
+                    header('Content-Type: text/xml');
+                    echo $rebootRequest;
+                    
+                    // Mark task as in progress
+                    $taskHandler->updateTaskStatus($task['id'], 'in_progress', 'Sent reboot command to device');
+                    
+                    exit;
+                }
+            } else {
+                tr069_log("Failed to generate parameters for task {$task['id']}", "ERROR");
+                $taskHandler->updateTaskStatus($task['id'], 'failed', 'Failed to generate parameters');
+            }
+        } else {
+            tr069_log("No pending tasks to process", "DEBUG");
+        }
+        
+        // If we get here, we're done with this session
+        header('Content-Type: text/xml');
+        echo '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+  </soapenv:Body>
+</soapenv:Envelope>';
+        exit;
+    }
+    
+    // Check if this is a SetParameterValuesResponse
+    if (stripos($raw_post, 'SetParameterValuesResponse') !== false) {
+        // Extract the SOAP ID
+        preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
+        $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
+        
+        // Check the status
+        preg_match('/<Status>(.*?)<\/Status>/s', $raw_post, $statusMatches);
+        $status = isset($statusMatches[1]) ? trim($statusMatches[1]) : null;
+        
+        tr069_log("Received SetParameterValuesResponse with status: $status", "INFO");
+        
+        // Update task status
+        if ($GLOBALS['current_task']) {
+            if ($status === '0') {
+                $taskHandler->updateTaskStatus($GLOBALS['current_task']['id'], 'completed', 'Successfully applied ' . $GLOBALS['current_task']['task_type'] . ' configuration');
+                tr069_log("Task completed successfully: " . $GLOBALS['current_task']['id'], "INFO");
+            } else {
+                $taskHandler->updateTaskStatus($GLOBALS['current_task']['id'], 'failed', 'Device returned error status: ' . $status);
+                tr069_log("Task failed: " . $GLOBALS['current_task']['id'] . " - Status: " . $status, "ERROR");
+            }
+        }
+        
+        // Send empty response to complete the session
+        header('Content-Type: text/xml');
+        echo '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+  </soapenv:Body>
+</soapenv:Envelope>';
+        exit;
+    }
+    
+    // Check if this is a RebootResponse
+    if (stripos($raw_post, 'RebootResponse') !== false) {
+        // Extract the SOAP ID
+        preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
+        $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
+        
+        tr069_log("Received RebootResponse", "INFO");
+        
+        // Update task status
+        if ($GLOBALS['current_task']) {
+            $taskHandler->updateTaskStatus($GLOBALS['current_task']['id'], 'completed', 'Device reboot initiated successfully');
+            tr069_log("Reboot task completed: " . $GLOBALS['current_task']['id'], "INFO");
+        }
+        
+        // Send empty response to complete the session
+        header('Content-Type: text/xml');
+        echo '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+  </soapenv:Body>
+</soapenv:Envelope>';
+        exit;
+    }
+    
+    // Default response for unhandled message types
+    tr069_log("Unhandled message type: " . substr($raw_post, 0, 100) . "...", "WARNING");
+    
+    header('Content-Type: text/xml');
+    echo '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">1</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+  </soapenv:Body>
+</soapenv:Envelope>';
+
 } catch (Exception $e) {
-    header('HTTP/1.1 500 Internal Server Error');
-    echo "Internal Server Error";
+    tr069_log("Exception: " . $e->getMessage(), "ERROR");
+    
+    header('Content-Type: text/xml');
+    echo '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">1</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+  </soapenv:Body>
+</soapenv:Envelope>';
 }
