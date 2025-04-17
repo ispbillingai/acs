@@ -1,4 +1,3 @@
-
 <?php
 // Enable error reporting for development
 error_reporting(E_ALL);
@@ -409,16 +408,40 @@ try {
             // Request to check device connection status
             try {
                 // Check device status based on last_contact
-                $tenMinutesAgo = date('Y-m-d H:i:s', strtotime('-10 minutes'));
-                $isOnline = strtotime($device['last_contact']) >= strtotime($tenMinutesAgo);
+                $fifteenMinutesAgo = date('Y-m-d H:i:s', strtotime('-15 minutes'));
+                $isOnline = $device['last_contact'] && strtotime($device['last_contact']) >= strtotime($fifteenMinutesAgo);
                 
-                // Force status update in the database
-                $updateSql = "UPDATE devices SET status = :status WHERE id = :id";
-                $updateStmt = $db->prepare($updateSql);
-                $updateStmt->execute([
-                    ':status' => $isOnline ? 'online' : 'offline',
-                    ':id' => $deviceId
-                ]);
+                // Check if the status has changed and update it if necessary
+                if (($isOnline && $device['status'] !== 'online') || (!$isOnline && $device['status'] !== 'offline')) {
+                    $newStatus = $isOnline ? 'online' : 'offline';
+                    $updateSql = "UPDATE devices SET status = :status WHERE id = :id";
+                    $updateStmt = $db->prepare($updateSql);
+                    $updateStmt->execute([
+                        ':status' => $newStatus,
+                        ':id' => $deviceId
+                    ]);
+                    
+                    logAction("Updated device status from {$device['status']} to {$newStatus} for device: {$device['serial_number']}");
+                }
+                
+                // Calculate time since last contact
+                $lastContactTime = '';
+                if (!empty($device['last_contact'])) {
+                    $lastContactDate = new Date($device['last_contact']);
+                    $now = new Date();
+                    $diff = $now->getTime() - $lastContactDate->getTime();
+                    $diffMinutes = round($diff / 60000);
+                    
+                    if ($diffMinutes < 60) {
+                        $lastContactTime = "$diffMinutes minutes ago";
+                    } else if ($diffMinutes < 1440) {
+                        $diffHours = round($diffMinutes / 60);
+                        $lastContactTime = "$diffHours hours ago";
+                    } else {
+                        $diffDays = round($diffMinutes / 1440);
+                        $lastContactTime = "$diffDays days ago";
+                    }
+                }
                 
                 logAction("Connection check for device {$device['serial_number']}: " . ($isOnline ? 'Online' : 'Offline'));
                 
@@ -427,7 +450,9 @@ try {
                     'connection_status' => [
                         'success' => $isOnline,
                         'message' => $isOnline ? 'Device is online' : 'Device appears to be offline',
-                        'last_contact' => $device['last_contact']
+                        'last_contact' => $device['last_contact'],
+                        'last_contact_relative' => $lastContactTime,
+                        'updated_status' => ($isOnline && $device['status'] !== 'online') || (!$isOnline && $device['status'] !== 'offline')
                     ]
                 ]);
                 exit;
