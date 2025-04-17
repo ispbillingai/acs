@@ -56,46 +56,9 @@ class MessageHandler {
             }
             
             if ($needsParameterRequest) {
-                $this->logger->logToFile("Important parameters missing, creating parameter request task");
-                
-                // Create a special task to get these parameters on the next request
-                try {
-                    // First, get the device ID
-                    $stmt = $this->db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
-                    $stmt->execute([':serial' => $serialNumber]);
-                    $deviceId = $stmt->fetchColumn();
-                    
-                    if ($deviceId) {
-                        $this->logger->logToFile("Creating parameter request task for device ID: $deviceId");
-                        
-                        // Define parameters to request
-                        $parametersToRequest = [
-                            'InternetGatewayDevice.DeviceInfo.UpTime',
-                            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
-                            'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress'
-                        ];
-                        
-                        // Insert a parameter request task
-                        $stmt = $this->db->prepare("
-                            INSERT INTO device_tasks 
-                                (device_id, task_type, task_data, status, created_at, updated_at) 
-                            VALUES 
-                                (:deviceId, 'get_parameters', :taskData, 'pending', NOW(), NOW())
-                        ");
-                        
-                        $stmt->execute([
-                            ':deviceId' => $deviceId,
-                            ':taskData' => json_encode(['parameters' => $parametersToRequest])
-                        ]);
-                        
-                        $taskId = $this->db->lastInsertId();
-                        $this->logger->logToFile("Created parameter request task with ID: $taskId");
-                    } else {
-                        $this->logger->logToFile("Warning: Device ID not found for serial: $serialNumber");
-                    }
-                } catch (PDOException $e) {
-                    $this->logger->logToFile("Database error creating parameter request task: " . $e->getMessage());
-                }
+                $this->logger->logToFile("Important parameters missing, will need to request them");
+                // We can't request parameters here directly as we need to first send the InformResponse
+                // The parameter request would be handled in the next session step in tr069.php
             }
         }
         
