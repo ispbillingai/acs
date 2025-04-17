@@ -1,3 +1,4 @@
+
 <?php
 // Database initialization script for REST API
 header('Content-Type: application/json');

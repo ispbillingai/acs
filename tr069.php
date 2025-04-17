@@ -145,6 +145,39 @@ try {
                 $_SESSION['current_task'] = $pendingTasks[0];
                 $_SESSION['device_serial'] = $serialNumber;
                 session_write_close();
+            } else {
+                // Check for in-progress tasks that might need to be completed
+                try {
+                    $deviceStmt = $db->prepare("SELECT id FROM devices WHERE serial_number = :serial_number");
+                    $deviceStmt->execute([':serial_number' => $serialNumber]);
+                    $deviceId = $deviceStmt->fetchColumn();
+                    
+                    if ($deviceId) {
+                        $inProgressStmt = $db->prepare("
+                            SELECT * FROM device_tasks 
+                            WHERE device_id = :device_id 
+                            AND status = 'in_progress' 
+                            ORDER BY updated_at DESC LIMIT 1"
+                        );
+                        $inProgressStmt->execute([':device_id' => $deviceId]);
+                        $inProgressTask = $inProgressStmt->fetch(PDO::FETCH_ASSOC);
+                        
+                        if ($inProgressTask) {
+                            tr069_log("Found in-progress task that might need completion: " . $inProgressTask['task_type'] . " - ID: " . $inProgressTask['id'], "INFO");
+                            
+                            // Auto-complete tasks that have been in progress for more than 5 minutes
+                            $taskTime = strtotime($inProgressTask['updated_at']);
+                            $currentTime = time();
+                            
+                            if (($currentTime - $taskTime) > 300) { // 5 minutes
+                                $taskHandler->updateTaskStatus($inProgressTask['id'], 'completed', 'Auto-completed after device reconnection');
+                                tr069_log("Auto-completed task ID: " . $inProgressTask['id'] . " after timeout", "INFO");
+                            }
+                        }
+                    }
+                } catch (PDOException $e) {
+                    tr069_log("Database error checking in-progress tasks: " . $e->getMessage(), "ERROR");
+                }
             }
         }
         
@@ -374,6 +407,44 @@ try {
             $GLOBALS['current_task'] = null;
         } else {
             tr069_log("No current task found to update status", "WARNING");
+            
+            // Try to find the most recent in-progress task for this device
+            try {
+                session_start();
+                $serialNumber = isset($_SESSION['device_serial']) ? $_SESSION['device_serial'] : null;
+                session_write_close();
+                
+                if ($serialNumber) {
+                    $deviceStmt = $db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
+                    $deviceStmt->execute([':serial' => $serialNumber]);
+                    $deviceId = $deviceStmt->fetchColumn();
+                    
+                    if ($deviceId) {
+                        $taskStmt = $db->prepare("
+                            SELECT * FROM device_tasks 
+                            WHERE device_id = :device_id 
+                            AND status = 'in_progress' 
+                            ORDER BY updated_at DESC LIMIT 1"
+                        );
+                        $taskStmt->execute([':device_id' => $deviceId]);
+                        $inProgressTask = $taskStmt->fetch(PDO::FETCH_ASSOC);
+                        
+                        if ($inProgressTask) {
+                            if ($status === '0') {
+                                $taskHandler->updateTaskStatus($inProgressTask['id'], 'completed', 'Successfully applied ' . $inProgressTask['task_type'] . ' configuration');
+                                tr069_log("Found and completed in-progress task: " . $inProgressTask['id'], "INFO");
+                            } else {
+                                $taskHandler->updateTaskStatus($inProgressTask['id'], 'failed', 'Device returned error status: ' . $status);
+                                tr069_log("Found and marked as failed in-progress task: " . $inProgressTask['id'] . " - Status: " . $status, "ERROR");
+                            }
+                        } else {
+                            tr069_log("No in-progress tasks found for device ID: $deviceId", "WARNING");
+                        }
+                    }
+                }
+            } catch (PDOException $e) {
+                tr069_log("Database error finding in-progress tasks: " . $e->getMessage(), "ERROR");
+            }
         }
         
         // Send empty response to complete the session
@@ -462,6 +533,39 @@ try {
         $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
         
         tr069_log("Received generic SOAP response: " . substr($raw_post, 0, 100) . "...", "DEBUG");
+        
+        // Check if this appears to be a SetParameterValuesResponse without proper markup
+        if (stripos($raw_post, 'SetParameterValuesResponse') !== false) {
+            try {
+                session_start();
+                $serialNumber = isset($_SESSION['device_serial']) ? $_SESSION['device_serial'] : null;
+                session_write_close();
+                
+                if ($serialNumber) {
+                    $deviceStmt = $db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
+                    $deviceStmt->execute([':serial' => $serialNumber]);
+                    $deviceId = $deviceStmt->fetchColumn();
+                    
+                    if ($deviceId) {
+                        $taskStmt = $db->prepare("
+                            SELECT * FROM device_tasks 
+                            WHERE device_id = :device_id 
+                            AND status = 'in_progress' 
+                            ORDER BY updated_at DESC LIMIT 1"
+                        );
+                        $taskStmt->execute([':device_id' => $deviceId]);
+                        $inProgressTask = $taskStmt->fetch(PDO::FETCH_ASSOC);
+                        
+                        if ($inProgressTask) {
+                            $taskHandler->updateTaskStatus($inProgressTask['id'], 'completed', 'Auto-completed after receiving generic response');
+                            tr069_log("Auto-completed task: " . $inProgressTask['id'] . " after receiving generic response", "INFO");
+                        }
+                    }
+                }
+            } catch (PDOException $e) {
+                tr069_log("Database error auto-completing task: " . $e->getMessage(), "ERROR");
+            }
+        }
         
         // Send empty response to complete the session
         header('Content-Type: text/xml');
