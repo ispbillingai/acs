@@ -55,10 +55,14 @@ try {
     
     // If no optical readings exist, generate placeholders
     if (empty($opticalParams)) {
-        // Insert placeholder values to show in UI
+        // Insert placeholder values to show in UI - using the specific GPON parameters for HG8145V5
         $paramTypes = [
+            'InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.TXPower' => 'N/A (Pending)',
+            'InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.RXPower' => 'N/A (Pending)',
             'InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.TXPower' => 'N/A (Pending)',
-            'InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.RXPower' => 'N/A (Pending)'
+            'InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.RXPower' => 'N/A (Pending)',
+            'InternetGatewayDevice.Device.Optical.Interface.1.CurrentTXPower' => 'N/A (Pending)',
+            'InternetGatewayDevice.Device.Optical.Interface.1.CurrentRXPower' => 'N/A (Pending)'
         ];
         
         foreach ($paramTypes as $paramName => $paramValue) {

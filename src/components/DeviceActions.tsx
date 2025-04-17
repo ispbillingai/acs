@@ -2,6 +2,7 @@
 import { Button } from "@/components/ui/button";
 import { DownloadIcon, RefreshCwIcon, PowerIcon, SignalIcon } from "lucide-react";
 import { Device } from "@/types";
+import { toast } from "sonner";
 
 export interface DeviceActionsProps {
   device: Device;
@@ -14,13 +15,14 @@ export const DeviceActions = ({ device, onRefresh, onRefreshOptical }: DeviceAct
     if (window.confirm(`Are you sure you want to reboot device ${device.serialNumber}?`)) {
       console.log("Rebooting device:", device.id);
       // In a real application, this would be an API call
-      alert("Reboot command sent to device");
+      toast.success("Reboot command sent to device");
     }
   };
 
   const handleRefresh = () => {
     if (onRefresh) {
       onRefresh();
+      toast.success("Device refresh initiated");
     } else {
       console.log("Refreshing device data:", device.id);
       // In a real application, this would refresh the device data
@@ -31,17 +33,32 @@ export const DeviceActions = ({ device, onRefresh, onRefreshOptical }: DeviceAct
   const handleRefreshOptical = () => {
     if (onRefreshOptical) {
       onRefreshOptical();
+      toast.success("Optical readings refresh initiated");
     } else {
       console.log("Refreshing optical readings:", device.id);
-      // In a real application, this would refresh just the optical readings
-      window.location.reload();
+      
+      // Make direct API call if no callback provided
+      fetch(`/backend/api/refresh_optical.php?id=${device.id}`)
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            toast.success("Optical readings refresh initiated");
+            setTimeout(() => window.location.reload(), 1500);
+          } else {
+            toast.error(`Failed to refresh optical readings: ${data.message}`);
+          }
+        })
+        .catch(error => {
+          console.error("Error refreshing optical readings:", error);
+          toast.error("Error refreshing optical readings");
+        });
     }
   };
 
   const handleBackup = () => {
     console.log("Backing up device configuration:", device.id);
     // In a real application, this would initiate a backup download
-    alert("Backup initiated, download will start shortly");
+    toast.success("Backup initiated, download will start shortly");
   };
 
   return (

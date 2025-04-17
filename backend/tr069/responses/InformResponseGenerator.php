@@ -1,3 +1,4 @@
+
 <?php
 class InformResponseGenerator {
     public function createResponse($id = null) {
@@ -74,6 +75,32 @@ class InformResponseGenerator {
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
 
+        return $response;
+    }
+    
+    // New method for HG8145V5 optical power readings
+    public function createOpticalPowerRequest($id = null) {
+        $soapId = $id ?? '1';
+        $response = '<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <SOAP-ENV:Header>
+    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </SOAP-ENV:Header>
+  <SOAP-ENV:Body>
+    <cwmp:GetParameterValues>
+      <ParameterNames SOAP-ENC:arrayType="xsd:string[6]">
+        <string>InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.TXPower</string>
+        <string>InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.RXPower</string>
+        <string>InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.TXPower</string>
+        <string>InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.RXPower</string>
+        <string>InternetGatewayDevice.Device.Optical.Interface.1.CurrentTXPower</string>
+        <string>InternetGatewayDevice.Device.Optical.Interface.1.CurrentRXPower</string>
+      </ParameterNames>
+    </cwmp:GetParameterValues>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>';
+
+        file_put_contents(__DIR__ . '/../../../tr069_optical_power.log', date('Y-m-d H:i:s') . " [INFO] Created optical power request with ID: " . $soapId . "\n", FILE_APPEND);
         return $response;
     }
     
