@@ -23,6 +23,12 @@ class WifiTaskGenerator {
                 'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
                 'value' => $ssid,
                 'type' => 'xsd:string'
+            ],
+            // Always include Enable parameter to ensure WiFi is active
+            [
+                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Enable',
+                'value' => 'true',
+                'type' => 'xsd:boolean'
             ]
         ];
         

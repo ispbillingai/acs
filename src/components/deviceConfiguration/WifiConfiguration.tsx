@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Wifi, AlertTriangle } from "lucide-react";
+import { Wifi, AlertTriangle, ShieldCheck } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -32,6 +32,8 @@ const WifiConfiguration: React.FC<WifiConfigurationProps> = ({
   const [security, setSecurity] = useState('WPA2-PSK');
   const [configuring, setConfiguring] = useState(false);
   const [existingSettings, setExistingSettings] = useState<any>(null);
+  const [taskId, setTaskId] = useState<number | null>(null);
+  const [taskStatus, setTaskStatus] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchWifiSettings = async () => {
@@ -61,11 +63,48 @@ const WifiConfiguration: React.FC<WifiConfigurationProps> = ({
     fetchWifiSettings();
   }, [deviceId]);
 
+  // Poll for task status if we have a task ID
+  useEffect(() => {
+    if (!taskId) return;
+    
+    const checkTaskStatus = async () => {
+      try {
+        const response = await fetch(`/backend/api/rest/tasks.php?id=${taskId}`);
+        const result = await response.json();
+        
+        if (result.success && result.task) {
+          setTaskStatus(result.task.status);
+          
+          // If the task is completed or failed, stop polling
+          if (result.task.status === 'completed') {
+            toast.success("WiFi configuration applied successfully!");
+            setTaskId(null);
+          } else if (result.task.status === 'failed') {
+            toast.error("WiFi configuration failed: " + (result.task.message || "Unknown error"));
+            setTaskId(null);
+          }
+        }
+      } catch (error) {
+        console.error('Error checking task status:', error);
+      }
+    };
+    
+    // Check immediately
+    checkTaskStatus();
+    
+    // Then set up interval to check every 5 seconds
+    const interval = setInterval(checkTaskStatus, 5000);
+    
+    // Clean up on unmount
+    return () => clearInterval(interval);
+  }, [taskId]);
+
   const makeConfigRequest = async () => {
     setConfiguring(true);
     try {
       if (!ssid) {
         toast.error("SSID cannot be empty");
+        setConfiguring(false);
         return;
       }
       
@@ -87,19 +126,25 @@ const WifiConfiguration: React.FC<WifiConfigurationProps> = ({
       console.log(`WiFi config response:`, result);
 
       if (result.success) {
-        toast.success("WiFi configuration updated successfully");
+        toast.success("WiFi configuration request sent");
         
         if (result.connection_request && onSuccess) {
           onSuccess(result.connection_request);
         }
         
-        toast(
-          <div className="space-y-2">
-            <p className="font-medium">WiFi Configuration Request Sent</p>
-            <p className="text-sm">The router will update its WiFi settings on the next TR-069 session.</p>
-          </div>,
-          { duration: 6000 }
-        );
+        if (result.task_id) {
+          setTaskId(result.task_id);
+          setTaskStatus('pending');
+          
+          toast(
+            <div className="space-y-2">
+              <p className="font-medium">WiFi Configuration Request Sent</p>
+              <p className="text-sm">The router will update its WiFi settings on the next TR-069 session.</p>
+              <p className="text-sm">Task ID: {result.task_id}</p>
+            </div>,
+            { duration: 6000 }
+          );
+        }
       } else {
         toast.error(result.message || 'WiFi configuration failed');
       }
@@ -133,6 +178,18 @@ const WifiConfiguration: React.FC<WifiConfigurationProps> = ({
         </Alert>
       )}
       
+      {taskStatus && taskId && (
+        <Alert className="mb-4 bg-yellow-50 border-yellow-200">
+          <ShieldCheck className="h-4 w-4 text-yellow-500" />
+          <AlertTitle className="text-yellow-800">Configuration in Progress</AlertTitle>
+          <AlertDescription className="text-yellow-700 text-sm">
+            <div>Task ID: <strong>{taskId}</strong></div>
+            <div>Status: <strong className="capitalize">{taskStatus}</strong></div>
+            <div className="text-xs mt-1">The status will automatically update every few seconds.</div>
+          </AlertDescription>
+        </Alert>
+      )}
+      
       <div className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="ssid">WiFi Network Name (SSID)</Label>
@@ -141,6 +198,7 @@ const WifiConfiguration: React.FC<WifiConfigurationProps> = ({
             placeholder="Enter WiFi name"
             value={ssid}
             onChange={(e) => setSsid(e.target.value)}
+            disabled={!!taskId}
           />
         </div>
         
@@ -152,6 +210,7 @@ const WifiConfiguration: React.FC<WifiConfigurationProps> = ({
             placeholder="Enter WiFi password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            disabled={!!taskId}
           />
           <p className="text-xs text-gray-500">
             Minimum 8 characters recommended for security.
@@ -163,6 +222,7 @@ const WifiConfiguration: React.FC<WifiConfigurationProps> = ({
           <Select 
             value={security} 
             onValueChange={setSecurity}
+            disabled={!!taskId}
           >
             <SelectTrigger className="w-full">
               <SelectValue placeholder="Select security type" />
@@ -188,14 +248,14 @@ const WifiConfiguration: React.FC<WifiConfigurationProps> = ({
         <Button
           onClick={makeConfigRequest}
           className="w-full md:w-auto"
-          disabled={configuring || !ssid}
+          disabled={configuring || !ssid || !!taskId}
         >
           {configuring ? (
             <>
               <span className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full mr-2"></span>
               Updating WiFi...
             </>
-          ) : "Update WiFi Configuration"}
+          ) : taskId ? "WiFi Update in Progress..." : "Update WiFi Configuration"}
         </Button>
       </div>
     </div>
