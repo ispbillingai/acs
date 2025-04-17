@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,8 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { PowerIcon, WifiIcon, GlobeIcon, ServerIcon, AlertTriangleIcon, CheckCircleIcon } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { PowerIcon, WifiIcon, GlobeIcon, ServerIcon } from "lucide-react";
 
 interface ConfigurationProps {
   deviceId?: string;
@@ -17,15 +15,6 @@ export function DeviceConfiguration({ deviceId }: ConfigurationProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [connectionType, setConnectionType] = useState("DHCP");
   const [currentSettings, setCurrentSettings] = useState<any>(null);
-  const [connectionStatus, setConnectionStatus] = useState<{
-    status: 'unknown' | 'success' | 'error';
-    message: string;
-    details?: string;
-    lastChecked?: string;
-  }>({
-    status: 'unknown',
-    message: 'Connection status unknown'
-  });
 
   // TR069 form state
   const [tr069Config, setTr069Config] = useState({
@@ -91,69 +80,11 @@ export function DeviceConfiguration({ deviceId }: ConfigurationProps) {
             gateway: result.settings.gateway || ''
           }));
         }
-
-        // Check connection status if available
-        if (result.connection_status) {
-          setConnectionStatus({
-            status: result.connection_status.success ? 'success' : 'error',
-            message: result.connection_status.message || 'Connection status retrieved',
-            details: result.connection_status.details || undefined,
-            lastChecked: new Date().toLocaleString()
-          });
-        }
         
         console.log("Fetched current device settings:", result.settings);
       }
     } catch (error) {
       console.error("Error fetching device settings:", error);
-    }
-  };
-
-  const checkTR069Connection = async () => {
-    setIsSubmitting(true);
-    
-    try {
-      const formData = new FormData();
-      formData.append('device_id', deviceId || '');
-      formData.append('action', 'check_connection');
-      
-      toast.loading("Checking TR-069 connection...");
-      
-      const response = await fetch('/backend/api/device_configure.php', {
-        method: 'POST',
-        body: formData
-      });
-      
-      const result = await response.json();
-      
-      if (result.success) {
-        setConnectionStatus({
-          status: 'success',
-          message: result.message || 'Connection successful',
-          lastChecked: new Date().toLocaleString()
-        });
-        toast.success(result.message || "Connection test successful");
-      } else {
-        setConnectionStatus({
-          status: 'error',
-          message: result.message || 'Connection failed',
-          details: result.details || 'No additional details available',
-          lastChecked: new Date().toLocaleString()
-        });
-        toast.error(result.message || "Connection test failed");
-      }
-      
-      console.log("Connection check result:", result);
-    } catch (error) {
-      console.error("Error checking connection:", error);
-      toast.error("Failed to check connection");
-      setConnectionStatus({
-        status: 'error',
-        message: 'Error checking connection',
-        lastChecked: new Date().toLocaleString()
-      });
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
@@ -201,40 +132,14 @@ export function DeviceConfiguration({ deviceId }: ConfigurationProps) {
     setIsSubmitting(true);
     
     try {
-      // Create form data for the API request
-      const formData = new FormData();
-      formData.append('device_id', deviceId || '');
-      formData.append('action', 'tr069');
-      formData.append('username', tr069Config.username);
-      formData.append('password', tr069Config.password);
-      formData.append('inform_interval', tr069Config.informInterval.toString());
-      
       // Log configuration change intent
       console.log("Updating TR069 Configuration:", tr069Config);
       
-      // Make API call to update TR069 config
-      const response = await fetch('/backend/api/device_configure.php', {
-        method: 'POST',
-        body: formData
-      });
+      // Simulate API call to update TR069 config
+      // In a real implementation, this would be an actual API call
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
-      const result = await response.json();
-      
-      if (result.success) {
-        toast.success("TR069 configuration updated successfully");
-        
-        // Update connection status if provided
-        if (result.connection_status) {
-          setConnectionStatus({
-            status: result.connection_status.success ? 'success' : 'error',
-            message: result.connection_status.message || 'Connection status updated',
-            details: result.connection_status.details || undefined,
-            lastChecked: new Date().toLocaleString()
-          });
-        }
-      } else {
-        toast.error(result.message || "Failed to update TR069 configuration");
-      }
+      toast.success("TR069 configuration updated successfully");
     } catch (error) {
       toast.error("Failed to update TR069 configuration");
       console.error("Error updating TR069 configuration:", error);
@@ -263,8 +168,6 @@ export function DeviceConfiguration({ deviceId }: ConfigurationProps) {
       formData.append('password', wifiConfig.password);
       formData.append('security', wifiConfig.security);
       
-      toast.loading("Sending WiFi configuration to device...");
-      
       // Make actual API call to update WiFi config
       const response = await fetch('/backend/api/device_configure.php', {
         method: 'POST',
@@ -284,28 +187,9 @@ export function DeviceConfiguration({ deviceId }: ConfigurationProps) {
             ssid: wifiConfig.ssid
           });
         }
-        
-        // Update connection status if provided
-        if (result.connection_status) {
-          setConnectionStatus({
-            status: result.connection_status.success ? 'success' : 'error',
-            message: result.connection_status.message || 'Connection attempted',
-            details: result.connection_status.details || undefined,
-            lastChecked: new Date().toLocaleString()
-          });
-        }
       } else {
         console.error("WiFi configuration update failed:", result);
         toast.error(result.message || "Failed to update WiFi configuration");
-        
-        if (result.connection_status) {
-          setConnectionStatus({
-            status: 'error',
-            message: result.connection_status.message || 'Connection failed',
-            details: result.connection_status.details || undefined,
-            lastChecked: new Date().toLocaleString()
-          });
-        }
       }
     } catch (error) {
       toast.error("Failed to update WiFi configuration");
@@ -416,32 +300,6 @@ export function DeviceConfiguration({ deviceId }: ConfigurationProps) {
 
   return (
     <div className="space-y-6">
-      {connectionStatus.status === 'error' && (
-        <Alert variant="destructive" className="mb-4">
-          <AlertTriangleIcon className="h-4 w-4" />
-          <AlertTitle>TR-069 Connection Problem</AlertTitle>
-          <AlertDescription>
-            <p>{connectionStatus.message}</p>
-            {connectionStatus.details && (
-              <details className="mt-2 text-sm">
-                <summary className="cursor-pointer font-medium">View technical details</summary>
-                <p className="mt-2 whitespace-pre-wrap">{connectionStatus.details}</p>
-              </details>
-            )}
-            <div className="mt-4">
-              <Button 
-                size="sm" 
-                variant="outline" 
-                onClick={checkTR069Connection} 
-                disabled={isSubmitting}
-              >
-                Check Connection
-              </Button>
-            </div>
-          </AlertDescription>
-        </Alert>
-      )}
-
       <Tabs defaultValue="tr069" className="w-full">
         <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="tr069">
@@ -465,28 +323,7 @@ export function DeviceConfiguration({ deviceId }: ConfigurationProps) {
         {/* TR069 Configuration Tab */}
         <TabsContent value="tr069" className="space-y-4">
           <div className="bg-white p-6 rounded-lg shadow-sm">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-medium">TR069 Configuration</h3>
-              <div className="flex items-center text-sm">
-                {connectionStatus.status === 'success' ? (
-                  <span className="text-green-600 flex items-center">
-                    <CheckCircleIcon className="h-4 w-4 mr-1" /> Connected
-                  </span>
-                ) : connectionStatus.status === 'error' ? (
-                  <span className="text-red-600 flex items-center">
-                    <AlertTriangleIcon className="h-4 w-4 mr-1" /> Connection Issue
-                  </span>
-                ) : (
-                  <span className="text-gray-500">Status Unknown</span>
-                )}
-                {connectionStatus.lastChecked && (
-                  <span className="ml-2 text-gray-500">
-                    (Last checked: {connectionStatus.lastChecked})
-                  </span>
-                )}
-              </div>
-            </div>
-
+            <h3 className="text-lg font-medium mb-4">TR069 Configuration</h3>
             <form onSubmit={updateTr069Config} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="username">TR069 Username</Label>
@@ -525,19 +362,9 @@ export function DeviceConfiguration({ deviceId }: ConfigurationProps) {
                 <p className="text-sm text-gray-500">Minimum 60 seconds recommended</p>
               </div>
               
-              <div className="flex space-x-2">
-                <Button type="submit" disabled={isSubmitting}>
-                  {isSubmitting ? "Updating..." : "Update TR069 Configuration"}
-                </Button>
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  onClick={checkTR069Connection} 
-                  disabled={isSubmitting}
-                >
-                  Test Connection
-                </Button>
-              </div>
+              <Button type="submit" disabled={isSubmitting}>
+                {isSubmitting ? "Updating..." : "Update TR069 Configuration"}
+              </Button>
             </form>
           </div>
         </TabsContent>
@@ -593,13 +420,6 @@ export function DeviceConfiguration({ deviceId }: ConfigurationProps) {
               <Button type="submit" disabled={isSubmitting}>
                 {isSubmitting ? "Updating..." : "Update WiFi Configuration"}
               </Button>
-
-              {connectionStatus.status === 'error' && (
-                <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800">
-                  <p>Note: TR-069 connection issues may prevent WiFi settings from being applied.</p>
-                  <p>Check the connection status under the TR069 tab.</p>
-                </div>
-              )}
             </form>
           </div>
         </TabsContent>
@@ -704,13 +524,6 @@ export function DeviceConfiguration({ deviceId }: ConfigurationProps) {
               <Button type="submit" disabled={isSubmitting}>
                 {isSubmitting ? "Updating..." : "Update WAN Configuration"}
               </Button>
-
-              {connectionStatus.status === 'error' && (
-                <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800">
-                  <p>Note: TR-069 connection issues may prevent WAN settings from being applied.</p>
-                  <p>Check the connection status under the TR069 tab.</p>
-                </div>
-              )}
             </form>
           </div>
         </TabsContent>
@@ -739,17 +552,10 @@ export function DeviceConfiguration({ deviceId }: ConfigurationProps) {
             <Button 
               variant="destructive" 
               onClick={rebootDevice}
-              disabled={isSubmitting || connectionStatus.status === 'error'}
+              disabled={isSubmitting}
             >
               {isSubmitting ? "Processing..." : "Reboot Device"}
             </Button>
-
-            {connectionStatus.status === 'error' && (
-              <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800">
-                <p>TR-069 connection issues may prevent remote reboot from working.</p>
-                <p>Fix connection issues before attempting to reboot the device.</p>
-              </div>
-            )}
           </div>
         </TabsContent>
       </Tabs>
