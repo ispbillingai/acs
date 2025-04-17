@@ -213,12 +213,18 @@ try {
             break;
             
         case 'reboot':
-            // Create empty task data
-            $taskData = json_encode([
+            // Create task data
+            $taskData = [
                 'reboot_reason' => isset($_POST['reason']) ? $_POST['reason'] : 'User initiated reboot'
-            ]);
+            ];
             
-            writeToDeviceLog("[Reboot] Creating reboot task for device: {$device['serial_number']}");
+            // Check if we should use vendor-specific RPC for Huawei devices
+            if (isset($_POST['use_vendor_rpc']) && $_POST['use_vendor_rpc'] === 'true') {
+                $taskData['use_vendor_rpc'] = true;
+                writeToDeviceLog("[Reboot] Creating Huawei vendor-specific reboot task for device: {$device['serial_number']}");
+            } else {
+                writeToDeviceLog("[Reboot] Creating standard reboot task for device: {$device['serial_number']}");
+            }
             
             // Insert task
             $stmt = $db->prepare("
@@ -228,7 +234,7 @@ try {
             
             $stmt->execute([
                 ':device_id' => $deviceId,
-                ':task_data' => $taskData
+                ':task_data' => json_encode($taskData)
             ]);
             
             $taskId = $db->lastInsertId();
@@ -276,6 +282,62 @@ try {
                     'success' => true,
                     'message' => 'Reboot task created successfully',
                     'task_id' => $taskId
+                ]);
+            }
+            break;
+            
+        case 'get_parameter':
+            if (!isset($_POST['parameter'])) {
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => 'Parameter name is required']);
+                exit;
+            }
+            
+            $parameterName = $_POST['parameter'];
+            writeToDeviceLog("[Parameter Request] Getting parameter: {$parameterName}");
+            
+            // For now, we'll simulate getting the parameter from a mock database
+            // In a real implementation, you would query the device or a cached parameter database
+            $mockParameters = [
+                'InternetGatewayDevice.DeviceInfo.UpTime' => rand(10, 86400), // Random uptime between 10s and 24h
+            ];
+            
+            // If it's a real device with cached parameters, try to get the actual value
+            if (file_exists($_SERVER['DOCUMENT_ROOT'] . '/router_ssids.txt')) {
+                $parameterData = file_get_contents($_SERVER['DOCUMENT_ROOT'] . '/router_ssids.txt');
+                $matches = [];
+                if (preg_match('/'. preg_quote($parameterName, '/') . '\s*=\s*([^\n]+)/', $parameterData, $matches)) {
+                    $paramValue = trim($matches[1]);
+                    writeToDeviceLog("[Parameter Found] {$parameterName} = {$paramValue}");
+                    
+                    header('Content-Type: application/json');
+                    echo json_encode([
+                        'success' => true,
+                        'parameter' => $parameterName,
+                        'value' => $paramValue
+                    ]);
+                    exit;
+                }
+            }
+            
+            // Fall back to mock data if we didn't find it in the cached parameters
+            if (isset($mockParameters[$parameterName])) {
+                $paramValue = $mockParameters[$parameterName];
+                writeToDeviceLog("[Parameter Mock] {$parameterName} = {$paramValue}");
+                
+                header('Content-Type: application/json');
+                echo json_encode([
+                    'success' => true,
+                    'parameter' => $parameterName,
+                    'value' => (string)$paramValue
+                ]);
+            } else {
+                writeToDeviceLog("[Parameter Not Found] {$parameterName}");
+                
+                header('Content-Type: application/json');
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'Parameter not found: ' . $parameterName
                 ]);
             }
             break;

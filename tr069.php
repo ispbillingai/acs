@@ -285,7 +285,7 @@ try {
   <soapenv:Body>
     <cwmp:X_HW_DelayReboot>
       <CommandKey>' . $parameterRequest['commandKey'] . '</CommandKey>
-      <DelaySeconds>0</DelaySeconds>
+      <DelaySeconds>' . $parameterRequest['delay'] . '</DelaySeconds>
     </cwmp:X_HW_DelayReboot>
   </soapenv:Body>
 </soapenv:Envelope>';
@@ -427,9 +427,11 @@ try {
             tr069_log("No current task found to update status for reboot", "WARNING");
         }
         
-        // Send empty response to complete the session
+        // Send empty response to complete the session and ensure connection is closed
         header('Content-Type: text/xml');
-        echo '<?xml version="1.0" encoding="UTF-8"?>
+        header('Connection: close');
+        
+        $response = '<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope
     xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
     xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
@@ -441,6 +443,15 @@ try {
   <soapenv:Body>
   </soapenv:Body>
 </soapenv:Envelope>';
+        
+        header('Content-Length: ' . strlen($response));
+        echo $response;
+        flush();
+        
+        if (function_exists('fastcgi_finish_request')) {
+            fastcgi_finish_request();
+        }
+        
         exit;
     }
     
