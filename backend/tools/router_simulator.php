@@ -6,11 +6,6 @@
 $serialNumber = $argv[1] ?? '48575443F2D61173';
 $ipAddress = $argv[2] ?? '192.168.1.138';
 
-// Initialize with error logging
-error_log("[ROUTER_SIM] Starting TR-069 Router Simulator");
-error_log("[ROUTER_SIM] Serial Number: $serialNumber");
-error_log("[ROUTER_SIM] IP Address: $ipAddress");
-
 echo "Starting TR-069 Router Simulator\n";
 echo "Serial Number: $serialNumber\n";
 echo "IP Address: $ipAddress\n";
@@ -88,7 +83,6 @@ $scriptDir = __DIR__;
 $apiDir = dirname($scriptDir) . '/api';
 $targetScript = $apiDir . '/store_tr069_data.php';
 
-error_log("[ROUTER_SIM] Sending data to: $targetScript");
 echo "Sending data to: $targetScript\n";
 
 // Create temporary file with the data
@@ -97,12 +91,8 @@ file_put_contents($tempFile, $jsonData);
 
 // Now send the data using curl
 $cmd = "curl -X POST --data-binary @$tempFile $targetScript";
-error_log("[ROUTER_SIM] Executing: $cmd");
 echo "Executing: $cmd\n";
 exec($cmd, $output, $returnCode);
-
-error_log("[ROUTER_SIM] Return code: $returnCode");
-error_log("[ROUTER_SIM] Output: " . implode("\n", $output));
 
 echo "Return code: $returnCode\n";
 echo "Output:\n";
@@ -110,5 +100,4 @@ print_r($output);
 
 // Clean up
 unlink($tempFile);
-error_log("[ROUTER_SIM] Simulation complete");
 echo "Done\n";
