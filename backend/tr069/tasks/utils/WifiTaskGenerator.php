@@ -103,3 +103,4 @@ class WifiTaskGenerator
         $this->logger->logToFile('WifiTaskGenerator: ' . $msg);
     }
 }
+//Working upto here
