@@ -22,13 +22,67 @@ require_once __DIR__ . '/../../config/database.php';
 $database = new Database();
 $db = $database->getConnection();
 
-// Include device manager
-require_once __DIR__ . '/../../tr069/device_manager.php';
-$deviceManager = new DeviceManager($db);
+// Include device manager if available
+if (file_exists(__DIR__ . '/../../tr069/device_manager.php')) {
+    require_once __DIR__ . '/../../tr069/device_manager.php';
+    $deviceManager = new DeviceManager($db);
+} else {
+    // Simple function for storing parameters if DeviceManager isn't available
+    function storeDeviceParameter($db, $deviceId, $paramName, $paramValue, $paramType = 'string') {
+        try {
+            // Check if parameter exists
+            $checkSql = "SELECT id FROM parameters WHERE device_id = :device_id AND param_name = :param_name";
+            $checkStmt = $db->prepare($checkSql);
+            $checkStmt->execute([
+                ':device_id' => $deviceId,
+                ':param_name' => $paramName
+            ]);
+            $existingParam = $checkStmt->fetch(PDO::FETCH_ASSOC);
+            
+            if ($existingParam) {
+                // Update existing parameter
+                $sql = "UPDATE parameters SET 
+                    param_value = :param_value,
+                    param_type = :param_type,
+                    updated_at = NOW()
+                    WHERE id = :id";
+                $stmt = $db->prepare($sql);
+                return $stmt->execute([
+                    ':param_value' => $paramValue,
+                    ':param_type' => $paramType,
+                    ':id' => $existingParam['id']
+                ]);
+            } else {
+                // Insert new parameter
+                $sql = "INSERT INTO parameters (
+                    device_id, 
+                    param_name, 
+                    param_value, 
+                    param_type
+                ) VALUES (
+                    :device_id,
+                    :param_name,
+                    :param_value,
+                    :param_type
+                )";
+                $stmt = $db->prepare($sql);
+                return $stmt->execute([
+                    ':device_id' => $deviceId,
+                    ':param_name' => $paramName,
+                    ':param_value' => $paramValue,
+                    ':param_type' => $paramType
+                ]);
+            }
+        } catch (PDOException $e) {
+            error_log("Database error in storeDeviceParameter: " . $e->getMessage());
+            return false;
+        }
+    }
+}
 
 // Log function for debugging
 function writeLog($message) {
-    $logFile = $_SERVER['DOCUMENT_ROOT'] . '/rest_api.log';
+    $logFile = __DIR__ . '/../../../acs.log';
     $timestamp = date('Y-m-d H:i:s');
     
     // Make sure the log is writable
@@ -94,7 +148,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         if ($paramName) {
             $stmt = $db->prepare("
                 SELECT param_name, param_value, param_type, updated_at
-                FROM device_parameters
+                FROM parameters
                 WHERE device_id = :device_id AND param_name = :param_name
             ");
             $stmt->execute([
@@ -124,7 +178,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         // Get all parameters for the device
         $stmt = $db->prepare("
             SELECT param_name, param_value, param_type, updated_at
-            FROM device_parameters
+            FROM parameters
             WHERE device_id = :device_id
             ORDER BY param_name
         ");
@@ -231,8 +285,12 @@ else if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $paramValue = $inputData['param_value'];
                 $paramType = $inputData['param_type'] ?? 'string';
                 
-                // Store parameter using device manager
-                $success = $deviceManager->storeDeviceParameter($deviceId, $paramName, $paramValue);
+                // Store parameter using device manager or local function
+                if (isset($deviceManager)) {
+                    $success = $deviceManager->storeDeviceParameter($deviceId, $paramName, $paramValue, $paramType);
+                } else {
+                    $success = storeDeviceParameter($db, $deviceId, $paramName, $paramValue, $paramType);
+                }
                 
                 if ($success) {
                     echo json_encode([
@@ -252,31 +310,75 @@ else if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
             case 'update_device':
                 // Update device basic information
-                $deviceInfo = [
-                    'serialNumber' => $inputData['serial'] ?? null,
-                    'manufacturer' => $inputData['manufacturer'] ?? null,
-                    'modelName' => $inputData['model'] ?? null,
-                    'softwareVersion' => $inputData['software_version'] ?? null,
-                    'hardwareVersion' => $inputData['hardware_version'] ?? null,
-                    'ipAddress' => $inputData['ip_address'] ?? null,
-                    'ssid' => $inputData['ssid'] ?? null,
-                    'ssidPassword' => $inputData['ssid_password'] ?? null,
-                    'tr069Password' => $inputData['tr069_password'] ?? null,
-                    'localAdminPassword' => $inputData['local_admin_password'] ?? null
-                ];
+                $updateFields = [];
+                $params = [];
                 
-                // Make sure serial number exists
-                if (empty($deviceInfo['serialNumber'])) {
-                    $deviceInfo['serialNumber'] = $deviceIdentifier;
+                // Build query dynamically based on provided fields
+                if (isset($inputData['manufacturer'])) {
+                    $updateFields[] = "manufacturer = :manufacturer";
+                    $params[':manufacturer'] = $inputData['manufacturer'];
                 }
                 
-                $updatedId = $deviceManager->updateDevice($deviceInfo);
+                if (isset($inputData['model'])) {
+                    $updateFields[] = "model_name = :model";
+                    $params[':model'] = $inputData['model'];
+                }
                 
-                if ($updatedId) {
+                if (isset($inputData['software_version'])) {
+                    $updateFields[] = "software_version = :software_version";
+                    $params[':software_version'] = $inputData['software_version'];
+                }
+                
+                if (isset($inputData['hardware_version'])) {
+                    $updateFields[] = "hardware_version = :hardware_version";
+                    $params[':hardware_version'] = $inputData['hardware_version'];
+                }
+                
+                if (isset($inputData['ip_address'])) {
+                    $updateFields[] = "ip_address = :ip_address";
+                    $params[':ip_address'] = $inputData['ip_address'];
+                }
+                
+                if (isset($inputData['ssid'])) {
+                    $updateFields[] = "ssid = :ssid";
+                    $params[':ssid'] = $inputData['ssid'];
+                }
+                
+                if (isset($inputData['ssid_password'])) {
+                    $updateFields[] = "ssid_password = :ssid_password";
+                    $params[':ssid_password'] = $inputData['ssid_password'];
+                }
+                
+                if (isset($inputData['tr069_password'])) {
+                    $updateFields[] = "tr069_password = :tr069_password";
+                    $params[':tr069_password'] = $inputData['tr069_password'];
+                }
+                
+                if (isset($inputData['local_admin_password'])) {
+                    $updateFields[] = "local_admin_password = :local_admin_password";
+                    $params[':local_admin_password'] = $inputData['local_admin_password'];
+                }
+                
+                // Only proceed if we have fields to update
+                if (empty($updateFields)) {
+                    http_response_code(400);
+                    echo json_encode(['error' => 'No device fields provided for update']);
+                    exit;
+                }
+                
+                // Add device ID to params
+                $params[':device_id'] = $deviceId;
+                
+                // Construct and execute query
+                $sql = "UPDATE devices SET " . implode(", ", $updateFields) . " WHERE id = :device_id";
+                $stmt = $db->prepare($sql);
+                $result = $stmt->execute($params);
+                
+                if ($result) {
                     echo json_encode([
                         'success' => true,
                         'message' => 'Device updated successfully',
-                        'device_id' => $updatedId
+                        'device_id' => $deviceId
                     ]);
                 } else {
                     http_response_code(500);
@@ -301,36 +403,68 @@ else if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'password' => $password
                 ]);
                 
-                // Cancel any existing pending WiFi tasks
-                $cancelStmt = $db->prepare("
-                    UPDATE device_tasks 
-                    SET status = 'canceled', message = 'Superseded by newer task', updated_at = NOW()
-                    WHERE device_id = :device_id AND task_type = 'wifi' AND status = 'pending'
-                ");
-                $cancelStmt->execute([':device_id' => $deviceId]);
-                
-                // Insert task
-                $stmt = $db->prepare("
-                    INSERT INTO device_tasks (device_id, task_type, task_data, status, created_at)
-                    VALUES (:device_id, 'wifi', :task_data, 'pending', NOW())
-                ");
-                
-                $stmt->execute([
-                    ':device_id' => $deviceId,
-                    ':task_data' => $taskData
-                ]);
-                
-                $taskId = $db->lastInsertId();
-                
-                if ($taskId) {
+                // First check if the device_tasks table exists
+                try {
+                    $checkTable = $db->query("SHOW TABLES LIKE 'device_tasks'");
+                    $tableExists = $checkTable->rowCount() > 0;
+                    
+                    if (!$tableExists) {
+                        // Create the device_tasks table
+                        $createTableSql = "CREATE TABLE IF NOT EXISTS device_tasks (
+                            id INT AUTO_INCREMENT PRIMARY KEY,
+                            device_id INT NOT NULL,
+                            task_type VARCHAR(50) NOT NULL COMMENT 'wifi, wan, reboot, etc.',
+                            task_data TEXT NOT NULL COMMENT 'JSON encoded parameters',
+                            status ENUM('pending', 'in_progress', 'completed', 'failed', 'canceled') NOT NULL DEFAULT 'pending',
+                            message TEXT,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+                        ) ENGINE=InnoDB";
+                        
+                        $db->exec($createTableSql);
+                        writeLog("Created device_tasks table");
+                    }
+                    
+                    // Cancel any existing pending WiFi tasks
+                    $cancelStmt = $db->prepare("
+                        UPDATE device_tasks 
+                        SET status = 'canceled', message = 'Superseded by newer task', updated_at = NOW()
+                        WHERE device_id = :device_id AND task_type = 'wifi' AND status = 'pending'
+                    ");
+                    $cancelStmt->execute([':device_id' => $deviceId]);
+                    
+                    // Insert task
+                    $stmt = $db->prepare("
+                        INSERT INTO device_tasks (device_id, task_type, task_data, status, created_at)
+                        VALUES (:device_id, 'wifi', :task_data, 'pending', NOW())
+                    ");
+                    
+                    $stmt->execute([
+                        ':device_id' => $deviceId,
+                        ':task_data' => $taskData
+                    ]);
+                    
+                    $taskId = $db->lastInsertId();
+                    
+                    // Also update the device record directly
+                    $updateDeviceStmt = $db->prepare("
+                        UPDATE devices SET ssid = :ssid, ssid_password = :password WHERE id = :device_id
+                    ");
+                    $updateDeviceStmt->execute([
+                        ':ssid' => $ssid,
+                        ':password' => $password,
+                        ':device_id' => $deviceId
+                    ]);
+                    
                     echo json_encode([
                         'success' => true,
                         'message' => 'WiFi configuration task created successfully',
                         'task_id' => $taskId
                     ]);
-                } else {
+                } catch (PDOException $e) {
                     http_response_code(500);
-                    echo json_encode(['error' => 'Failed to create WiFi configuration task']);
+                    echo json_encode(['error' => 'Failed to create WiFi configuration task', 'details' => $e->getMessage()]);
                 }
                 break;
                 
@@ -368,36 +502,58 @@ else if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $taskData['pppoe_password'] = $inputData['pppoe_password'] ?? '';
                 }
                 
-                // Cancel any existing pending WAN tasks
-                $cancelStmt = $db->prepare("
-                    UPDATE device_tasks 
-                    SET status = 'canceled', message = 'Superseded by newer task', updated_at = NOW()
-                    WHERE device_id = :device_id AND task_type = 'wan' AND status = 'pending'
-                ");
-                $cancelStmt->execute([':device_id' => $deviceId]);
-                
-                // Insert task
-                $stmt = $db->prepare("
-                    INSERT INTO device_tasks (device_id, task_type, task_data, status, created_at)
-                    VALUES (:device_id, 'wan', :task_data, 'pending', NOW())
-                ");
-                
-                $stmt->execute([
-                    ':device_id' => $deviceId,
-                    ':task_data' => json_encode($taskData)
-                ]);
-                
-                $taskId = $db->lastInsertId();
-                
-                if ($taskId) {
+                try {
+                    // Check if device_tasks table exists
+                    $checkTable = $db->query("SHOW TABLES LIKE 'device_tasks'");
+                    $tableExists = $checkTable->rowCount() > 0;
+                    
+                    if (!$tableExists) {
+                        // Create the device_tasks table
+                        $createTableSql = "CREATE TABLE IF NOT EXISTS device_tasks (
+                            id INT AUTO_INCREMENT PRIMARY KEY,
+                            device_id INT NOT NULL,
+                            task_type VARCHAR(50) NOT NULL COMMENT 'wifi, wan, reboot, etc.',
+                            task_data TEXT NOT NULL COMMENT 'JSON encoded parameters',
+                            status ENUM('pending', 'in_progress', 'completed', 'failed', 'canceled') NOT NULL DEFAULT 'pending',
+                            message TEXT,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+                        ) ENGINE=InnoDB";
+                        
+                        $db->exec($createTableSql);
+                        writeLog("Created device_tasks table");
+                    }
+                    
+                    // Cancel any existing pending WAN tasks
+                    $cancelStmt = $db->prepare("
+                        UPDATE device_tasks 
+                        SET status = 'canceled', message = 'Superseded by newer task', updated_at = NOW()
+                        WHERE device_id = :device_id AND task_type = 'wan' AND status = 'pending'
+                    ");
+                    $cancelStmt->execute([':device_id' => $deviceId]);
+                    
+                    // Insert task
+                    $stmt = $db->prepare("
+                        INSERT INTO device_tasks (device_id, task_type, task_data, status, created_at)
+                        VALUES (:device_id, 'wan', :task_data, 'pending', NOW())
+                    ");
+                    
+                    $stmt->execute([
+                        ':device_id' => $deviceId,
+                        ':task_data' => json_encode($taskData)
+                    ]);
+                    
+                    $taskId = $db->lastInsertId();
+                    
                     echo json_encode([
                         'success' => true,
                         'message' => 'WAN configuration task created successfully',
                         'task_id' => $taskId
                     ]);
-                } else {
+                } catch (PDOException $e) {
                     http_response_code(500);
-                    echo json_encode(['error' => 'Failed to create WAN configuration task']);
+                    echo json_encode(['error' => 'Failed to create WAN configuration task', 'details' => $e->getMessage()]);
                 }
                 break;
                 
@@ -410,28 +566,50 @@ else if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'reboot_reason' => $reason
                 ]);
                 
-                // Insert task
-                $stmt = $db->prepare("
-                    INSERT INTO device_tasks (device_id, task_type, task_data, status, created_at)
-                    VALUES (:device_id, 'reboot', :task_data, 'pending', NOW())
-                ");
+                try {
+                    // Check if device_tasks table exists
+                    $checkTable = $db->query("SHOW TABLES LIKE 'device_tasks'");
+                    $tableExists = $checkTable->rowCount() > 0;
+                    
+                    if (!$tableExists) {
+                        // Create the device_tasks table
+                        $createTableSql = "CREATE TABLE IF NOT EXISTS device_tasks (
+                            id INT AUTO_INCREMENT PRIMARY KEY,
+                            device_id INT NOT NULL,
+                            task_type VARCHAR(50) NOT NULL COMMENT 'wifi, wan, reboot, etc.',
+                            task_data TEXT NOT NULL COMMENT 'JSON encoded parameters',
+                            status ENUM('pending', 'in_progress', 'completed', 'failed', 'canceled') NOT NULL DEFAULT 'pending',
+                            message TEXT,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+                        ) ENGINE=InnoDB";
+                        
+                        $db->exec($createTableSql);
+                        writeLog("Created device_tasks table");
+                    }
                 
-                $stmt->execute([
-                    ':device_id' => $deviceId,
-                    ':task_data' => $taskData
-                ]);
-                
-                $taskId = $db->lastInsertId();
-                
-                if ($taskId) {
+                    // Insert task
+                    $stmt = $db->prepare("
+                        INSERT INTO device_tasks (device_id, task_type, task_data, status, created_at)
+                        VALUES (:device_id, 'reboot', :task_data, 'pending', NOW())
+                    ");
+                    
+                    $stmt->execute([
+                        ':device_id' => $deviceId,
+                        ':task_data' => $taskData
+                    ]);
+                    
+                    $taskId = $db->lastInsertId();
+                    
                     echo json_encode([
                         'success' => true,
                         'message' => 'Reboot task created successfully',
                         'task_id' => $taskId
                     ]);
-                } else {
+                } catch (PDOException $e) {
                     http_response_code(500);
-                    echo json_encode(['error' => 'Failed to create reboot task']);
+                    echo json_encode(['error' => 'Failed to create reboot task', 'details' => $e->getMessage()]);
                 }
                 break;
                 
