@@ -1,4 +1,3 @@
-
 <?php
 header('Content-Type: application/json');
 
@@ -20,6 +19,7 @@ try {
     }
 
     $logFile = __DIR__ . '/../../logs/configure.log';
+    $wifiLogFile = __DIR__ . '/../../wifi.logs';
     
     // Get device information from database
     $stmt = $db->prepare("SELECT * FROM devices WHERE id = :id");
@@ -34,6 +34,9 @@ try {
     // Create logs directory if it doesn't exist
     if (!file_exists(dirname($logFile))) {
         mkdir(dirname($logFile), 0755, true);
+    }
+    if (!file_exists(dirname($wifiLogFile))) {
+        mkdir(dirname($wifiLogFile), 0755, true);
     }
 
     switch ($action) {
@@ -58,9 +61,14 @@ try {
                 throw new Exception("SSID cannot be empty");
             }
             
-            // Log WiFi configuration change attempt
-            $logEntry = date('Y-m-d H:i:s') . " - Device $deviceId: WiFi configuration change attempted. SSID: $ssid\n";
+            // Log WiFi configuration change attempt with more details
+            $logEntry = date('Y-m-d H:i:s') . " - Device $deviceId: WiFi configuration change\n";
+            $logEntry .= "  New SSID: $ssid\n";
+            $logEntry .= "  Password Length: " . strlen($password) . " characters\n";
+            
+            // Write to both the general log and the specific WiFi log
             file_put_contents($logFile, $logEntry, FILE_APPEND);
+            file_put_contents($wifiLogFile, $logEntry, FILE_APPEND);
             
             // Create TR-069 SOAP request to change SSID
             $tr069Request = createSetParameterValuesRequest($ssid, $password);
