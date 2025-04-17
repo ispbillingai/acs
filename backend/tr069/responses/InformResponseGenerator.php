@@ -115,7 +115,7 @@ class InformResponseGenerator {
     }
     
     public function createSetSSIDRequest($ssid, $id = null) {
-        $soapId = $id ?? 'tr181-wifi-a1acc4a2';
+        $soapId = 'tr181-wifi-a1acc4a2';
         $parameterKey = 'TR181ChangeSSIDa1a';
         
         $response = '<?xml version="1.0" encoding="UTF-8"?>
@@ -208,5 +208,101 @@ class InformResponseGenerator {
 </SOAP-ENV:Envelope>';
 
         return $response;
+    }
+    
+    public function createCompleteWiFiConfigRequest($ssid, $password = null) {
+        $soapId = 'tr181-wifi-a1acc4a2';
+        $parameterKey = 'TR181ChangeSSIDa1a';
+        
+        $paramCount = empty($password) ? 1 : 3;
+        
+        $paramXml = '        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.Device.WiFi.SSID.1.SSID</Name>
+          <Value xsi:type="xsd:string">' . htmlspecialchars($ssid) . '</Value>
+        </ParameterValueStruct>';
+        
+        if (!empty($password)) {
+            $paramXml .= '
+        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.Device.WiFi.AccessPoint.1.Security.KeyPassphrase</Name>
+          <Value xsi:type="xsd:string">' . htmlspecialchars($password) . '</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.Device.WiFi.AccessPoint.1.Security.ModeEnabled</Name>
+          <Value xsi:type="xsd:string">WPA2-Personal</Value>
+        </ParameterValueStruct>';
+        }
+        
+        $response = '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:SetParameterValues>
+      <ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[' . $paramCount . ']">
+' . $paramXml . '
+      </ParameterList>
+      <ParameterKey>' . $parameterKey . '</ParameterKey>
+    </cwmp:SetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>';
+
+        return $response;
+    }
+    
+    public function createMultiModelWiFiRequests($ssid, $password = null) {
+        $requests = [];
+        
+        $requests['tr181'] = $this->createCompleteWiFiConfigRequest($ssid, $password);
+        
+        $soapId = 'tr098-wifi-a1acc4a2';
+        $parameterKey = 'TR098ChangeSSIDa1a';
+        
+        $paramCount = empty($password) ? 1 : 3;
+        
+        $paramXml = '        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID</Name>
+          <Value xsi:type="xsd:string">' . htmlspecialchars($ssid) . '</Value>
+        </ParameterValueStruct>';
+        
+        if (!empty($password)) {
+            $paramXml .= '
+        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase</Name>
+          <Value xsi:type="xsd:string">' . htmlspecialchars($password) . '</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType</Name>
+          <Value xsi:type="xsd:string">WPAand11i</Value>
+        </ParameterValueStruct>';
+        }
+        
+        $requests['tr098'] = '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:SetParameterValues>
+      <ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[' . $paramCount . ']">
+' . $paramXml . '
+      </ParameterList>
+      <ParameterKey>' . $parameterKey . '</ParameterKey>
+    </cwmp:SetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>';
+        
+        return $requests;
     }
 }

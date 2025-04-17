@@ -72,51 +72,57 @@ try {
             file_put_contents($logFile, $logEntry, FILE_APPEND);
             file_put_contents($wifiLogFile, $logEntry, FILE_APPEND);
             
-            // Try both TR-098 and TR-181 data models
-            // First, create TR-098 style request (most common for HG8145V5)
-            $tr098Request = createSetParameterValuesRequest($ssid, $password, true);
-            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Sending TR-098 request\n", FILE_APPEND);
-            file_put_contents($wifiLogFile, $tr098Request . "\n", FILE_APPEND);
+            // Create InformResponseGenerator to use our hardcoded request
+            $responseGenerator = new InformResponseGenerator();
             
-            // We'll also try the TR-181 model as a fallback
-            $tr181Request = createTR181SetParameterValuesRequest($ssid, $password);
-            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Sending TR-181 request as fallback\n", FILE_APPEND);
+            // Use the exact hardcoded request that matches the one in the logs
+            $tr181Request = $responseGenerator->createSetSSIDRequest($ssid);
+            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Using hardcoded TR-181 request\n", FILE_APPEND);
             file_put_contents($wifiLogFile, $tr181Request . "\n", FILE_APPEND);
             
-            // Check if device exists in TR-069 system - if not, add it
+            // Try the multi-model approach as well
+            $multiRequests = $responseGenerator->createMultiModelWiFiRequests($ssid, $password);
+            
+            // Device URL from database
             $deviceUrl = "http://{$device['ip_address']}:7547/";
             file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Target device URL: $deviceUrl\n", FILE_APPEND);
             
-            // Always use hardcoded admin/admin credentials regardless of database values
+            // Use hardcoded admin credentials
+            $username = "admin";
+            $password = "admin";
+            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Using hardcoded credentials - Username: $username\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Password length: " . strlen($password) . " characters\n", FILE_APPEND);
+            
+            // First try with hardcoded TR-181 request
             $success = simulateTR069Request(
                 $deviceUrl, 
-                $tr098Request, 
-                'admin', 
-                'admin'
+                $tr181Request, 
+                $username, 
+                $password
             );
             
+            // If hardcoded request failed, try TR-098 style
             if (!$success) {
-                // Try TR-181 as fallback
                 $success = simulateTR069Request(
                     $deviceUrl, 
-                    $tr181Request, 
-                    'admin', 
-                    'admin'
+                    $multiRequests['tr098'], 
+                    $username, 
+                    $password
                 );
-                file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Fallback to TR-181: " . ($success ? "success" : "failed") . "\n", FILE_APPEND);
+                file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Fallback to TR-098: " . ($success ? "success" : "failed") . "\n", FILE_APPEND);
             } else {
-                file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - TR-098 request successful\n", FILE_APPEND);
+                file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - TR-181 request successful\n", FILE_APPEND);
             }
             
             // For debugging: verify the change with a GetParameterValues request
-            $verifyRequest = createGetParameterValuesRequest('InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID');
+            $verifyRequest = $responseGenerator->createCustomGetParameterValuesRequest(null, ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID']);
             file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Verification request:\n", FILE_APPEND);
             file_put_contents($wifiLogFile, $verifyRequest . "\n", FILE_APPEND);
             
             // Update device record in database
             $updateStmt = $db->prepare("UPDATE devices SET ssid = :ssid, ssid_password = :password WHERE id = :id");
             $updateStmt->bindParam(':ssid', $ssid);
-            $updateStmt->bindParam(':password', $password);
+            $updateStmt->bindParam(':password', $_POST['password'] ?? '');
             $updateStmt->bindParam(':id', $deviceId);
             $updateStmt->execute();
             
@@ -390,14 +396,10 @@ function createRebootRequest() {
 }
 
 // Updated simulateTR069Request to always use admin credentials if provided
-function simulateTR069Request($deviceUrl, $soapRequest, $username = null, $password = null) {
+function simulateTR069Request($deviceUrl, $soapRequest, $username = 'admin', $password = 'admin') {
     global $wifiLogFile;
     
     try {
-        // Use hardcoded admin credentials if not provided
-        if (!$username) $username = 'admin';
-        if (!$password) $password = 'admin';
-        
         // Log attempt to send request
         if (isset($wifiLogFile)) {
             file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Attempting to send request to: $deviceUrl\n", FILE_APPEND);

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,7 +21,6 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
   useEffect(() => {
     console.log("DeviceConfigurationPanel mounted with deviceId:", deviceId);
     
-    // Fetch current device settings when component mounts
     const fetchDeviceSettings = async () => {
       try {
         setLoading(true);
@@ -83,7 +81,6 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
       if (result.success) {
         toast.success(result.message);
         
-        // For WiFi configuration, show an additional information toast
         if (action === 'wifi') {
           toast.info(
             <div className="flex items-start gap-2">
@@ -191,7 +188,7 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
             ) : "Update WiFi"}
           </Button>
           <p className="text-xs text-gray-500 mt-1">
-            Note: WiFi changes may take 30-60 seconds to apply on the router. Using hardcoded admin/admin credentials.
+            Note: Uses hardcoded TR-181 model SOAP request with ID tr181-wifi-a1acc4a2. Using admin/admin credentials.
           </p>
         </div>
       </div>
