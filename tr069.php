@@ -394,7 +394,7 @@ try {
     }
     
     // Check if this is a RebootResponse
-    if (stripos($raw_post, 'RebootResponse') !== false) {
+    if (stripos($raw_post, 'RebootResponse') !== false || stripos($raw_post, 'X_HW_DelayRebootResponse') !== false) {
         // Extract the SOAP ID
         preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
         $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
@@ -452,6 +452,31 @@ try {
             fastcgi_finish_request();
         }
         
+        exit;
+    }
+    
+    // Additional message type handling for other SOAP responses
+    if (stripos($raw_post, 'SOAP-ENV:Envelope') !== false) {
+        // Extract the SOAP ID
+        preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
+        $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
+        
+        tr069_log("Received generic SOAP response: " . substr($raw_post, 0, 100) . "...", "DEBUG");
+        
+        // Send empty response to complete the session
+        header('Content-Type: text/xml');
+        echo '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+  </soapenv:Body>
+</soapenv:Envelope>';
         exit;
     }
     

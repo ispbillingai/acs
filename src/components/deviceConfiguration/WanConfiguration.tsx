@@ -1,10 +1,10 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Globe, Server } from "lucide-react";
+import { Globe, Server, AlertCircle } from "lucide-react";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form";
 import { useForm } from "react-hook-form";
@@ -28,6 +28,7 @@ interface WanFormValues {
 
 const WanConfiguration: React.FC<WanConfigurationProps> = ({ deviceId }) => {
   const [configuring, setConfiguring] = useState(false);
+  const [taskStatus, setTaskStatus] = useState<string | null>(null);
   
   const form = useForm<WanFormValues>({
     defaultValues: {
@@ -43,6 +44,56 @@ const WanConfiguration: React.FC<WanConfigurationProps> = ({ deviceId }) => {
   });
 
   const connectionType = form.watch("connectionType");
+  
+  // Poll for task status if a task is in progress
+  useEffect(() => {
+    let taskId: string | null = null;
+    let intervalId: NodeJS.Timeout;
+    
+    if (configuring) {
+      intervalId = setInterval(async () => {
+        if (!taskId) return;
+        
+        try {
+          const formData = new FormData();
+          formData.append('task_id', taskId);
+          formData.append('action', 'check_task_status');
+          
+          const response = await fetch('/backend/api/device_configure.php', {
+            method: 'POST',
+            body: formData
+          });
+          
+          if (!response.ok) {
+            throw new Error('Failed to fetch task status');
+          }
+          
+          const result = await response.json();
+          console.log('Task status check result:', result);
+          
+          if (result.success && result.status) {
+            setTaskStatus(result.status);
+            
+            if (result.status === 'completed') {
+              setConfiguring(false);
+              toast.success('WAN configuration applied successfully');
+              clearInterval(intervalId);
+            } else if (result.status === 'failed') {
+              setConfiguring(false);
+              toast.error(`Configuration failed: ${result.message || 'Unknown error'}`);
+              clearInterval(intervalId);
+            }
+          }
+        } catch (error) {
+          console.error('Error checking task status:', error);
+        }
+      }, 3000); // Check every 3 seconds
+    }
+    
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [configuring]);
 
   const makeConfigRequest = async (values: WanFormValues) => {
     setConfiguring(true);
@@ -80,14 +131,22 @@ const WanConfiguration: React.FC<WanConfigurationProps> = ({ deviceId }) => {
       console.log(`WAN config response:`, result);
 
       if (result.success) {
-        toast.success(result.message || "WAN configuration updated successfully");
+        // Store the task ID for status polling
+        if (result.task_id) {
+          window.taskId = result.task_id;
+          setTaskStatus('pending');
+          toast.success("WAN configuration request sent to device");
+        } else {
+          toast.success(result.message || "WAN configuration updated successfully");
+          setConfiguring(false);
+        }
       } else {
         toast.error(result.message || 'Configuration failed');
+        setConfiguring(false);
       }
     } catch (error) {
       console.error(`Error in WAN config:`, error);
       toast.error('Configuration failed due to server error');
-    } finally {
       setConfiguring(false);
     }
   };
@@ -103,6 +162,20 @@ const WanConfiguration: React.FC<WanConfigurationProps> = ({ deviceId }) => {
         <Globe className="h-5 w-5" />
         WAN Configuration
       </h3>
+      
+      {taskStatus === 'in_progress' && (
+        <div className="bg-blue-50 border border-blue-200 text-blue-800 p-3 rounded-md mb-4 flex items-center gap-2">
+          <div className="animate-spin h-4 w-4 border-2 border-blue-600 border-t-transparent rounded-full"></div>
+          <p>Applying WAN configuration to device... This may take a moment.</p>
+        </div>
+      )}
+      
+      {taskStatus === 'failed' && (
+        <div className="bg-red-50 border border-red-200 text-red-800 p-3 rounded-md mb-4 flex items-center gap-2">
+          <AlertCircle className="h-4 w-4" />
+          <p>Failed to apply WAN configuration. Please try again.</p>
+        </div>
+      )}
       
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -152,7 +225,7 @@ const WanConfiguration: React.FC<WanConfigurationProps> = ({ deviceId }) => {
                     id="pppoeUsername"
                     {...form.register("pppoeUsername")}
                     placeholder="Enter ISP provided username"
-                    disabled={connectionType !== "PPPoE"}
+                    disabled={connectionType !== "PPPoE" || configuring}
                     className={connectionType !== "PPPoE" ? "bg-gray-100 text-gray-500" : ""}
                   />
                 </div>
@@ -165,7 +238,7 @@ const WanConfiguration: React.FC<WanConfigurationProps> = ({ deviceId }) => {
                     type="password"
                     {...form.register("pppoePassword")}
                     placeholder="Enter ISP provided password"
-                    disabled={connectionType !== "PPPoE"}
+                    disabled={connectionType !== "PPPoE" || configuring}
                     className={connectionType !== "PPPoE" ? "bg-gray-100 text-gray-500" : ""}
                   />
                 </div>
@@ -187,7 +260,7 @@ const WanConfiguration: React.FC<WanConfigurationProps> = ({ deviceId }) => {
                     id="ipAddress"
                     {...form.register("ipAddress")}
                     placeholder="e.g., 192.168.1.100"
-                    disabled={connectionType !== "Static"}
+                    disabled={connectionType !== "Static" || configuring}
                     className={connectionType !== "Static" ? "bg-gray-100 text-gray-500" : ""}
                   />
                 </div>
@@ -199,7 +272,7 @@ const WanConfiguration: React.FC<WanConfigurationProps> = ({ deviceId }) => {
                     id="subnetMask"
                     {...form.register("subnetMask")}
                     placeholder="e.g., 255.255.255.0"
-                    disabled={connectionType !== "Static"}
+                    disabled={connectionType !== "Static" || configuring}
                     className={connectionType !== "Static" ? "bg-gray-100 text-gray-500" : ""}
                   />
                 </div>
@@ -211,7 +284,7 @@ const WanConfiguration: React.FC<WanConfigurationProps> = ({ deviceId }) => {
                     id="gateway"
                     {...form.register("gateway")}
                     placeholder="e.g., 192.168.1.1"
-                    disabled={connectionType !== "Static"}
+                    disabled={connectionType !== "Static" || configuring}
                     className={connectionType !== "Static" ? "bg-gray-100 text-gray-500" : ""}
                   />
                 </div>
@@ -223,7 +296,7 @@ const WanConfiguration: React.FC<WanConfigurationProps> = ({ deviceId }) => {
                     id="dnsServer1"
                     {...form.register("dnsServer1")}
                     placeholder="e.g., 8.8.8.8"
-                    disabled={connectionType !== "Static"}
+                    disabled={connectionType !== "Static" || configuring}
                     className={connectionType !== "Static" ? "bg-gray-100 text-gray-500" : ""}
                   />
                 </div>
@@ -235,7 +308,7 @@ const WanConfiguration: React.FC<WanConfigurationProps> = ({ deviceId }) => {
                     id="dnsServer2"
                     {...form.register("dnsServer2")}
                     placeholder="e.g., 8.8.4.4"
-                    disabled={connectionType !== "Static"}
+                    disabled={connectionType !== "Static" || configuring}
                     className={connectionType !== "Static" ? "bg-gray-100 text-gray-500" : ""}
                   />
                 </div>

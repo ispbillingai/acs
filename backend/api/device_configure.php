@@ -1,4 +1,3 @@
-
 <?php
 // Enable error logging
 error_reporting(E_ALL);
@@ -31,16 +30,15 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 // Validate required parameters
-if (!isset($_POST['device_id']) || !isset($_POST['action'])) {
+if (!isset($_POST['action'])) {
     header('Content-Type: application/json');
-    echo json_encode(['success' => false, 'message' => 'Missing required parameters']);
+    echo json_encode(['success' => false, 'message' => 'Missing required action parameter']);
     exit;
 }
 
-$deviceId = $_POST['device_id'];
 $action = $_POST['action'];
 
-writeToDeviceLog("[Configuration Request] Device ID: {$deviceId}, Action: {$action}");
+writeToDeviceLog("[API Request] Action: {$action}");
 
 try {
     // Include database connection
@@ -48,24 +46,53 @@ try {
     $database = new Database();
     $db = $database->getConnection();
     
-    // Get device information
-    $stmt = $db->prepare("SELECT * FROM devices WHERE id = :id");
-    $stmt->execute([':id' => $deviceId]);
-    $device = $stmt->fetch(PDO::FETCH_ASSOC);
-    
-    if (!$device) {
-        writeToDeviceLog("[Error] Device not found: {$deviceId}");
-        header('Content-Type: application/json');
-        echo json_encode(['success' => false, 'message' => 'Device not found']);
-        exit;
-    }
-    
-    writeToDeviceLog("[Device Found] Serial: {$device['serial_number']}, Status: {$device['status']}");
-    
     // Process based on action type
     switch ($action) {
+        case 'check_task_status':
+            // Check status of a specific task
+            if (!isset($_POST['task_id'])) {
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => 'Task ID is required']);
+                exit;
+            }
+            
+            $taskId = $_POST['task_id'];
+            writeToDeviceLog("[Task Status Check] Task ID: {$taskId}");
+            
+            $stmt = $db->prepare("SELECT * FROM device_tasks WHERE id = :id");
+            $stmt->execute([':id' => $taskId]);
+            $task = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if (!$task) {
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => 'Task not found']);
+                exit;
+            }
+            
+            header('Content-Type: application/json');
+            echo json_encode([
+                'success' => true,
+                'task_id' => $task['id'],
+                'status' => $task['status'],
+                'message' => $task['message'],
+                'created_at' => $task['created_at'],
+                'updated_at' => $task['updated_at']
+            ]);
+            break;
+        
         case 'wifi':
             // Validate parameters
+            if (!isset($_POST['device_id']) || !isset($_POST['action'])) {
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => 'Missing required parameters']);
+                exit;
+            }
+            
+            $deviceId = $_POST['device_id'];
+            $action = $_POST['action'];
+            
+            writeToDeviceLog("[Configuration Request] Device ID: {$deviceId}, Action: {$action}");
+            
             if (!isset($_POST['ssid'])) {
                 writeToDeviceLog("[Error] Missing SSID for WiFi configuration");
                 header('Content-Type: application/json');
@@ -158,6 +185,28 @@ try {
             break;
             
         case 'wan':
+            // Validate device ID
+            if (!isset($_POST['device_id'])) {
+                writeToDeviceLog("[Error] Missing device ID for WAN configuration");
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => 'Device ID is required']);
+                exit;
+            }
+            
+            $deviceId = $_POST['device_id'];
+            
+            // Get device information
+            $stmt = $db->prepare("SELECT * FROM devices WHERE id = :id");
+            $stmt->execute([':id' => $deviceId]);
+            $device = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if (!$device) {
+                writeToDeviceLog("[Error] Device not found: {$deviceId}");
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => 'Device not found']);
+                exit;
+            }
+            
             // Get connection type (DHCP, PPPoE, Static)
             $connectionType = $_POST['connection_type'] ?? 'DHCP';
             writeToDeviceLog("[WAN Config] Connection type: {$connectionType}");
@@ -213,6 +262,20 @@ try {
             
             if ($canceledCount > 0) {
                 writeToDeviceLog("[WAN Config] Canceled {$canceledCount} older pending WAN tasks");
+            }
+            
+            // Also mark any 'in_progress' WAN tasks that have been stuck for more than 5 minutes as failed
+            $failStmt = $db->prepare("
+                UPDATE device_tasks 
+                SET status = 'failed', message = 'Task timed out', updated_at = NOW()
+                WHERE device_id = :device_id AND task_type = 'wan' AND status = 'in_progress' 
+                AND updated_at < NOW() - INTERVAL 5 MINUTE
+            ");
+            $failStmt->execute([':device_id' => $deviceId]);
+            $failedCount = $failStmt->rowCount();
+            
+            if ($failedCount > 0) {
+                writeToDeviceLog("[WAN Config] Marked {$failedCount} stalled in-progress WAN tasks as failed");
             }
             
             // Insert task
