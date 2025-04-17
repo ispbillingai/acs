@@ -1,5 +1,12 @@
-
 <?php
+// Function to log detailed actions
+function logDetail($message, $level = 'INFO') {
+    $logFile = __DIR__ . '/../../device_details.log';
+    $timestamp = date('Y-m-d H:i:s');
+    $logEntry = "$timestamp - [$level] $message\n";
+    file_put_contents($logFile, $logEntry, FILE_APPEND);
+}
+
 // Function to retrieve all devices from the database
 function getDevices($db) {
     try {
@@ -13,6 +20,9 @@ function getDevices($db) {
         // Map database field names to the expected field names in the application
         $mappedDevices = [];
         foreach ($devices as $device) {
+            // Log raw device data
+            logDetail("Device from DB: ID={$device['id']}, Serial={$device['serial_number']}, Status={$device['status']}, LastContact={$device['last_contact']}");
+            
             $mappedDevice = [
                 'id' => $device['id'],
                 'manufacturer' => $device['manufacturer'] ?? 'Unknown',
@@ -26,6 +36,25 @@ function getDevices($db) {
                 'uptime' => $device['uptime'] ?? '0',
                 'pending_tasks' => $device['pending_tasks'] ?? 0
             ];
+            
+            // Update status based on last contact time
+            $fiveMinutesAgo = date('Y-m-d H:i:s', strtotime('-5 minutes'));
+            if ($device['last_contact'] && strtotime($device['last_contact']) >= strtotime($fiveMinutesAgo)) {
+                // Device has checked in within the last 5 minutes
+                if ($mappedDevice['status'] !== 'online') {
+                    $mappedDevice['status'] = 'online';
+                    // Update database to reflect this
+                    updateDeviceStatusInDb($db, $device['id'], 'online');
+                    logDetail("Updated device status to online: ID={$device['id']}, Serial={$device['serial_number']}");
+                }
+            } else if ($mappedDevice['status'] !== 'offline' && $device['last_contact']) {
+                // Device hasn't checked in within 5 minutes
+                $mappedDevice['status'] = 'offline';
+                // Update database to reflect this
+                updateDeviceStatusInDb($db, $device['id'], 'offline');
+                logDetail("Updated device status to offline: ID={$device['id']}, Serial={$device['serial_number']}");
+            }
+            
             $mappedDevices[] = $mappedDevice;
         }
         
@@ -34,6 +63,29 @@ function getDevices($db) {
     } catch (PDOException $e) {
         logError("Database error in getDevices(): " . $e->getMessage());
         return [];
+    }
+}
+
+// Helper function to update device status in the database
+function updateDeviceStatusInDb($db, $deviceId, $status) {
+    try {
+        $sql = "UPDATE devices SET status = :status WHERE id = :id";
+        $stmt = $db->prepare($sql);
+        $result = $stmt->execute([
+            ':status' => $status,
+            ':id' => $deviceId
+        ]);
+        
+        if ($result) {
+            logDetail("Successfully updated device status in DB: ID=$deviceId, Status=$status");
+            return true;
+        } else {
+            logDetail("Failed to update device status in DB: ID=$deviceId, Status=$status", "ERROR");
+            return false;
+        }
+    } catch (PDOException $e) {
+        logDetail("Database error updating device status: " . $e->getMessage(), "ERROR");
+        return false;
     }
 }
 
@@ -46,6 +98,9 @@ function getDevice($db, $id) {
         $device = $stmt->fetch(PDO::FETCH_ASSOC);
         
         if ($device) {
+            // Log raw device data
+            logDetail("Device details from DB: ID={$device['id']}, Serial={$device['serial_number']}, Status={$device['status']}, LastContact={$device['last_contact']}");
+            
             // Map database field names to the expected field names
             $mappedDevice = [
                 'id' => $device['id'],
@@ -63,6 +118,25 @@ function getDevice($db, $id) {
                 'txPower' => $device['tx_power'] ?? 'N/A',
                 'rxPower' => $device['rx_power'] ?? 'N/A'
             ];
+            
+            // Update status based on last contact time
+            $fiveMinutesAgo = date('Y-m-d H:i:s', strtotime('-5 minutes'));
+            if ($device['last_contact'] && strtotime($device['last_contact']) >= strtotime($fiveMinutesAgo)) {
+                // Device has checked in within the last 5 minutes
+                if ($mappedDevice['status'] !== 'online') {
+                    $mappedDevice['status'] = 'online';
+                    // Update database to reflect this
+                    updateDeviceStatusInDb($db, $device['id'], 'online');
+                    logDetail("Updated device status to online: ID={$device['id']}, Serial={$device['serial_number']}");
+                }
+            } else if ($mappedDevice['status'] !== 'offline' && $device['last_contact']) {
+                // Device hasn't checked in within 5 minutes
+                $mappedDevice['status'] = 'offline';
+                // Update database to reflect this
+                updateDeviceStatusInDb($db, $device['id'], 'offline');
+                logDetail("Updated device status to offline: ID={$device['id']}, Serial={$device['serial_number']}");
+            }
+            
             logAction("Retrieved device details for ID: $id");
             return $mappedDevice;
         }

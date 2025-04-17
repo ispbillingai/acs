@@ -20,12 +20,15 @@ export const DeviceStats = ({ device }: DeviceStatsProps) => {
     const determineStatus = (lastContactTime: string | undefined): 'online' | 'offline' | 'unknown' => {
       if (!lastContactTime) return 'unknown';
       
-      // Consider a device online if last contact was within the last 3 hours (changed from 15 minutes)
-      // This is a more realistic window for TR-069 devices which may have longer check-in intervals
+      // Consider a device online if last contact was within the last 5 minutes
+      // This is a realistic window for TR-069 devices that should check in regularly
       const lastContact = new Date(lastContactTime);
-      const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
       
-      return lastContact > threeHoursAgo ? 'online' : 'offline';
+      console.log(`Last contact: ${lastContact}, Five minutes ago: ${fiveMinutesAgo}`);
+      console.log(`Is device online? ${lastContact > fiveMinutesAgo}`);
+      
+      return lastContact > fiveMinutesAgo ? 'online' : 'offline';
     };
     
     // Initial status check based on device.lastContact
@@ -72,8 +75,8 @@ export const DeviceStats = ({ device }: DeviceStatsProps) => {
     // Check status when component mounts
     checkDeviceStatus();
     
-    // Set up an interval to periodically check status (every 60 seconds)
-    const interval = setInterval(checkDeviceStatus, 60000);
+    // Set up an interval to periodically check status (every 30 seconds)
+    const interval = setInterval(checkDeviceStatus, 30000);
     
     return () => clearInterval(interval);
   }, [device.id, device.lastContact]);
