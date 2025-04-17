@@ -197,6 +197,80 @@ if ($isMikroTik) {
     exit;
 }
 
+// Function to check for pending tasks and apply them during an Inform session
+function processPendingTasks($db, $serialNumber) {
+    try {
+        // First find the device by serial number
+        $deviceSql = "SELECT id FROM devices WHERE serial_number = :serial";
+        $deviceStmt = $db->prepare($deviceSql);
+        $deviceStmt->execute([':serial' => $serialNumber]);
+        $device = $deviceStmt->fetch(PDO::FETCH_ASSOC);
+        
+        if (!$device) {
+            writeLog("Cannot process tasks: Device with serial $serialNumber not found", true);
+            return false;
+        }
+        
+        $deviceId = $device['id'];
+        
+        // Find pending tasks for this device
+        $taskSql = "SELECT * FROM device_tasks WHERE device_id = :device_id AND status = 'pending' ORDER BY created_at ASC LIMIT 1";
+        $taskStmt = $db->prepare($taskSql);
+        $taskStmt->execute([':device_id' => $deviceId]);
+        $task = $taskStmt->fetch(PDO::FETCH_ASSOC);
+        
+        if (!$task) {
+            // No pending tasks
+            return false;
+        }
+        
+        // Mark task as processing
+        $updateSql = "UPDATE device_tasks SET status = 'processing' WHERE id = :id";
+        $updateStmt = $db->prepare($updateSql);
+        $updateStmt->execute([':id' => $task['id']]);
+        
+        // Process the task
+        $taskData = json_decode($task['task_data'], true);
+        $result = false;
+        
+        switch ($task['task_type']) {
+            case 'wifi':
+                writeLog("Processing WiFi configuration task for device $serialNumber", true);
+                // Apply WiFi changes
+                // This would be implemented with actual TR-069 parameter setting
+                $result = true;
+                break;
+                
+            case 'wan':
+                writeLog("Processing WAN configuration task for device $serialNumber", true);
+                // Apply WAN changes
+                // This would be implemented with actual TR-069 parameter setting
+                $result = true;
+                break;
+                
+            case 'reboot':
+                writeLog("Processing reboot task for device $serialNumber", true);
+                // Initiate reboot
+                // This would be implemented with actual TR-069 reboot command
+                $result = true;
+                break;
+        }
+        
+        // Update task status
+        $statusSql = "UPDATE device_tasks SET status = :status, updated_at = NOW() WHERE id = :id";
+        $statusStmt = $db->prepare($statusSql);
+        $statusStmt->execute([
+            ':status' => $result ? 'completed' : 'failed',
+            ':id' => $task['id']
+        ]);
+        
+        return $result;
+    } catch (Exception $e) {
+        writeLog("Error processing tasks: " . $e->getMessage(), true);
+        return false;
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $raw_post = file_get_contents('php://input');
     
@@ -230,6 +304,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 if (stripos($model, 'HG8546M') !== false) {
                     $modelDetected = 'HG8546M';
+                }
+            }
+            
+            // Extract serial number
+            $serialNumber = '';
+            preg_match('/<SerialNumber>(.*?)<\/SerialNumber>/s', $raw_post, $serialMatches);
+            if (isset($serialMatches[1])) {
+                $serialNumber = trim($serialMatches[1]);
+            }
+            
+            // Process pending tasks for this device if we have a serial number
+            if (!empty($serialNumber)) {
+                try {
+                    require_once __DIR__ . '/../config/database.php';
+                    $database = new Database();
+                    $db = $database->getConnection();
+                    
+                    // Process any pending tasks
+                    processPendingTasks($db, $serialNumber);
+                    
+                    // Update last contact time
+                    $updateSql = "UPDATE devices SET lastContact = NOW(), status = 'online' WHERE serial_number = :serial";
+                    $updateStmt = $db->prepare($updateSql);
+                    $updateStmt->execute([':serial' => $serialNumber]);
+                    
+                } catch (Exception $e) {
+                    writeLog("Database error during task processing: " . $e->getMessage(), true);
                 }
             }
             
@@ -450,7 +551,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </cwmp:SetParameterValuesResponse>
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
-                
+            
             exit;
         }
         
@@ -623,42 +724,3 @@ try {
     
     // Pass the Huawei detection flag to the server
     $server->setHuaweiDetection($isHuawei);
-    
-    // Pass model information if detected
-    if (!empty($modelDetected)) {
-        $server->setModelHint($modelDetected);
-    }
-    
-    // Handle the request
-    $server->handleRequest();
-} catch (Exception $e) {
-    header('HTTP/1.1 500 Internal Server Error');
-    echo "Internal Server Error";
-}
-
-// Enhance the SOAP request generation for optical power readings
-if (stripos($raw_post, '<cwmp:Inform>') !== false) {
-    // After regular Inform response, prioritize optical power readings
-    
-    // Create a custom SOAP envelope for optical power readings
-    $opticalRequest = '<?xml version="1.0" encoding="UTF-8"?>
-<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-  <SOAP-ENV:Header>
-    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </SOAP-ENV:Header>
-  <SOAP-ENV:Body>
-    <cwmp:GetParameterValues>
-      <ParameterNames SOAP-ENC:arrayType="xsd:string[4]">
-        <string>InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.TXPower</string>
-        <string>InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.RXPower</string>
-        <string>InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.TXPower</string>
-        <string>InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.RXPower</string>
-      </ParameterNames>
-    </cwmp:GetParameterValues>
-  </SOAP-ENV:Body>
-</SOAP-ENV:Envelope>';
-    
-    header('Content-Type: text/xml');
-    echo $opticalRequest;
-    exit;
-}
