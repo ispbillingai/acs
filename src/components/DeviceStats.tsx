@@ -20,12 +20,11 @@ export const DeviceStats = ({ device }: DeviceStatsProps) => {
     const determineStatus = (lastContactTime: string | undefined): 'online' | 'offline' | 'unknown' => {
       if (!lastContactTime) return 'unknown';
       
-      // Consider a device online if last contact was within the last 3 hours (changed from 15 minutes)
-      // This is a more realistic window for TR-069 devices which may have longer check-in intervals
+      // Consider a device online if last contact was within the last 15 minutes
       const lastContact = new Date(lastContactTime);
-      const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
+      const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
       
-      return lastContact > threeHoursAgo ? 'online' : 'offline';
+      return lastContact > fifteenMinutesAgo ? 'online' : 'offline';
     };
     
     // Initial status check based on device.lastContact
@@ -159,9 +158,6 @@ export const DeviceStats = ({ device }: DeviceStatsProps) => {
         {device.lastContact && (
           <p className="text-xs text-gray-500 mt-1">
             Last contact: {getLastContactTime(device.lastContact)}
-            <span className="block mt-1 text-xs italic">
-              ({new Date(device.lastContact).toLocaleString()})
-            </span>
           </p>
         )}
       </Card>
