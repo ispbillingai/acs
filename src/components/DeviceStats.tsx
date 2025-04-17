@@ -9,22 +9,15 @@ interface DeviceStatsProps {
 }
 
 export const DeviceStats = ({ device }: DeviceStatsProps) => {
-  const [currentStatus, setCurrentStatus] = useState(device.status || 'unknown');
+  const [currentStatus, setCurrentStatus] = useState(device.status);
   const [lastChecked, setLastChecked] = useState<string | null>(null);
-
-  // Log device data for debugging
-  console.log("DeviceStats received device:", device);
 
   // Check actual device status in case the displayed status is incorrect
   useEffect(() => {
     const checkDeviceStatus = async () => {
-      if (!device.id) {
-        console.log("No device ID available, skipping status check");
-        return;
-      }
+      if (!device.id) return;
       
       try {
-        console.log("Checking status for device ID:", device.id);
         const formData = new FormData();
         formData.append('device_id', device.id.toString());
         formData.append('action', 'check_connection');
@@ -35,11 +28,13 @@ export const DeviceStats = ({ device }: DeviceStatsProps) => {
         });
         
         const result = await response.json();
-        console.log("Device status check result:", result);
         
         if (result.success && result.connection_status) {
           setCurrentStatus(result.connection_status.success ? 'online' : 'offline');
           setLastChecked(new Date().toLocaleString());
+          
+          // Log for debugging
+          console.log("Device status check:", result.connection_status);
         }
       } catch (error) {
         console.error("Error checking device status:", error);
