@@ -11,7 +11,6 @@ class SessionManager {
         $this->logger = $logger;
         session_start();
         $this->logger->logToFile("Session started/resumed with ID: " . session_id());
-        error_log("TR-069: Session started/resumed with ID: " . session_id());
     }
 
     public function startNewSession($serialNumber) {
@@ -28,7 +27,6 @@ class SessionManager {
         }
         
         $this->logger->logToFile("Started new session for device: $serialNumber with session ID: " . session_id());
-        error_log("TR-069: Started new session for device: $serialNumber with session ID: " . session_id());
     }
 
     public function getCurrentTask() {
@@ -40,7 +38,6 @@ class SessionManager {
     public function setCurrentTask($task) {
         $_SESSION['current_task'] = $task;
         $this->logger->logToFile("Set current task: " . ($task ? $task['task_type'] . ' (ID: ' . $task['id'] . ')' : 'null'));
-        error_log("TR-069: Set current task: " . ($task ? $task['task_type'] . ' (ID: ' . $task['id'] . ')' : 'null'));
     }
 
     public function getCurrentSessionDeviceSerial() {
@@ -51,7 +48,6 @@ class SessionManager {
 
     public function cleanupSession() {
         $this->logger->logToFile("Cleaning up session with ID: " . session_id());
-        error_log("TR-069: Cleaning up session with ID: " . session_id());
         session_destroy();
         $this->logger->logToFile("Session cleaned up");
     }
