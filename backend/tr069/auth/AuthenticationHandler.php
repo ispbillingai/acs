@@ -36,7 +36,7 @@ class AuthenticationHandler {
                 return true;
             }
             
-            $this->writeLog("TR-069 AUTHENTICATION FAILED: Invalid credentials from " . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
+            $this->writeLog("TR-069 AUTHENTICATION FAILED: Invalid credentials from " . ($_SERVER['REMOTE_ADDR'] ?? 'unknown') . " (User: $username)");
         } catch (Exception $e) {
             $this->writeLog("TR-069 AUTHENTICATION ERROR: " . $e->getMessage());
         }

@@ -9,12 +9,33 @@ $response = ['success' => false, 'message' => 'Invalid request'];
 
 // Set path for the main device log file
 $deviceLogFile = __DIR__ . '/../../device.log';
+$tr069CommunicationLogFile = __DIR__ . '/../../tr069_communications.log';
 
 // Helper function to write to the device log
 function writeToDeviceLog($message) {
     global $deviceLogFile;
     $timestamp = date('Y-m-d H:i:s');
     file_put_contents($deviceLogFile, "$timestamp - $message\n", FILE_APPEND);
+}
+
+// Helper function to log TR-069 SOAP messages
+function logTR069Communication($message, $direction = 'OUT', $xmlContent = null) {
+    global $tr069CommunicationLogFile;
+    $timestamp = date('Y-m-d H:i:s');
+    $logEntry = "$timestamp - [$direction] $message\n";
+    
+    if ($xmlContent) {
+        $logEntry .= "--- XML Content ---\n$xmlContent\n-------------------\n";
+    }
+    
+    file_put_contents($tr069CommunicationLogFile, $logEntry, FILE_APPEND);
+    
+    // Also log important operations to main device log
+    if ($direction === 'OUT' && strpos($message, 'SetParameterValues') !== false) {
+        writeToDeviceLog("TR-069 SENT: $message");
+    } elseif ($direction === 'IN' && strpos($message, 'SetParameterValuesResponse') !== false) {
+        writeToDeviceLog("TR-069 RECEIVED: $message");
+    }
 }
 
 try {
@@ -91,14 +112,58 @@ try {
             // Generate session ID for this transaction
             $sessionId = 'wifi-' . substr(md5(time() . $deviceId), 0, 12);
             
-            // Create complete TR-069 debug workflow
-            $workflowData = $responseGenerator->createDebugWorkflow($sessionId, $ssid, $password);
+            // Create TR-069 parameters with correct paths
+            $parameterStructs = [
+                [
+                    'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
+                    'value' => $ssid,
+                    'type' => 'xsd:string'
+                ]
+            ];
+            
+            // Add password parameter if provided, trying both parameter paths
+            if (!empty($password)) {
+                // Try the standard KeyPassphrase parameter
+                $parameterStructs[] = [
+                    'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
+                    'value' => $password,
+                    'type' => 'xsd:string'
+                ];
+                
+                // Also try the alternative path with PreSharedKey
+                $parameterStructs[] = [
+                    'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
+                    'value' => $password,
+                    'type' => 'xsd:string'
+                ];
+                
+                // Ensure WPA security is enabled
+                $parameterStructs[] = [
+                    'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
+                    'value' => 'WPAand11i',
+                    'type' => 'xsd:string'
+                ];
+                
+                // Ensure WPA encryption is set correctly
+                $parameterStructs[] = [
+                    'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.WPAEncryptionModes',
+                    'value' => 'AESEncryption',
+                    'type' => 'xsd:string'
+                ];
+            }
+            
+            // Create complete TR-069 SOAP message
+            $soapRequest = $responseGenerator->createDetailedSetParameterValuesRequest($sessionId, $parameterStructs);
+            
+            // Log the SOAP request
+            logTR069Communication("SetParameterValues request for WiFi configuration (Session: $sessionId)", "OUT", $soapRequest);
             
             // Log the workflow session
             writeToDeviceLog("TR-069 SESSION STARTED: ID=$sessionId for WiFi configuration");
             writeToDeviceLog("TR-069 PARAMETER SET: InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID=$ssid");
             if (!empty($password)) {
                 writeToDeviceLog("TR-069 PARAMETER SET: InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase=[password]");
+                writeToDeviceLog("TR-069 PARAMETER SET: InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase=[password]");
             }
             
             // Common connection request ports for Huawei devices
@@ -124,18 +189,43 @@ try {
                 $connectionRequestUrl
             );
             
+            // Log the connection request
+            logTR069Communication("Connection Request to initiate session (URL: $connectionRequestUrl)", "OUT", $connectionRequest);
+            
             // Update device in database with new WiFi settings (pending)
             try {
-                $updateStmt = $db->prepare("UPDATE devices SET 
-                    ssid = :ssid, 
-                    ssid_password = :password,
-                    tr069_last_transaction = :transaction,
-                    tr069_last_attempt = NOW()
-                    WHERE id = :id");
-                    
+                // Check if the new columns exist in the table
+                $columnsExist = true;
+                try {
+                    $columnCheck = $db->query("SHOW COLUMNS FROM devices LIKE 'tr069_last_transaction'");
+                    if ($columnCheck->rowCount() == 0) {
+                        $columnsExist = false;
+                    }
+                } catch (Exception $e) {
+                    $columnsExist = false;
+                }
+                
+                // Define the SQL statement based on whether the columns exist
+                if ($columnsExist) {
+                    $sql = "UPDATE devices SET 
+                        ssid = :ssid, 
+                        ssid_password = :password,
+                        tr069_last_transaction = :transaction,
+                        tr069_last_attempt = NOW()
+                        WHERE id = :id";
+                } else {
+                    $sql = "UPDATE devices SET 
+                        ssid = :ssid, 
+                        ssid_password = :password
+                        WHERE id = :id";
+                }
+                
+                $updateStmt = $db->prepare($sql);
                 $updateStmt->bindParam(':ssid', $ssid);
                 $updateStmt->bindParam(':password', $password);
-                $updateStmt->bindParam(':transaction', $sessionId);
+                if ($columnsExist) {
+                    $updateStmt->bindParam(':transaction', $sessionId);
+                }
                 $updateStmt->bindParam(':id', $deviceId);
                 $updateStmt->execute();
                 
@@ -150,7 +240,12 @@ try {
                 'success' => true,
                 'message' => 'WiFi configuration has been prepared. Use the connection request to initiate a TR-069 session.',
                 'connection_request' => $connectionRequest,
-                'tr069_session_id' => $sessionId
+                'tr069_session_id' => $sessionId,
+                'debug_info' => [
+                    'attempted_parameters' => array_map(function($p) {
+                        return $p['name'] . '=' . ($p['name'] === 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase' ? '[HIDDEN]' : $p['value']);
+                    }, $parameterStructs)
+                ]
             ];
             
             writeToDeviceLog("FRONTEND RESPONSE: WiFi configuration prepared successfully for device {$device['serial_number']}");
@@ -440,45 +535,81 @@ function createRebootRequest() {
 
 // Updated simulateTR069Request to always use admin credentials if provided
 function simulateTR069Request($deviceUrl, $soapRequest, $username = 'admin', $password = 'admin') {
-    global $deviceLogFile;
+    global $deviceLogFile, $tr069CommunicationLogFile;
     
     try {
         // Log attempt to send request
         writeToDeviceLog("TR-069 REQUEST: Sending to $deviceUrl");
+        logTR069Communication("Attempting connection to $deviceUrl", "OUT");
         
-        // For testing purposes, simulate a successful request since we're in development
-        if (defined('SIMULATE_TR069_SUCCESS') || true) {
-            writeToDeviceLog("TR-069 SIMULATION: Direct connection simulated (development mode)");
-            return true; // Always simulate success in test environment
-        }
-        
-        // Real implementation would make an actual connection attempt
+        // For testing purposes, we'll attempt a real connection
         $context = stream_context_create([
             'http' => [
                 'method' => 'POST',
                 'header' => 'Content-Type: text/xml; charset=utf-8' . 
                     "\r\nAuthorization: Basic " . base64_encode("$username:$password"),
                 'content' => $soapRequest,
-                'timeout' => 5, // Short timeout for testing
+                'timeout' => 10, // Increased timeout for real-world network conditions
+                'ignore_errors' => true, // Capture error responses
             ]
         ]);
         
+        // Log request data
+        logTR069Communication("TR-069 Request Headers", "OUT", print_r(get_headers($deviceUrl, 1), true));
+        
+        // Attempt the actual connection
         $result = @file_get_contents($deviceUrl, false, $context);
+        
+        // Get response code
+        if (isset($http_response_header)) {
+            $statusLine = $http_response_header[0];
+            preg_match('{HTTP/\S*\s(\d+)}', $statusLine, $match);
+            $statusCode = $match[1] ?? 'unknown';
+            
+            // Log response headers
+            logTR069Communication("TR-069 Response Headers (Status: $statusCode)", "IN", print_r($http_response_header, true));
+        } else {
+            $statusCode = 'connection failed';
+        }
         
         if ($result !== false) {
             // Request succeeded
-            writeToDeviceLog("TR-069 RESPONSE: Received response from device");
+            writeToDeviceLog("TR-069 RESPONSE: Received response from device (Status: $statusCode)");
+            logTR069Communication("TR-069 Response Body", "IN", $result);
+            
+            // Check for fault in the response
+            if (stripos($result, '<SOAP-ENV:Fault>') !== false || stripos($result, '<cwmp:Fault>') !== false) {
+                preg_match('/<FaultCode>(.*?)<\/FaultCode>.*?<FaultString>(.*?)<\/FaultString>/s', $result, $faultMatches);
+                if (!empty($faultMatches)) {
+                    $faultCode = $faultMatches[1] ?? 'Unknown';
+                    $faultString = $faultMatches[2] ?? 'Unknown error';
+                    writeToDeviceLog("TR-069 FAULT: Code=$faultCode, Message=$faultString");
+                    return false;
+                }
+            }
+            
             return true;
         } else {
             // Request failed
-            writeToDeviceLog("TR-069 ERROR: Connection failed");
+            writeToDeviceLog("TR-069 ERROR: Connection failed or returned error (Status: $statusCode)");
+            logTR069Communication("TR-069 Connection Failed", "ERROR", "Status: $statusCode");
             return false;
         }
     } catch (Exception $e) {
         // Log the error but continue
         writeToDeviceLog("TR-069 ERROR: " . $e->getMessage());
+        logTR069Communication("TR-069 Exception", "ERROR", $e->getMessage());
         return false;
     }
+}
+
+// Updated function to enable enhanced logging in InformResponseGenerator
+InformResponseGenerator::$enableDetailedLogging = true;
+
+// Add a new helper function to attempt TR-069 parameter changes directly
+function attemptDirectParameterChange($deviceUrl, $soapRequest, $username = 'admin', $password = 'admin') {
+    // Use enhanced simulateTR069Request with detailed logging
+    return simulateTR069Request($deviceUrl, $soapRequest, $username, $password);
 }
 
 echo json_encode($response);
