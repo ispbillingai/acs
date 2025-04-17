@@ -219,46 +219,10 @@ try {
             break;
 
         case 'connection_request':
-            $username = $_POST['username'] ?? '';
-            $password = $_POST['password'] ?? '';
-            
-            if (empty($username)) {
-                throw new Exception("Connection Request Username cannot be empty");
-            }
-            
-            if (empty($password)) {
-                throw new Exception("Connection Request Password cannot be empty");
-            }
-            
-            // Log connection request settings change
-            $logEntry = date('Y-m-d H:i:s') . " - Device $deviceId: Connection Request settings changed\n";
-            $logEntry .= "  New Username: $username\n";
-            $logEntry .= "  Password Length: " . strlen($password) . " characters\n";
-            file_put_contents($logFile, $logEntry, FILE_APPEND);
-            
-            // Update connection request credentials in database
-            // First check if the columns exist
-            try {
-                $checkStmt = $db->query("SHOW COLUMNS FROM devices LIKE 'connection_request_username'");
-                $columnExists = $checkStmt->fetchColumn() !== false;
-                
-                if (!$columnExists) {
-                    // Add the columns if they don't exist
-                    $db->exec("ALTER TABLE devices ADD COLUMN connection_request_username VARCHAR(255)");
-                    $db->exec("ALTER TABLE devices ADD COLUMN connection_request_password VARCHAR(255)");
-                }
-                
-                // Now update the credentials
-                $updateStmt = $db->prepare("UPDATE devices SET connection_request_username = :username, connection_request_password = :password WHERE id = :id");
-                $updateStmt->bindParam(':username', $username);
-                $updateStmt->bindParam(':password', $password);
-                $updateStmt->bindParam(':id', $deviceId);
-                $updateStmt->execute();
-                
-                $response = ['success' => true, 'message' => 'Connection Request settings updated successfully'];
-            } catch (PDOException $e) {
-                throw new Exception("Database error: " . $e->getMessage());
-            }
+            $response = [
+                'success' => true, 
+                'message' => 'Connection request configuration is now managed through ACS Inform interval'
+            ];
             break;
 
         case 'reboot':

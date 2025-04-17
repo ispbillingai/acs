@@ -11,6 +11,7 @@ class AuthenticationHandler {
     }
 
     public function authenticate() {
+        // Simplified authentication using only ACS credentials
         if (!isset($_SERVER['PHP_AUTH_USER']) || !isset($_SERVER['PHP_AUTH_PW'])) {
             return false;
         }
@@ -27,7 +28,7 @@ class AuthenticationHandler {
                 return true;
             }
         } catch (Exception $e) {
-            error_log("TR069 Authentication Error: " . $e->getMessage());
+            error_log("TR-069 Authentication Error: " . $e->getMessage());
         }
         
         return false;
