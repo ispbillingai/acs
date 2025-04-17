@@ -9,9 +9,6 @@ ini_set('display_errors', 0);  // <-- change to 1 only while debugging
 ini_set('log_errors', 1);
 ini_set('error_log', '/var/log/apache2/tr069_error.log'); // Ensure Apache can write to this file
 
-// Include the XMLGenerator class
-require_once __DIR__ . '/tr069/core/XMLGenerator.php';
-
 // Log function that writes to error_log and optionally to a custom file
 function tr069_debug_log($message, $level = 'INFO') {
     $timestamp = date('Y-m-d H:i:s');
@@ -21,8 +18,58 @@ function tr069_debug_log($message, $level = 'INFO') {
     error_log($formatted);
     
     // Also log to a custom file if available
-    $log_file = __DIR__ . '/retrieve.log';
-    file_put_contents($log_file, $formatted . "\n", FILE_APPEND);
+    $log_file = __DIR__ . '/tr069_debug.log';
+    if (is_writable(dirname($log_file))) {
+        file_put_contents($log_file, $formatted . "\n", FILE_APPEND);
+    }
+}
+
+/* ---------- helper: build empty envelope ----------------------- */
+function empty_rpc($id = null)
+{
+    $id = $id ?: uniqid();
+    return '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+   xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+   xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+ <soapenv:Header>
+   <cwmp:ID soapenv:mustUnderstand="1">'.$id.'</cwmp:ID>
+ </soapenv:Header>
+ <soapenv:Body/>
+</soapenv:Envelope>';
+}
+
+/* ---------- helper: inner GetParameterValues block ------------- */
+function gpv_block(array $names, $id = null)
+{
+    $id = $id ?: uniqid();
+    $list = '';
+    foreach ($names as $n) {
+        $list .= "\n      <string>".htmlspecialchars($n)."</string>";
+    }
+
+    return '<cwmp:GetParameterValues>
+      <ParameterNames soap-enc:arrayType="xsd:string['.count($names).']" xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">'.
+        $list.'
+      </ParameterNames>
+    </cwmp:GetParameterValues>';
+}
+
+/* ---------- helper: InformResponse envelope -------------------- */
+function inform_response($soapId)
+{
+    return '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+                  xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">'.$soapId.'</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:InformResponse>
+      <MaxEnvelopes>1</MaxEnvelopes>
+    </cwmp:InformResponse>
+  </soapenv:Body>
+</soapenv:Envelope>';
 }
 
 /* ---------- main entry ----------------------------------------- */
@@ -36,11 +83,6 @@ $contentLength = isset($_SERVER['CONTENT_LENGTH']) ? (int)$_SERVER['CONTENT_LENG
 $rawLength = strlen($raw);
 
 tr069_debug_log("TR‑069 raw LEN=$rawLength (Content-Length=$contentLength) head=" . substr($raw, 0, 120), "DEBUG");
-
-// Save the complete raw request for debugging
-$requestLogFile = __DIR__ . '/tr069_request_' . date('Ymd_His') . '.xml';
-file_put_contents($requestLogFile, $raw);
-tr069_debug_log("Saved complete request to: $requestLogFile", "DEBUG");
 
 /* ---- INFORM ----------------------------------------------------*/
 if (stripos($raw, '<cwmp:Inform>') !== false) {
@@ -66,11 +108,31 @@ if (stripos($raw, '<cwmp:Inform>') !== false) {
     ];
     tr069_debug_log("Requesting parameters: " . implode(', ', $need), "DEBUG");
 
-    // Use XMLGenerator to create the compound response
-    $compound = XMLGenerator::generateCompoundInformResponseWithGPV($soapId, $need);
-    tr069_debug_log("Generated compound response, length: " . strlen($compound), "DEBUG");
-    tr069_debug_log("TR‑069 sending compound response (first 200): " . substr($compound, 0, 200), "DEBUG");
+    // build InformResponse
+    $resp = inform_response($soapId);
+    tr069_debug_log("Built InformResponse, length: " . strlen($resp), "DEBUG");
 
+    // normalise closing tag (no whitespace)
+    $resp = preg_replace('~\s+</([A-Za-z0-9_-]+):Body>~', '</$1:Body>', $resp, 1);
+
+    // inject GPV before </*:Body>
+    $gpvXml = gpv_block($need);
+    tr069_debug_log("Generated GPV block: " . $gpvXml, "DEBUG");
+    
+    $compound = preg_replace(
+        '~</([A-Za-z0-9_-]+):Body>~',
+        $gpvXml . "\n  </$1:Body>",
+        $resp,
+        1
+    );
+
+    if ($compound === $resp) {
+        tr069_debug_log("ERROR: Failed to inject GetParameterValues into InformResponse", "ERROR");
+    } else {
+        tr069_debug_log("Successfully created compound response with GetParameterValues", "INFO");
+    }
+
+    tr069_debug_log("TR‑069 sending compound response (first 200): " . substr($compound, 0, 200), "DEBUG");
     header('Content-Type: text/xml'); 
     echo $compound; 
     exit;
@@ -80,11 +142,6 @@ if (stripos($raw, '<cwmp:Inform>') !== false) {
 if (stripos($raw, '<cwmp:GetParameterValuesResponse') !== false) {
     tr069_debug_log("Received GetParameterValuesResponse", "INFO");
     tr069_debug_log("GPV‑RESPONSE head=" . substr($raw, 0, 200), "DEBUG");
-    
-    // Save the complete response for analysis
-    $responseLogFile = __DIR__ . '/tr069_gpv_response_' . date('Ymd_His') . '.xml';
-    file_put_contents($responseLogFile, $raw);
-    tr069_debug_log("Saved GPV response to: $responseLogFile", "DEBUG");
     
     // Extract and log parameters for debugging
     preg_match_all('/<ParameterValueStruct>\s*<Name>(.*?)<\/Name>\s*<Value[^>]*>(.*?)<\/Value>\s*<\/ParameterValueStruct>/s', $raw, $params, PREG_SET_ORDER);
@@ -100,54 +157,14 @@ if (stripos($raw, '<cwmp:GetParameterValuesResponse') !== false) {
         tr069_debug_log("No parameters found in GetParameterValuesResponse", "WARNING");
     }
     
-    // Extract SOAP ID
-    preg_match('~<cwmp:ID [^>]*>(.*?)</cwmp:ID>~', $raw, $m);
-    $soapId = $m[1] ?? uniqid();
-    
-    // Return empty response
-    $emptyResponse = XMLGenerator::generateEmptyResponse($soapId);
+    // TODO: parse and store values here
     header('Content-Type: text/xml'); 
-    echo $emptyResponse; 
+    echo empty_rpc(); 
     exit;
 }
 
 /* ---- any other SOAP (SetParameterValuesResponse etc.) ----------*/
 tr069_debug_log("Received unhandled SOAP message type, first 100 chars: " . substr($raw, 0, 100), "INFO");
-
-// Extract SOAP ID if possible
-preg_match('~<cwmp:ID [^>]*>(.*?)</cwmp:ID>~', $raw, $m);
-$soapId = $m[1] ?? uniqid();
-
-// For empty POST requests, try to detect device based on HTTP headers
-if (empty($raw) || $rawLength < 10) {
-    tr069_debug_log("Empty or near-empty POST received, content length: $rawLength", "WARNING");
-    
-    // Log all headers for debugging
-    $headers = getallheaders();
-    foreach ($headers as $name => $value) {
-        tr069_debug_log("Header: $name = $value", "DEBUG");
-    }
-    
-    // Check if there's a device serial in the User-Agent
-    $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
-    tr069_debug_log("User-Agent: $userAgent", "DEBUG");
-    
-    // Return a GetParameterValues request for common parameters
-    $need = [
-        'InternetGatewayDevice.DeviceInfo.UpTime',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
-        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress',
-        'InternetGatewayDevice.DeviceInfo.SoftwareVersion',
-        'InternetGatewayDevice.DeviceInfo.HardwareVersion'
-    ];
-    
-    $getParamRequest = XMLGenerator::generateFullGetParameterValuesRequestXML(uniqid(), $need);
-    tr069_debug_log("Sending GetParameterValues request for empty POST", "INFO");
-    header('Content-Type: text/xml'); 
-    echo $getParamRequest; 
-    exit;
-}
-
 header('Content-Type: text/xml'); 
-echo XMLGenerator::generateEmptyResponse($soapId); 
+echo empty_rpc(); 
 exit;
