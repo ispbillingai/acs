@@ -238,6 +238,7 @@ try {
                     
                     exit;
                 } elseif ($parameterRequest['method'] === 'Reboot') {
+                    // Create a custom reboot request using the SOAP format
                     $rebootRequest = '<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope
     xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
@@ -254,6 +255,8 @@ try {
   </soapenv:Body>
 </soapenv:Envelope>';
 
+                    tr069_log("Sending reboot command with key: " . $parameterRequest['commandKey'], "INFO");
+                    
                     header('Content-Type: text/xml');
                     echo $rebootRequest;
                     

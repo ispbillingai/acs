@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { PowerOff, AlertTriangle } from "lucide-react";
+import { PowerOff, AlertTriangle, RefreshCw } from "lucide-react";
 import {
   Alert,
   AlertDescription,
@@ -82,7 +82,7 @@ const RebootConfiguration: React.FC<RebootConfigurationProps> = ({
     <div>
       <h3 className="text-lg font-bold mb-3 flex items-center gap-2">
         <PowerOff className="h-5 w-5" />
-        Device Control
+        Device Reboot
       </h3>
       
       <div className="space-y-4">
@@ -91,6 +91,7 @@ const RebootConfiguration: React.FC<RebootConfigurationProps> = ({
           <AlertTitle className="text-red-800">Device Reboot Warning</AlertTitle>
           <AlertDescription className="text-red-700 text-sm">
             Rebooting the device will disconnect all users and services. This operation typically takes 1-2 minutes to complete.
+            After reboot, the device will reconnect automatically to the ACS server.
           </AlertDescription>
         </Alert>
         
@@ -113,10 +114,15 @@ const RebootConfiguration: React.FC<RebootConfigurationProps> = ({
         >
           {configuring ? (
             <>
-              <span className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full mr-2"></span>
+              <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
               Processing...
             </>
-          ) : "Reboot Device"}
+          ) : (
+            <>
+              <PowerOff className="h-4 w-4 mr-2" />
+              Reboot Device
+            </>
+          )}
         </Button>
       </div>
     </div>

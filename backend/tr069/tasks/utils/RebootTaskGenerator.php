@@ -10,8 +10,13 @@ class RebootTaskGenerator {
     }
     
     public function generateParameters($data) {
+        // Get the reboot reason from the task data or use a default
         $reason = $data['reboot_reason'] ?? 'User initiated reboot';
-        $commandKey = 'Reboot-' . substr(md5(time()), 0, 8);
+        
+        // Generate a unique command key with timestamp and current date
+        $timestamp = time();
+        $date = date('Ymd', $timestamp);
+        $commandKey = "manual-reboot-{$date}-" . substr(md5($timestamp), 0, 8);
         
         $this->logger->logToFile("Generated Reboot command with reason: $reason, CommandKey: $commandKey");
         
