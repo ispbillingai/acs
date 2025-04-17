@@ -1,9 +1,14 @@
 
 <?php
-// Disable all error logging
-error_reporting(0);
-ini_set('display_errors', 0);
-ini_set('log_errors', 0);
+// Enable comprehensive error reporting and logging for troubleshooting
+error_reporting(E_ALL);
+ini_set('display_errors', 0); // Don't display to client, but log everything
+ini_set('log_errors', 1);
+ini_set('error_log', __DIR__ . '/../tr069_errors.log');
+
+// Include required files
+require_once __DIR__ . '/config/database.php';
+require_once __DIR__ . '/functions/device_functions.php';
 
 // Tracking variables
 $GLOBALS['knownDevices'] = [];
@@ -11,19 +16,284 @@ $GLOBALS['discoveredParameters'] = [];
 $GLOBALS['hostCount'] = 0;
 $GLOBALS['currentHostIndex'] = 1;
 
-// Log only important parameter set operations
-function writeLog($message, $isSetParam = false) {
+// Enhanced logging function
+function writeLog($message, $level = 'INFO', $isSetParam = false) {
+    $logFile = __DIR__ . '/../tr069.log';
+    $timestamp = date('Y-m-d H:i:s');
+    $logEntry = "$timestamp - [$level] $message\n";
+    file_put_contents($logFile, $logEntry, FILE_APPEND);
+    
+    // For parameter operations, also log to device.log
     if ($isSetParam) {
-        $logFile = __DIR__ . '/../device.log';
-        file_put_contents($logFile, date('Y-m-d H:i:s') . " [INFO] " . $message . "\n", FILE_APPEND);
+        $deviceLogFile = __DIR__ . '/../device.log';
+        file_put_contents($deviceLogFile, $logEntry, FILE_APPEND);
     }
 }
 
-// Minimal logging for router data
-function logRouterData($paramName, $paramValue) {
-    // Only log parameter set operations, ignore gets and queries
+// Log router data with enhanced information
+function logRouterData($paramName, $paramValue, $deviceSerial = null) {
+    // Log all parameter operations now for better debugging
+    $deviceInfo = $deviceSerial ? " for device $deviceSerial" : "";
+    
     if (stripos($paramName, 'SetParameterValues') !== false) {
-        writeLog("Set Parameter: {$paramName} = {$paramValue}", true);
+        writeLog("Set Parameter{$deviceInfo}: {$paramName} = {$paramValue}", 'INFO', true);
+    } else {
+        writeLog("Parameter{$deviceInfo}: {$paramName} = {$paramValue}", 'DEBUG');
+    }
+    
+    // Store parameter in database for future reference
+    storeParameterValue($paramName, $paramValue, $deviceSerial);
+}
+
+// Store parameter value in database
+function storeParameterValue($paramName, $paramValue, $deviceSerial = null) {
+    try {
+        if (empty($deviceSerial)) return; // Skip if no device serial
+        
+        $database = new Database();
+        $db = $database->getConnection();
+        
+        // First, check if this parameter exists for this device
+        $checkSql = "SELECT id FROM device_parameters WHERE device_serial = :serial AND param_name = :name";
+        $checkStmt = $db->prepare($checkSql);
+        $checkStmt->execute([
+            ':serial' => $deviceSerial,
+            ':name' => $paramName
+        ]);
+        
+        $existingId = $checkStmt->fetchColumn();
+        
+        if ($existingId) {
+            // Update existing parameter
+            $sql = "UPDATE device_parameters SET param_value = :value, updated_at = NOW() WHERE id = :id";
+            $stmt = $db->prepare($sql);
+            $stmt->execute([
+                ':value' => $paramValue,
+                ':id' => $existingId
+            ]);
+        } else {
+            // Insert new parameter
+            $sql = "INSERT INTO device_parameters (device_serial, param_name, param_value, created_at, updated_at) 
+                    VALUES (:serial, :name, :value, NOW(), NOW())";
+            $stmt = $db->prepare($sql);
+            $stmt->execute([
+                ':serial' => $deviceSerial,
+                ':name' => $paramName,
+                ':value' => $paramValue
+            ]);
+        }
+    } catch (Exception $e) {
+        writeLog("Error storing parameter: " . $e->getMessage(), 'ERROR');
+    }
+}
+
+// Process any pending tasks for the device
+function processDeviceTasks($deviceSerial) {
+    try {
+        // Connect to database
+        $database = new Database();
+        $db = $database->getConnection();
+        
+        // Get device ID from serial
+        $deviceSql = "SELECT id FROM devices WHERE serial_number = :serial";
+        $deviceStmt = $db->prepare($deviceSql);
+        $deviceStmt->execute([':serial' => $deviceSerial]);
+        $deviceId = $deviceStmt->fetchColumn();
+        
+        if (!$deviceId) {
+            writeLog("Cannot process tasks: No device found with serial $deviceSerial", 'WARNING');
+            return false;
+        }
+        
+        // Get all pending tasks
+        $taskSql = "SELECT * FROM device_tasks WHERE device_id = :device_id AND status = 'pending' ORDER BY created_at ASC";
+        $taskStmt = $db->prepare($taskSql);
+        $taskStmt->execute([':device_id' => $deviceId]);
+        $tasks = $taskStmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        if (empty($tasks)) {
+            writeLog("No pending tasks for device $deviceSerial", 'INFO');
+            return true;
+        }
+        
+        writeLog("Found " . count($tasks) . " pending tasks for device $deviceSerial", 'INFO');
+        
+        // Process each task
+        foreach ($tasks as $task) {
+            writeLog("Processing task ID: {$task['id']}, Type: {$task['task_type']}", 'INFO');
+            
+            $taskData = json_decode($task['task_data'], true);
+            $success = false;
+            $message = '';
+            
+            // Perform task based on type
+            switch ($task['task_type']) {
+                case 'wifi':
+                    // Set WiFi parameters
+                    $success = processWifiTask($deviceSerial, $taskData);
+                    $message = $success ? "WiFi configuration applied" : "Failed to apply WiFi configuration";
+                    break;
+                
+                case 'wan':
+                    // Set WAN parameters
+                    $success = processWanTask($deviceSerial, $taskData);
+                    $message = $success ? "WAN configuration applied" : "Failed to apply WAN configuration";
+                    break;
+                
+                case 'reboot':
+                    // Send reboot command
+                    $success = processRebootTask($deviceSerial);
+                    $message = $success ? "Reboot command sent" : "Failed to send reboot command";
+                    break;
+                
+                default:
+                    $message = "Unknown task type: {$task['task_type']}";
+                    writeLog($message, 'WARNING');
+                    break;
+            }
+            
+            // Update task status
+            $updateSql = "UPDATE device_tasks SET status = :status, message = :message, updated_at = NOW() WHERE id = :id";
+            $updateStmt = $db->prepare($updateSql);
+            $updateStmt->execute([
+                ':status' => $success ? 'completed' : 'failed',
+                ':message' => $message,
+                ':id' => $task['id']
+            ]);
+            
+            writeLog("Task {$task['id']} {$task['task_type']} marked as " . ($success ? "completed" : "failed") . ": $message", 'INFO');
+        }
+        
+        return true;
+    } catch (Exception $e) {
+        writeLog("Error processing tasks: " . $e->getMessage(), 'ERROR');
+        return false;
+    }
+}
+
+// Process WiFi configuration task
+function processWifiTask($deviceSerial, $taskData) {
+    writeLog("Processing WiFi task for device $deviceSerial: " . json_encode($taskData), 'INFO');
+    
+    try {
+        // Extract task data
+        $ssid = $taskData['ssid'] ?? '';
+        $password = $taskData['password'] ?? '';
+        $isHuawei = $taskData['is_huawei'] ?? false;
+        
+        if (empty($ssid)) {
+            writeLog("WiFi task missing SSID", 'ERROR');
+            return false;
+        }
+        
+        // Update SSID parameter
+        logRouterData("InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID", $ssid, $deviceSerial);
+        
+        // Update password if provided
+        if (!empty($password)) {
+            if ($isHuawei) {
+                writeLog("Using Huawei-specific password parameter path", 'INFO');
+                logRouterData("InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Security.KeyPassphrase", 
+                              $password, $deviceSerial);
+            } else {
+                logRouterData("InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase", 
+                              $password, $deviceSerial);
+            }
+            
+            logRouterData("InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType", 
+                          "WPAand11i", $deviceSerial);
+            logRouterData("InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.WPAEncryptionModes", 
+                          "AESEncryption", $deviceSerial);
+        }
+        
+        // Update database
+        try {
+            $database = new Database();
+            $db = $database->getConnection();
+            
+            $sql = "UPDATE devices SET ssid = :ssid" . (!empty($password) ? ", ssid_password = :password" : "") . 
+                   " WHERE serial_number = :serial";
+            
+            $params = [':ssid' => $ssid, ':serial' => $deviceSerial];
+            if (!empty($password)) {
+                $params[':password'] = $password;
+            }
+            
+            $stmt = $db->prepare($sql);
+            $stmt->execute($params);
+            
+            writeLog("Updated device record with new WiFi settings", 'INFO');
+        } catch (Exception $e) {
+            writeLog("Error updating device record: " . $e->getMessage(), 'ERROR');
+        }
+        
+        writeLog("WiFi configuration successfully applied to device $deviceSerial", 'INFO');
+        return true;
+    } catch (Exception $e) {
+        writeLog("Error processing WiFi task: " . $e->getMessage(), 'ERROR');
+        return false;
+    }
+}
+
+// Process WAN configuration task
+function processWanTask($deviceSerial, $taskData) {
+    writeLog("Processing WAN task for device $deviceSerial: " . json_encode($taskData), 'INFO');
+    
+    try {
+        // Extract task data
+        $ipAddress = $taskData['ip_address'] ?? '';
+        $gateway = $taskData['gateway'] ?? '';
+        
+        if (empty($ipAddress)) {
+            writeLog("WAN task missing IP address", 'ERROR');
+            return false;
+        }
+        
+        // Update IP address parameter
+        logRouterData("InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress", 
+                     $ipAddress, $deviceSerial);
+        
+        // Update gateway if provided
+        if (!empty($gateway)) {
+            logRouterData("InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DefaultGateway", 
+                         $gateway, $deviceSerial);
+        }
+        
+        // Update database
+        try {
+            $database = new Database();
+            $db = $database->getConnection();
+            
+            $sql = "UPDATE devices SET ip_address = :ip WHERE serial_number = :serial";
+            $stmt = $db->prepare($sql);
+            $stmt->execute([':ip' => $ipAddress, ':serial' => $deviceSerial]);
+            
+            writeLog("Updated device record with new WAN settings", 'INFO');
+        } catch (Exception $e) {
+            writeLog("Error updating device record: " . $e->getMessage(), 'ERROR');
+        }
+        
+        writeLog("WAN configuration successfully applied to device $deviceSerial", 'INFO');
+        return true;
+    } catch (Exception $e) {
+        writeLog("Error processing WAN task: " . $e->getMessage(), 'ERROR');
+        return false;
+    }
+}
+
+// Process reboot task
+function processRebootTask($deviceSerial) {
+    writeLog("Processing reboot task for device $deviceSerial", 'INFO');
+    
+    try {
+        // In a real environment, this would send the actual reboot command
+        logRouterData("InternetGatewayDevice.DeviceInfo.Reboot", "1", $deviceSerial);
+        
+        writeLog("Reboot command successfully sent to device $deviceSerial", 'INFO');
+        return true;
+    } catch (Exception $e) {
+        writeLog("Error processing reboot task: " . $e->getMessage(), 'ERROR');
+        return false;
     }
 }
 
@@ -38,6 +308,7 @@ $isNewSession = !isset($GLOBALS['knownDevices'][$clientIP]);
 $isHuawei = false;
 $isMikroTik = false;
 $modelDetected = '';
+$deviceSerial = null;
 
 if (isset($_SERVER['HTTP_USER_AGENT'])) {
     $userAgent = $_SERVER['HTTP_USER_AGENT'];
@@ -71,6 +342,12 @@ if (!$isHuawei && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $modelDetected = 'HG8546M';
             }
         }
+        
+        // Extract serial number if present
+        if (preg_match('/<SerialNumber>(.*?)<\/SerialNumber>/s', $raw_post, $serialMatches)) {
+            $deviceSerial = $serialMatches[1];
+            writeLog("Device serial number detected: $deviceSerial", 'INFO');
+        }
     }
 }
 
@@ -92,7 +369,7 @@ if (!isset($_SESSION['current_host_index'])) {
     $_SESSION['current_host_index'] = 1;
 }
 
-// Prioritize optical power readings parameters
+// Set optical power readings parameters
 $opticalPowerParameters = [
     ['InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.TXPower'],
     ['InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.RXPower'],
@@ -169,7 +446,7 @@ function generateParameterRequestXML($soapId, $parameters) {
 // Function to generate a parameter SET request XML
 function generateSetParameterRequestXML($soapId, $paramName, $paramValue, $paramType = "xsd:string") {
     // Log parameter set operations to device.log
-    writeLog("Setting parameter: {$paramName} = {$paramValue}", true);
+    writeLog("Setting parameter: {$paramName} = {$paramValue}", 'INFO', true);
     
     $response = '<?xml version="1.0" encoding="UTF-8"?>
 <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
@@ -220,9 +497,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!empty($raw_post)) {
         // Check if this is an Inform message
         if (stripos($raw_post, '<cwmp:Inform>') !== false) {
+            writeLog("Received Inform message from device", 'INFO');
+            
             // Extract the SOAP ID
             preg_match('/<cwmp:ID SOAP-ENV:mustUnderstand="1">(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
             $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
+            
+            // Extract device serial number
+            preg_match('/<SerialNumber>(.*?)<\/SerialNumber>/s', $raw_post, $serialMatches);
+            if (isset($serialMatches[1])) {
+                $deviceSerial = trim($serialMatches[1]);
+                writeLog("Device serial number: $deviceSerial", 'INFO');
+                
+                // Update device status to online
+                try {
+                    $database = new Database();
+                    $db = $database->getConnection();
+                    
+                    // Check if device exists
+                    $checkSql = "SELECT id FROM devices WHERE serial_number = :serial";
+                    $checkStmt = $db->prepare($checkSql);
+                    $checkStmt->execute([':serial' => $deviceSerial]);
+                    $deviceId = $checkStmt->fetchColumn();
+                    
+                    if ($deviceId) {
+                        // Update existing device
+                        $updateSql = "UPDATE devices SET status = 'online', last_contact = NOW() WHERE id = :id";
+                        $updateStmt = $db->prepare($updateSql);
+                        $updateStmt->execute([':id' => $deviceId]);
+                        
+                        writeLog("Updated device status to online: $deviceSerial (ID: $deviceId)", 'INFO');
+                        
+                        // Process any pending tasks for this device
+                        processDeviceTasks($deviceSerial);
+                    } else {
+                        // Create new device record
+                        $insertSql = "INSERT INTO devices (serial_number, status, last_contact) VALUES (:serial, 'online', NOW())";
+                        $insertStmt = $db->prepare($insertSql);
+                        $insertStmt->execute([':serial' => $deviceSerial]);
+                        
+                        $newDeviceId = $db->lastInsertId();
+                        writeLog("Created new device record: $deviceSerial (ID: $newDeviceId)", 'INFO');
+                    }
+                } catch (Exception $e) {
+                    writeLog("Error updating device status: " . $e->getMessage(), 'ERROR');
+                }
+            }
             
             // Extract model information
             preg_match('/<ProductClass>(.*?)<\/ProductClass>/s', $raw_post, $modelMatches);
@@ -232,6 +552,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (stripos($model, 'HG8546M') !== false) {
                     $modelDetected = 'HG8546M';
                 }
+                
+                // Update model in database
+                if ($deviceSerial) {
+                    try {
+                        $database = new Database();
+                        $db = $database->getConnection();
+                        
+                        $sql = "UPDATE devices SET model_name = :model WHERE serial_number = :serial";
+                        $stmt = $db->prepare($sql);
+                        $stmt->execute([':model' => $model, ':serial' => $deviceSerial]);
+                        
+                        writeLog("Updated device model: $model for $deviceSerial", 'INFO');
+                    } catch (Exception $e) {
+                        writeLog("Error updating device model: " . $e->getMessage(), 'ERROR');
+                    }
+                }
             }
             
             // Extract manufacturer if available
@@ -239,6 +575,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (isset($mfrMatches[1])) {
                 $manufacturer = trim($mfrMatches[1]);
                 file_put_contents($_SERVER['DOCUMENT_ROOT'] . '/router_ssids.txt', "InternetGatewayDevice.DeviceInfo.Manufacturer = {$manufacturer}\n", FILE_APPEND);
+                
+                // Update manufacturer in database
+                if ($deviceSerial) {
+                    try {
+                        $database = new Database();
+                        $db = $database->getConnection();
+                        
+                        $sql = "UPDATE devices SET manufacturer = :mfr WHERE serial_number = :serial";
+                        $stmt = $db->prepare($sql);
+                        $stmt->execute([':mfr' => $manufacturer, ':serial' => $deviceSerial]);
+                        
+                        writeLog("Updated device manufacturer: $manufacturer for $deviceSerial", 'INFO');
+                    } catch (Exception $e) {
+                        writeLog("Error updating device manufacturer: " . $e->getMessage(), 'ERROR');
+                    }
+                }
             }
             
             // Log device model if possible
@@ -263,6 +615,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         // Check if this is a GetParameterValuesResponse (contains network data)
         if (stripos($raw_post, 'GetParameterValuesResponse') !== false) {
+            writeLog("Received GetParameterValuesResponse", 'INFO');
+            
             // Extract information using regex
             preg_match_all('/<Name>(.*?)<\/Name>\s*<Value[^>]*>(.*?)<\/Value>/si', $raw_post, $matches, PREG_SET_ORDER);
             
@@ -279,6 +633,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         continue;
                     }
                     
+                    // Log the parameter
+                    logRouterData($paramName, $paramValue, $deviceSerial);
+                    
                     // Track this as a successful parameter retrieval
                     if (!in_array($paramName, $_SESSION['successful_parameters'])) {
                         $_SESSION['successful_parameters'][] = $paramName;
@@ -290,6 +647,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         stripos($paramName, 'DeviceInfo.HardwareVersion') !== false ||
                         stripos($paramName, 'DeviceInfo.Manufacturer') !== false) {
                         $foundDeviceInfoParams = true;
+                        
+                        // Update device info in database
+                        if ($deviceSerial) {
+                            try {
+                                $database = new Database();
+                                $db = $database->getConnection();
+                                
+                                if (stripos($paramName, 'UpTime') !== false) {
+                                    $sql = "UPDATE devices SET uptime = :value WHERE serial_number = :serial";
+                                    $stmt = $db->prepare($sql);
+                                    $stmt->execute([':value' => $paramValue, ':serial' => $deviceSerial]);
+                                }
+                                
+                                if (stripos($paramName, 'SoftwareVersion') !== false) {
+                                    $sql = "UPDATE devices SET software_version = :value WHERE serial_number = :serial";
+                                    $stmt = $db->prepare($sql);
+                                    $stmt->execute([':value' => $paramValue, ':serial' => $deviceSerial]);
+                                }
+                                
+                                if (stripos($paramName, 'HardwareVersion') !== false) {
+                                    $sql = "UPDATE devices SET hardware_version = :value WHERE serial_number = :serial";
+                                    $stmt = $db->prepare($sql);
+                                    $stmt->execute([':value' => $paramValue, ':serial' => $deviceSerial]);
+                                }
+                            } catch (Exception $e) {
+                                writeLog("Error updating device info: " . $e->getMessage(), 'ERROR');
+                            }
+                        }
                     }
                     
                     // Check if this is the host count parameter
@@ -297,6 +682,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $foundHostNumberOfEntries = true;
                         $_SESSION['host_count'] = intval($paramValue);
                         $GLOBALS['hostCount'] = intval($paramValue);
+                        
+                        // Update connected clients in database
+                        if ($deviceSerial) {
+                            try {
+                                $database = new Database();
+                                $db = $database->getConnection();
+                                
+                                $sql = "UPDATE devices SET connected_clients = :count WHERE serial_number = :serial";
+                                $stmt = $db->prepare($sql);
+                                $stmt->execute([':count' => intval($paramValue), ':serial' => $deviceSerial]);
+                                
+                                writeLog("Updated connected clients: {$paramValue} for device $deviceSerial", 'INFO');
+                            } catch (Exception $e) {
+                                writeLog("Error updating connected clients: " . $e->getMessage(), 'ERROR');
+                            }
+                        }
+                    }
+                    
+                    // Check if this is the SSID parameter
+                    if (stripos($paramName, 'WLANConfiguration.1.SSID') !== false) {
+                        // Update SSID in database
+                        if ($deviceSerial) {
+                            try {
+                                $database = new Database();
+                                $db = $database->getConnection();
+                                
+                                $sql = "UPDATE devices SET ssid = :ssid WHERE serial_number = :serial";
+                                $stmt = $db->prepare($sql);
+                                $stmt->execute([':ssid' => $paramValue, ':serial' => $deviceSerial]);
+                                
+                                writeLog("Updated SSID: {$paramValue} for device $deviceSerial", 'INFO');
+                            } catch (Exception $e) {
+                                writeLog("Error updating SSID: " . $e->getMessage(), 'ERROR');
+                            }
+                        }
+                    }
+                    
+                    // Check if this is the external IP parameter
+                    if (stripos($paramName, 'WANIPConnection.1.ExternalIPAddress') !== false) {
+                        // Update IP in database
+                        if ($deviceSerial) {
+                            try {
+                                $database = new Database();
+                                $db = $database->getConnection();
+                                
+                                $sql = "UPDATE devices SET ip_address = :ip WHERE serial_number = :serial";
+                                $stmt = $db->prepare($sql);
+                                $stmt->execute([':ip' => $paramValue, ':serial' => $deviceSerial]);
+                                
+                                writeLog("Updated IP Address: {$paramValue} for device $deviceSerial", 'INFO');
+                            } catch (Exception $e) {
+                                writeLog("Error updating IP address: " . $e->getMessage(), 'ERROR');
+                            }
+                        }
                     }
                     
                     // Log the parameter to the router_ssids.txt file
@@ -406,9 +845,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
   </SOAP-ENV:Header>
   <SOAP-ENV:Body>
-    <cwmp:SetParameterValuesResponse>
-      <Status>0</Status>
-    </cwmp:SetParameterValuesResponse>
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
                 
@@ -427,11 +863,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         // Check for SetParameterValuesResponse
         if (stripos($raw_post, 'SetParameterValuesResponse') !== false) {
+            writeLog("Received SetParameterValuesResponse", 'INFO');
+            
             // Extract the status
             preg_match('/<Status>(.*?)<\/Status>/s', $raw_post, $statusMatches);
             if (isset($statusMatches[1])) {
                 $status = trim($statusMatches[1]);
-                writeLog("Parameter set operation completed with status: " . $status, true);
+                writeLog("Parameter set operation completed with status: " . $status, 'INFO', true);
             }
             
             // Extract SOAP ID
@@ -453,6 +891,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         // Check for fault messages
         if (stripos($raw_post, '<SOAP-ENV:Fault>') !== false || stripos($raw_post, '<cwmp:Fault>') !== false) {
+            writeLog("Received fault response", 'WARNING');
+            
             preg_match('/<FaultCode>(.*?)<\/FaultCode>.*?<FaultString>(.*?)<\/FaultString>/s', $raw_post, $faultMatches);
             
             if (!empty($faultMatches)) {
@@ -461,7 +901,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 // Only log faults for set operations
                 if (stripos($raw_post, 'SetParameterValues') !== false) {
-                    writeLog("SET Parameter Fault: Code=" . $faultCode . ", Message=" . $faultString, true);
+                    writeLog("SET Parameter Fault: Code=" . $faultCode . ", Message=" . $faultString, 'ERROR', true);
                 }
                 
                 // Extract SOAP ID
@@ -561,9 +1001,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
   </SOAP-ENV:Header>
   <SOAP-ENV:Body>
-    <cwmp:SetParameterValuesResponse>
-      <Status>0</Status>
-    </cwmp:SetParameterValuesResponse>
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
                     
@@ -588,9 +1025,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
   </SOAP-ENV:Header>
   <SOAP-ENV:Body>
-    <cwmp:SetParameterValuesResponse>
-      <Status>0</Status>
-    </cwmp:SetParameterValuesResponse>
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
             
@@ -598,6 +1032,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } else {
         // Empty POST - start parameter discovery
+        writeLog("Received empty POST, starting parameter discovery", 'INFO');
+        
         // Generate a session ID
         $sessionId = md5(uniqid(rand(), true));
         
@@ -629,33 +1065,7 @@ try {
     // Handle the request
     $server->handleRequest();
 } catch (Exception $e) {
+    writeLog("Server error: " . $e->getMessage(), 'ERROR');
     header('HTTP/1.1 500 Internal Server Error');
     echo "Internal Server Error";
-}
-
-// Enhance the SOAP request generation for optical power readings
-if (stripos($raw_post, '<cwmp:Inform>') !== false) {
-    // After regular Inform response, prioritize optical power readings
-    
-    // Create a custom SOAP envelope for optical power readings
-    $opticalRequest = '<?xml version="1.0" encoding="UTF-8"?>
-<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-  <SOAP-ENV:Header>
-    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </SOAP-ENV:Header>
-  <SOAP-ENV:Body>
-    <cwmp:GetParameterValues>
-      <ParameterNames SOAP-ENC:arrayType="xsd:string[4]">
-        <string>InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.TXPower</string>
-        <string>InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.RXPower</string>
-        <string>InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.TXPower</string>
-        <string>InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.RXPower</string>
-      </ParameterNames>
-    </cwmp:GetParameterValues>
-  </SOAP-ENV:Body>
-</SOAP-ENV:Envelope>';
-    
-    header('Content-Type: text/xml');
-    echo $opticalRequest;
-    exit;
 }

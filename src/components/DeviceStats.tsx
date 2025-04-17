@@ -2,12 +2,54 @@
 import { Card } from "@/components/ui/card";
 import { CircleIcon, WifiIcon, ClockIcon, CpuIcon, RouterIcon, PlugIcon } from "lucide-react";
 import { Device } from "@/types";
+import { useEffect, useState } from "react";
 
 interface DeviceStatsProps {
   device: Device;
 }
 
 export const DeviceStats = ({ device }: DeviceStatsProps) => {
+  const [currentStatus, setCurrentStatus] = useState(device.status);
+  const [lastChecked, setLastChecked] = useState<string | null>(null);
+
+  // Check actual device status in case the displayed status is incorrect
+  useEffect(() => {
+    const checkDeviceStatus = async () => {
+      if (!device.id) return;
+      
+      try {
+        const formData = new FormData();
+        formData.append('device_id', device.id.toString());
+        formData.append('action', 'check_connection');
+        
+        const response = await fetch('/backend/api/device_configure.php', {
+          method: 'POST',
+          body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.connection_status) {
+          setCurrentStatus(result.connection_status.success ? 'online' : 'offline');
+          setLastChecked(new Date().toLocaleString());
+          
+          // Log for debugging
+          console.log("Device status check:", result.connection_status);
+        }
+      } catch (error) {
+        console.error("Error checking device status:", error);
+      }
+    };
+    
+    // Check status when component mounts
+    checkDeviceStatus();
+    
+    // Set up an interval to periodically check status (every 30 seconds)
+    const interval = setInterval(checkDeviceStatus, 30000);
+    
+    return () => clearInterval(interval);
+  }, [device.id]);
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case "online":
@@ -44,12 +86,19 @@ export const DeviceStats = ({ device }: DeviceStatsProps) => {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
       <Card className="p-4 bg-gradient-to-br from-white to-blue-50 border border-blue-100 shadow-sm">
-        <div className="flex items-center mb-2">
-          <CircleIcon className={`h-3 w-3 mr-2 ${getStatusColor(device.status)}`} />
-          <h3 className="text-sm font-medium text-gray-500">Status</h3>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center">
+            <CircleIcon className={`h-3 w-3 mr-2 ${getStatusColor(currentStatus)}`} />
+            <h3 className="text-sm font-medium text-gray-500">Status</h3>
+          </div>
+          {lastChecked && (
+            <span className="text-xs text-gray-400">
+              Last checked: {lastChecked}
+            </span>
+          )}
         </div>
-        <p className={`text-2xl font-bold ${getStatusColor(device.status)}`}>
-          {device.status.charAt(0).toUpperCase() + device.status.slice(1)}
+        <p className={`text-2xl font-bold ${getStatusColor(currentStatus)}`}>
+          {currentStatus.charAt(0).toUpperCase() + currentStatus.slice(1)}
         </p>
       </Card>
       
