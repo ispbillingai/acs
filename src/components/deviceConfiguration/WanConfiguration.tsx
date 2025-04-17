@@ -3,335 +3,302 @@ import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Globe, Server, AlertCircle } from "lucide-react";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form";
-import { useForm } from "react-hook-form";
+import { Card, CardContent } from "@/components/ui/card";
+import { Loader2 } from "lucide-react";
 
 interface WanConfigurationProps {
-  deviceId: string;
+  deviceId?: string;
 }
 
-type ConnectionType = "DHCP" | "PPPoE" | "Static";
-
-interface WanFormValues {
-  connectionType: ConnectionType;
-  ipAddress?: string;
-  subnetMask?: string;
-  gateway?: string;
-  dnsServer1?: string;
-  dnsServer2?: string;
-  pppoeUsername?: string;
-  pppoePassword?: string;
-}
-
-const WanConfiguration: React.FC<WanConfigurationProps> = ({ deviceId }) => {
-  const [configuring, setConfiguring] = useState(false);
+export function WanConfiguration({ deviceId }: WanConfigurationProps) {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [connectionType, setConnectionType] = useState("DHCP");
   const [taskStatus, setTaskStatus] = useState<string | null>(null);
-  
-  const form = useForm<WanFormValues>({
-    defaultValues: {
-      connectionType: "DHCP",
-      ipAddress: "",
-      subnetMask: "",
-      gateway: "",
-      dnsServer1: "",
-      dnsServer2: "",
-      pppoeUsername: "",
-      pppoePassword: ""
-    }
+  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
+  const [pollingInterval, setPollingInterval] = useState<number | null>(null);
+
+  // Form state
+  const [formState, setFormState] = useState({
+    // PPPoE fields
+    pppoeUsername: '',
+    pppoePassword: '',
+    
+    // Static IP fields
+    staticIp: '',
+    subnetMask: '',
+    gateway: '',
+    dnsServer1: '',
+    dnsServer2: ''
   });
 
-  const connectionType = form.watch("connectionType");
-  
-  // Poll for task status if a task is in progress
+  // Handle form input changes
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormState(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  // Handle connection type change
+  const handleConnectionTypeChange = (value: string) => {
+    setConnectionType(value);
+  };
+
+  // Check task status periodically
   useEffect(() => {
-    let taskId: string | null = null;
-    let intervalId: NodeJS.Timeout;
-    
-    if (configuring) {
-      intervalId = setInterval(async () => {
-        if (!taskId) return;
-        
-        try {
-          const formData = new FormData();
-          formData.append('task_id', taskId);
-          formData.append('action', 'check_task_status');
-          
-          const response = await fetch('/backend/api/device_configure.php', {
-            method: 'POST',
-            body: formData
-          });
-          
-          if (!response.ok) {
-            throw new Error('Failed to fetch task status');
-          }
-          
-          const result = await response.json();
-          console.log('Task status check result:', result);
-          
-          if (result.success && result.status) {
-            setTaskStatus(result.status);
-            
-            if (result.status === 'completed') {
-              setConfiguring(false);
-              toast.success('WAN configuration applied successfully');
-              clearInterval(intervalId);
-            } else if (result.status === 'failed') {
-              setConfiguring(false);
-              toast.error(`Configuration failed: ${result.message || 'Unknown error'}`);
-              clearInterval(intervalId);
-            }
-          }
-        } catch (error) {
-          console.error('Error checking task status:', error);
+    if (currentTaskId && taskStatus === 'pending' || taskStatus === 'in_progress') {
+      const interval = window.setInterval(() => {
+        checkTaskStatus(currentTaskId);
+      }, 3000);
+      
+      setPollingInterval(interval);
+      
+      return () => {
+        if (pollingInterval) {
+          clearInterval(pollingInterval);
         }
-      }, 3000); // Check every 3 seconds
+      };
     }
-    
-    return () => {
-      if (intervalId) clearInterval(intervalId);
-    };
-  }, [configuring]);
+  }, [currentTaskId, taskStatus]);
 
-  const makeConfigRequest = async (values: WanFormValues) => {
-    setConfiguring(true);
+  // Check task status
+  const checkTaskStatus = async (taskId: string) => {
     try {
-      console.log(`Making WAN config request with data:`, values);
-      
-      const formData = new FormData();
-      formData.append('device_id', deviceId);
-      formData.append('action', 'wan');
-      formData.append('connection_type', values.connectionType);
-      
-      // Add connection-type specific parameters
-      if (values.connectionType === "Static") {
-        formData.append('ip_address', values.ipAddress || "");
-        formData.append('subnet_mask', values.subnetMask || "");
-        formData.append('gateway', values.gateway || "");
-        formData.append('dns_server1', values.dnsServer1 || "");
-        formData.append('dns_server2', values.dnsServer2 || "");
-      } else if (values.connectionType === "PPPoE") {
-        formData.append('pppoe_username', values.pppoeUsername || "");
-        formData.append('pppoe_password', values.pppoePassword || "");
-      }
-      // For DHCP, no additional parameters needed
-
-      const response = await fetch('/backend/api/device_configure.php', {
+      const response = await fetch(`/backend/api/device_configure.php`, {
         method: 'POST',
-        body: formData
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          'action': 'check_task_status',
+          'task_id': taskId
+        })
       });
-
-      if (!response.ok) {
-        throw new Error(`Server returned ${response.status}: ${response.statusText}`);
-      }
-
-      const result = await response.json();
-      console.log(`WAN config response:`, result);
-
-      if (result.success) {
-        // Store the task ID for status polling
-        if (result.task_id) {
-          window.taskId = result.task_id;
-          setTaskStatus('pending');
-          toast.success("WAN configuration request sent to device");
-        } else {
-          toast.success(result.message || "WAN configuration updated successfully");
-          setConfiguring(false);
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        setTaskStatus(data.status);
+        
+        if (data.status === 'completed') {
+          toast.success("WAN configuration completed successfully");
+          
+          // Clear polling
+          if (pollingInterval) {
+            clearInterval(pollingInterval);
+            setPollingInterval(null);
+          }
+        } else if (data.status === 'failed') {
+          toast.error(`WAN configuration failed: ${data.message}`);
+          
+          // Clear polling
+          if (pollingInterval) {
+            clearInterval(pollingInterval);
+            setPollingInterval(null);
+          }
         }
-      } else {
-        toast.error(result.message || 'Configuration failed');
-        setConfiguring(false);
       }
     } catch (error) {
-      console.error(`Error in WAN config:`, error);
-      toast.error('Configuration failed due to server error');
-      setConfiguring(false);
+      console.error("Error checking task status:", error);
     }
   };
 
-  const onSubmit = (values: WanFormValues) => {
-    console.log("WAN update form submitted", values);
-    makeConfigRequest(values);
+  // Submit WAN configuration
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!deviceId) {
+      toast.error("Device ID is required");
+      return;
+    }
+    
+    setIsSubmitting(true);
+    
+    // Prepare form data based on connection type
+    const formData = new URLSearchParams();
+    formData.append('action', 'wan');
+    formData.append('device_id', deviceId);
+    formData.append('connection_type', connectionType);
+    
+    if (connectionType === 'PPPoE') {
+      formData.append('pppoe_username', formState.pppoeUsername);
+      formData.append('pppoe_password', formState.pppoePassword);
+    } else if (connectionType === 'Static') {
+      formData.append('ip_address', formState.staticIp);
+      formData.append('subnet_mask', formState.subnetMask);
+      formData.append('gateway', formState.gateway);
+      formData.append('dns_server1', formState.dnsServer1);
+      formData.append('dns_server2', formState.dnsServer2);
+    }
+    
+    try {
+      const response = await fetch('/backend/api/device_configure.php', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: formData
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        toast.success("WAN configuration request sent");
+        setCurrentTaskId(data.task_id);
+        setTaskStatus('pending');
+      } else {
+        toast.error(`Failed to update WAN configuration: ${data.message}`);
+      }
+    } catch (error) {
+      console.error("Error updating WAN configuration:", error);
+      toast.error("An error occurred while updating WAN configuration");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
-    <div>
-      <h3 className="text-lg font-bold mb-3 flex items-center gap-2">
-        <Globe className="h-5 w-5" />
-        WAN Configuration
-      </h3>
-      
-      {taskStatus === 'in_progress' && (
-        <div className="bg-blue-50 border border-blue-200 text-blue-800 p-3 rounded-md mb-4 flex items-center gap-2">
-          <div className="animate-spin h-4 w-4 border-2 border-blue-600 border-t-transparent rounded-full"></div>
-          <p>Applying WAN configuration to device... This may take a moment.</p>
-        </div>
-      )}
-      
-      {taskStatus === 'failed' && (
-        <div className="bg-red-50 border border-red-200 text-red-800 p-3 rounded-md mb-4 flex items-center gap-2">
-          <AlertCircle className="h-4 w-4" />
-          <p>Failed to apply WAN configuration. Please try again.</p>
-        </div>
-      )}
-      
-      <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-          <FormField
-            control={form.control}
-            name="connectionType"
-            render={({ field }) => (
-              <FormItem className="space-y-3">
-                <FormLabel>Connection Type</FormLabel>
-                <FormControl>
-                  <RadioGroup
-                    onValueChange={field.onChange}
-                    defaultValue={field.value}
-                    className="flex flex-col space-y-1"
-                  >
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="DHCP" id="dhcp" />
-                      <Label htmlFor="dhcp">DHCP (Automatic)</Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="PPPoE" id="pppoe" />
-                      <Label htmlFor="pppoe">PPPoE</Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="Static" id="static" />
-                      <Label htmlFor="static">Static IP</Label>
-                    </div>
-                  </RadioGroup>
-                </FormControl>
-              </FormItem>
-            )}
-          />
+    <Card>
+      <CardContent className="pt-6">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="connectionType">Connection Type</Label>
+            <Select value={connectionType} onValueChange={handleConnectionTypeChange}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select connection type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="DHCP">DHCP (Automatic)</SelectItem>
+                <SelectItem value="PPPoE">PPPoE</SelectItem>
+                <SelectItem value="Static">Static IP</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* PPPoE Settings */}
-            <div className="space-y-4 bg-gray-50 p-4 rounded-md">
-              <h4 className="text-sm font-medium flex items-center gap-2">
-                <Server className="h-4 w-4" />
-                PPPoE Settings {connectionType === "PPPoE" && "(Active)"}
-              </h4>
-              <div className="space-y-3">
-                <div className="space-y-2">
-                  <Label htmlFor="pppoeUsername" className={connectionType !== "PPPoE" ? "text-gray-400" : ""}>
-                    Username
-                  </Label>
-                  <Input
-                    id="pppoeUsername"
-                    {...form.register("pppoeUsername")}
-                    placeholder="Enter ISP provided username"
-                    disabled={connectionType !== "PPPoE" || configuring}
-                    className={connectionType !== "PPPoE" ? "bg-gray-100 text-gray-500" : ""}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="pppoePassword" className={connectionType !== "PPPoE" ? "text-gray-400" : ""}>
-                    Password
-                  </Label>
-                  <Input
-                    id="pppoePassword"
-                    type="password"
-                    {...form.register("pppoePassword")}
-                    placeholder="Enter ISP provided password"
-                    disabled={connectionType !== "PPPoE" || configuring}
-                    className={connectionType !== "PPPoE" ? "bg-gray-100 text-gray-500" : ""}
-                  />
-                </div>
-              </div>
+          {/* PPPoE Fields - Always visible but disabled when not selected */}
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="pppoeUsername">PPPoE Username</Label>
+              <Input 
+                id="pppoeUsername"
+                name="pppoeUsername"
+                value={formState.pppoeUsername}
+                onChange={handleInputChange}
+                placeholder="Enter username provided by ISP"
+                disabled={connectionType !== 'PPPoE'}
+              />
             </div>
-
-            {/* Static IP Settings */}
-            <div className="space-y-4 bg-gray-50 p-4 rounded-md">
-              <h4 className="text-sm font-medium flex items-center gap-2">
-                <Server className="h-4 w-4" />
-                Static IP Settings {connectionType === "Static" && "(Active)"}
-              </h4>
-              <div className="space-y-3">
-                <div className="space-y-2">
-                  <Label htmlFor="ipAddress" className={connectionType !== "Static" ? "text-gray-400" : ""}>
-                    IP Address
-                  </Label>
-                  <Input
-                    id="ipAddress"
-                    {...form.register("ipAddress")}
-                    placeholder="e.g., 192.168.1.100"
-                    disabled={connectionType !== "Static" || configuring}
-                    className={connectionType !== "Static" ? "bg-gray-100 text-gray-500" : ""}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="subnetMask" className={connectionType !== "Static" ? "text-gray-400" : ""}>
-                    Subnet Mask
-                  </Label>
-                  <Input
-                    id="subnetMask"
-                    {...form.register("subnetMask")}
-                    placeholder="e.g., 255.255.255.0"
-                    disabled={connectionType !== "Static" || configuring}
-                    className={connectionType !== "Static" ? "bg-gray-100 text-gray-500" : ""}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="gateway" className={connectionType !== "Static" ? "text-gray-400" : ""}>
-                    Default Gateway
-                  </Label>
-                  <Input
-                    id="gateway"
-                    {...form.register("gateway")}
-                    placeholder="e.g., 192.168.1.1"
-                    disabled={connectionType !== "Static" || configuring}
-                    className={connectionType !== "Static" ? "bg-gray-100 text-gray-500" : ""}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="dnsServer1" className={connectionType !== "Static" ? "text-gray-400" : ""}>
-                    Primary DNS Server
-                  </Label>
-                  <Input
-                    id="dnsServer1"
-                    {...form.register("dnsServer1")}
-                    placeholder="e.g., 8.8.8.8"
-                    disabled={connectionType !== "Static" || configuring}
-                    className={connectionType !== "Static" ? "bg-gray-100 text-gray-500" : ""}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="dnsServer2" className={connectionType !== "Static" ? "text-gray-400" : ""}>
-                    Secondary DNS Server (Optional)
-                  </Label>
-                  <Input
-                    id="dnsServer2"
-                    {...form.register("dnsServer2")}
-                    placeholder="e.g., 8.8.4.4"
-                    disabled={connectionType !== "Static" || configuring}
-                    className={connectionType !== "Static" ? "bg-gray-100 text-gray-500" : ""}
-                  />
-                </div>
-              </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="pppoePassword">PPPoE Password</Label>
+              <Input 
+                id="pppoePassword"
+                name="pppoePassword"
+                type="password"
+                value={formState.pppoePassword}
+                onChange={handleInputChange}
+                placeholder="Enter password provided by ISP"
+                disabled={connectionType !== 'PPPoE'}
+              />
             </div>
           </div>
           
-          <Button 
-            type="submit"
-            className="w-full md:w-auto"
-            disabled={configuring}
-          >
-            {configuring ? (
-              <>
-                <span className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full mr-2"></span>
-                Updating...
-              </>
-            ) : "Update WAN Configuration"}
-          </Button>
+          {/* Static IP Fields - Always visible but disabled when not selected */}
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="staticIp">IP Address</Label>
+              <Input 
+                id="staticIp"
+                name="staticIp"
+                value={formState.staticIp}
+                onChange={handleInputChange}
+                placeholder="e.g., 192.168.1.100"
+                disabled={connectionType !== 'Static'}
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="subnetMask">Subnet Mask</Label>
+              <Input 
+                id="subnetMask"
+                name="subnetMask"
+                value={formState.subnetMask}
+                onChange={handleInputChange}
+                placeholder="e.g., 255.255.255.0"
+                disabled={connectionType !== 'Static'}
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="gateway">Default Gateway</Label>
+              <Input 
+                id="gateway"
+                name="gateway"
+                value={formState.gateway}
+                onChange={handleInputChange}
+                placeholder="e.g., 192.168.1.1"
+                disabled={connectionType !== 'Static'}
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="dnsServer1">Primary DNS Server</Label>
+              <Input 
+                id="dnsServer1"
+                name="dnsServer1"
+                value={formState.dnsServer1}
+                onChange={handleInputChange}
+                placeholder="e.g., 8.8.8.8"
+                disabled={connectionType !== 'Static'}
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="dnsServer2">Secondary DNS Server</Label>
+              <Input 
+                id="dnsServer2"
+                name="dnsServer2"
+                value={formState.dnsServer2}
+                onChange={handleInputChange}
+                placeholder="e.g., 8.8.4.4"
+                disabled={connectionType !== 'Static'}
+              />
+            </div>
+          </div>
+          
+          {taskStatus === 'pending' || taskStatus === 'in_progress' ? (
+            <div className="flex items-center space-x-2 rounded-md border border-yellow-200 bg-yellow-50 p-3">
+              <Loader2 className="h-5 w-5 animate-spin text-yellow-600" />
+              <p className="text-sm text-yellow-700">
+                {taskStatus === 'pending' ? 'Waiting to apply WAN configuration...' : 'Applying WAN configuration...'}
+              </p>
+            </div>
+          ) : (
+            <Button type="submit" disabled={isSubmitting} className="w-full">
+              {isSubmitting ? "Updating..." : "Update WAN Configuration"}
+            </Button>
+          )}
+          
+          {taskStatus === 'failed' && (
+            <div className="rounded-md border border-red-200 bg-red-50 p-3">
+              <p className="text-sm text-red-700">
+                WAN configuration failed. Please check device logs or try again.
+              </p>
+            </div>
+          )}
+          
+          {taskStatus === 'completed' && (
+            <div className="rounded-md border border-green-200 bg-green-50 p-3">
+              <p className="text-sm text-green-700">
+                WAN configuration successfully applied.
+              </p>
+            </div>
+          )}
         </form>
-      </Form>
-    </div>
+      </CardContent>
+    </Card>
   );
-};
-
-export default WanConfiguration;
+}
