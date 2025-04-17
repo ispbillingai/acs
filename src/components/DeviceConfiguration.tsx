@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+
+import React, { useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,7 +15,6 @@ interface ConfigurationProps {
 export function DeviceConfiguration({ deviceId }: ConfigurationProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [connectionType, setConnectionType] = useState("DHCP");
-  const [currentSettings, setCurrentSettings] = useState<any>(null);
 
   // TR069 form state
   const [tr069Config, setTr069Config] = useState({
@@ -40,53 +40,6 @@ export function DeviceConfiguration({ deviceId }: ConfigurationProps) {
     gateway: "",
     dnsServers: ""
   });
-
-  // Fetch current device settings on component mount
-  useEffect(() => {
-    if (deviceId) {
-      fetchDeviceSettings();
-    }
-  }, [deviceId]);
-
-  const fetchDeviceSettings = async () => {
-    try {
-      const formData = new FormData();
-      formData.append('device_id', deviceId || '');
-      formData.append('action', 'get_settings');
-      
-      const response = await fetch('/backend/api/device_configure.php', {
-        method: 'POST',
-        body: formData
-      });
-      
-      const result = await response.json();
-      
-      if (result.success && result.settings) {
-        setCurrentSettings(result.settings);
-        
-        // Update form states with current settings
-        if (result.settings.ssid) {
-          setWifiConfig(prev => ({
-            ...prev,
-            ssid: result.settings.ssid,
-            password: '' // Don't populate password for security
-          }));
-        }
-        
-        if (result.settings.ip_address) {
-          setWanConfig(prev => ({
-            ...prev,
-            staticIp: result.settings.ip_address,
-            gateway: result.settings.gateway || ''
-          }));
-        }
-        
-        console.log("Fetched current device settings:", result.settings);
-      }
-    } catch (error) {
-      console.error("Error fetching device settings:", error);
-    }
-  };
 
   const handleTr069Change = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -132,12 +85,12 @@ export function DeviceConfiguration({ deviceId }: ConfigurationProps) {
     setIsSubmitting(true);
     
     try {
-      // Log configuration change intent
-      console.log("Updating TR069 Configuration:", tr069Config);
-      
       // Simulate API call to update TR069 config
       // In a real implementation, this would be an actual API call
       await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Log configuration change
+      console.log("TR069 Configuration updated:", tr069Config);
       
       toast.success("TR069 configuration updated successfully");
     } catch (error) {
@@ -153,44 +106,13 @@ export function DeviceConfiguration({ deviceId }: ConfigurationProps) {
     setIsSubmitting(true);
     
     try {
-      // Log configuration change intent
-      console.log("Updating WiFi Configuration:", {
-        ssid: wifiConfig.ssid,
-        passwordLength: wifiConfig.password ? wifiConfig.password.length : 0,
-        security: wifiConfig.security
-      });
+      // Simulate API call to update WiFi config
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // Create form data for the API request
-      const formData = new FormData();
-      formData.append('device_id', deviceId || '');
-      formData.append('action', 'wifi');
-      formData.append('ssid', wifiConfig.ssid);
-      formData.append('password', wifiConfig.password);
-      formData.append('security', wifiConfig.security);
+      // Log configuration change
+      console.log("WiFi Configuration updated:", wifiConfig);
       
-      // Make actual API call to update WiFi config
-      const response = await fetch('/backend/api/device_configure.php', {
-        method: 'POST',
-        body: formData
-      });
-      
-      const result = await response.json();
-      
-      if (result.success) {
-        console.log("WiFi configuration update successful:", result);
-        toast.success(result.message || "WiFi configuration updated successfully");
-        
-        // Update local state if needed
-        if (currentSettings) {
-          setCurrentSettings({
-            ...currentSettings,
-            ssid: wifiConfig.ssid
-          });
-        }
-      } else {
-        console.error("WiFi configuration update failed:", result);
-        toast.error(result.message || "Failed to update WiFi configuration");
-      }
+      toast.success("WiFi configuration updated successfully");
     } catch (error) {
       toast.error("Failed to update WiFi configuration");
       console.error("Error updating WiFi configuration:", error);
@@ -204,53 +126,13 @@ export function DeviceConfiguration({ deviceId }: ConfigurationProps) {
     setIsSubmitting(true);
     
     try {
-      // Log configuration change intent
-      console.log("Updating WAN Configuration:", {
-        connectionType: wanConfig.connectionType,
-        staticIp: wanConfig.staticIp,
-        gateway: wanConfig.gateway,
-        // Other WAN settings
-      });
+      // Simulate API call to update WAN config
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // Create form data for the API request
-      const formData = new FormData();
-      formData.append('device_id', deviceId || '');
-      formData.append('action', 'wan');
-      formData.append('ip_address', wanConfig.staticIp);
-      formData.append('gateway', wanConfig.gateway);
+      // Log configuration change
+      console.log("WAN Configuration updated:", wanConfig);
       
-      if (wanConfig.connectionType === 'PPPoE') {
-        formData.append('pppoe_username', wanConfig.pppoeUsername);
-        formData.append('pppoe_password', wanConfig.pppoePassword);
-      } else if (wanConfig.connectionType === 'Static') {
-        formData.append('subnet_mask', wanConfig.subnetMask);
-        formData.append('dns_servers', wanConfig.dnsServers);
-      }
-      
-      // Make API call to update WAN config
-      const response = await fetch('/backend/api/device_configure.php', {
-        method: 'POST',
-        body: formData
-      });
-      
-      const result = await response.json();
-      
-      if (result.success) {
-        console.log("WAN configuration update successful:", result);
-        toast.success(result.message || "WAN configuration updated successfully");
-        
-        // Update local state if needed
-        if (currentSettings) {
-          setCurrentSettings({
-            ...currentSettings,
-            ip_address: wanConfig.staticIp,
-            gateway: wanConfig.gateway
-          });
-        }
-      } else {
-        console.error("WAN configuration update failed:", result);
-        toast.error(result.message || "Failed to update WAN configuration");
-      }
+      toast.success("WAN configuration updated successfully");
     } catch (error) {
       toast.error("Failed to update WAN configuration");
       console.error("Error updating WAN configuration:", error);
@@ -267,29 +149,13 @@ export function DeviceConfiguration({ deviceId }: ConfigurationProps) {
     setIsSubmitting(true);
     
     try {
-      // Log reboot intent
-      console.log("Initiating device reboot for device ID:", deviceId);
+      // Simulate API call to reboot device
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // Create form data for the API request
-      const formData = new FormData();
-      formData.append('device_id', deviceId || '');
-      formData.append('action', 'reboot');
+      // Log reboot action
+      console.log("Device reboot initiated");
       
-      // Make API call to reboot device
-      const response = await fetch('/backend/api/device_configure.php', {
-        method: 'POST',
-        body: formData
-      });
-      
-      const result = await response.json();
-      
-      if (result.success) {
-        console.log("Device reboot command successful:", result);
-        toast.success(result.message || "Reboot command sent to device");
-      } else {
-        console.error("Device reboot failed:", result);
-        toast.error(result.message || "Failed to reboot device");
-      }
+      toast.success("Reboot command sent to device");
     } catch (error) {
       toast.error("Failed to reboot device");
       console.error("Error rebooting device:", error);
