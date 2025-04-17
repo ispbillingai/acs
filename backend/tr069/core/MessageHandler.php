@@ -17,74 +17,108 @@ class MessageHandler {
         $this->taskHandler = $taskHandler;
     }
 
-    public function handleInform($raw_post)
-    {
+    public function handleInform($raw_post) {
         $this->logger->logToFile("======= START HANDLING INFORM =======");
-    
-        // --- 1. extract SOAP‑ID & Serial ---------------------------------------
-        preg_match('~<cwmp:ID [^>]*>(.*?)</cwmp:ID>~', $raw_post, $idM);
-        $soapId = $idM[1] ?? '1';
-    
-        preg_match('~<SerialNumber>(.*?)</SerialNumber>~s', $raw_post, $snM);
-        $serialNumber = isset($snM[1]) ? trim($snM[1]) : null;
-    
-        $this->logger->logToFile("SOAP‑ID: $soapId   Serial: " . ($serialNumber ?: 'none'));
-    
-        // --- 2. normal flow when Serial present --------------------------------
+        
+        // Extract the SOAP ID
+        preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
+        $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
+        $this->logger->logToFile("Extracted SOAP ID: $soapId");
+        
+        // Extract device serial number
+        preg_match('/<SerialNumber>(.*?)<\/SerialNumber>/s', $raw_post, $serialMatches);
+        $serialNumber = isset($serialMatches[1]) ? trim($serialMatches[1]) : null;
+        
         if ($serialNumber) {
-            // 2a) Parse quick params from Inform
+            $this->logger->logToFile("Device inform received - Serial: $serialNumber");
+            
+            // Extract additional device parameters from inform message
             $deviceParams = $this->extractDeviceParams($raw_post);
+            $this->logger->logToFile("Extracted parameters: " . json_encode($deviceParams));
+            
+            // Update device with all extracted parameters
             $this->updateDeviceWithParams($serialNumber, $deviceParams);
+            
             $this->sessionManager->startNewSession($serialNumber);
-    
-            // 2b) Decide which extra parameters we always want
-            $need = [
+            
+            // Look for pending tasks
+            $pendingTasks = $this->taskHandler->getPendingTasks($serialNumber);
+            if (!empty($pendingTasks)) {
+                $this->sessionManager->setCurrentTask($pendingTasks[0]);
+                $this->logger->logToFile("Found pending task: " . $pendingTasks[0]['id'] . " - " . $pendingTasks[0]['task_type']);
+            } else {
+                $this->logger->logToFile("No pending tasks found for device");
+            }
+
+            // Define critical parameters to request - THIS IS THE KEY PART FOR THE FIX
+            $parametersToRequest = [
                 'InternetGatewayDevice.DeviceInfo.UpTime',
                 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
                 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress',
                 'InternetGatewayDevice.DeviceInfo.SoftwareVersion',
                 'InternetGatewayDevice.DeviceInfo.HardwareVersion'
             ];
-            $this->logger->logToFile("Embedding GetParameterValues for: " . implode(', ', $need));
-    
-            // 2c) Build InformResponse
-            $respGen  = new InformResponseGenerator();
-            $informRsp = $respGen->createResponse($soapId);
-    
-            // 2d) Build <cwmp:GetParameterValues> block (inner XML only)
-            $gpvXml = XMLGenerator::generateGetParameterValuesXML(uniqid(), $need);
-    
-            // 2e) Ensure closing tag is normalised (remove whitespace/new‑line before it)
-            $informRsp = preg_replace('~\s+</([A-Za-z0-9_-]+):Body>~', '</$1:Body>', $informRsp, 1);
-    
-            // 2f) Inject GPV block before the first closing </*:Body>
-            $compound = preg_replace(
-                '~</([A-Za-z0-9_-]+):Body>~',
-                $gpvXml . "\n  </$1:Body>",
-                $informRsp,
-                1
-            );
-    
-            if ($compound === $informRsp) {
-                $this->logger->logToFile("ERROR – failed to inject GetParameterValues!");
-            } else {
-                $this->logger->logToFile(
-                    "Compound SOAP OK (first 200): " . substr($compound, 0, 200) . "…"
-                );
+            
+            $this->logger->logToFile("Will request these parameters in the same response: " . implode(", ", $parametersToRequest));
+            
+            // Get the device ID for logging
+            try {
+                $stmt = $this->db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
+                $stmt->execute([':serial' => $serialNumber]);
+                $deviceId = $stmt->fetchColumn();
+                
+                if ($deviceId) {
+                    $this->logger->logToFile("Will request parameters for device ID: $deviceId");
+                } else {
+                    $this->logger->logToFile("Warning: Device ID not found for serial: $serialNumber");
+                }
+            } catch (PDOException $e) {
+                $this->logger->logToFile("Database error: " . $e->getMessage());
             }
-    
+            
+            // Generate the InformResponse
+            $responseGenerator = new InformResponseGenerator();
+            $informResponse = $responseGenerator->createResponse($soapId);
+            
+            // Generate GetParameterValues XML with our requested parameters
+            $getParamXml = XMLGenerator::generateGetParameterValuesXML(
+                uniqid(), 
+                $parametersToRequest
+            );
+            
+            $this->logger->logToFile("GetParameterValues XML generated: " . substr($getParamXml, 0, 100) . "...");
+            $this->logger->logToFile("Sending GetParameterValues request with InformResponse");
+            
+            // Build a compound SOAP body: InformResponse + GetParameterValues
+            // We need to inject the GetParameterValues into the SOAP body before it closes
+// Insert just before the closing </…:Body>, regardless of prefix case
+$compound = preg_replace(
+    '~</([A-Za-z0-9_-]+):Body>~',
+    $getParamXml . "\n  </$1:Body>",
+    $informResponse,
+    1                // replace first and only closing tag
+);
+
+$this->logger->logToFile(
+    'Compound SOAP (first 200 chars): ' . substr($compound, 0, 200)
+);
+
+
+            
+            $this->logger->logToFile("Combined response length: " . strlen($compound));
             $this->logger->logToFile("======= END HANDLING INFORM =======");
+            
             return $compound;
         }
-    
-        // --- 3. fallback: no serial, just echo normal InformResponse -----------
-        $respGen = new InformResponseGenerator();
-        $simple  = $respGen->createResponse($soapId);
-        $this->logger->logToFile("No serial number – returning plain InformResponse");
+        
+        // Generate and return InformResponse if no serial number
+        $responseGenerator = new InformResponseGenerator();
+        $response = $responseGenerator->createResponse($soapId);
+        $this->logger->logToFile("No serial number found, sending simple InformResponse");
         $this->logger->logToFile("======= END HANDLING INFORM =======");
-        return $simple;
+        return $response;
     }
-    
+
     public function handleGetParameterValuesResponse($raw_post) {
         $this->logger->logToFile("======= START HANDLING GetParameterValuesResponse =======");
         $this->logger->logToFile("Raw response first 300 chars: " . substr($raw_post, 0, 300));
