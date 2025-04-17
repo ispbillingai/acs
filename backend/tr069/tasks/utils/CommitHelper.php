@@ -44,4 +44,3 @@ class CommitHelper
         return $envelope;
     }
 }
-

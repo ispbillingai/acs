@@ -1,4 +1,3 @@
-
 <?php
 // Disable all error logging
 error_reporting(0);
@@ -189,6 +188,26 @@ function generateSetParameterRequestXML($soapId, $paramName, $paramValue, $param
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
 
+    return $response;
+}
+
+// Function to generate a Commit RPC request XML
+function generateCommitRequestXML($soapId) {
+    $commandKey = 'commit-' . date('Ymd-His');
+    
+    $response = '<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <SOAP-ENV:Header>
+    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </SOAP-ENV:Header>
+  <SOAP-ENV:Body>
+    <cwmp:Commit>
+      <CommandKey>' . $commandKey . '</CommandKey>
+    </cwmp:Commit>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>';
+
+    writeLog("Commit RPC sent (key $commandKey)", true);
     return $response;
 }
 
