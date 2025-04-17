@@ -1,4 +1,3 @@
-
 <?php
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -7,14 +6,8 @@ header('Access-Control-Allow-Headers: Content-Type');
 
 require_once __DIR__ . '/../config/database.php';
 
-// Create log file if it doesn't exist
-$logFile = __DIR__ . '/../../acs.log';
-if (!file_exists($logFile)) {
-    file_put_contents($logFile, date('Y-m-d H:i:s') . " [INFO] === ACS Log Initialized ===\n");
-}
-
 function writeLog($message) {
-    global $logFile;
+    $logFile = __DIR__ . '/../../device.log';
     file_put_contents($logFile, date('Y-m-d H:i:s') . " [INFO] " . $message . "\n", FILE_APPEND);
 }
 
@@ -524,3 +517,4 @@ try {
     http_response_code(500);
     echo json_encode(['error' => 'Failed to store router data: ' . $e->getMessage()]);
 }
+
