@@ -31,6 +31,7 @@ export const ConnectedHosts = ({ deviceId, refreshTrigger }: ConnectedHostsProps
   const [hosts, setHosts] = useState<Host[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [hostCount, setHostCount] = useState(0);
   const { toast } = useToast();
 
   const fetchHosts = async () => {
@@ -46,8 +47,10 @@ export const ConnectedHosts = ({ deviceId, refreshTrigger }: ConnectedHostsProps
       
       if (data.connectedHosts && Array.isArray(data.connectedHosts)) {
         setHosts(data.connectedHosts);
+        setHostCount(data.connectedHosts.length);
       } else {
         setHosts([]);
+        setHostCount(0);
       }
     } catch (error) {
       console.error("Error fetching hosts:", error);
@@ -103,8 +106,15 @@ export const ConnectedHosts = ({ deviceId, refreshTrigger }: ConnectedHostsProps
     }
   };
 
+  // Set up auto-refresh every 30 seconds
   useEffect(() => {
     fetchHosts();
+    
+    const intervalId = setInterval(() => {
+      fetchHosts();
+    }, 30000);
+    
+    return () => clearInterval(intervalId);
   }, [deviceId, refreshTrigger]);
 
   // Function to determine what icon to show for each device
@@ -130,7 +140,12 @@ export const ConnectedHosts = ({ deviceId, refreshTrigger }: ConnectedHostsProps
   return (
     <Card className="p-6">
       <div className="mb-6 flex justify-between items-center">
-        <h3 className="text-lg font-semibold">Connected Clients</h3>
+        <div>
+          <h3 className="text-lg font-semibold">Connected Clients</h3>
+          <p className="text-sm text-gray-500">
+            {hostCount} active {hostCount === 1 ? 'device' : 'devices'} on network
+          </p>
+        </div>
         <Button 
           variant="outline" 
           size="sm" 

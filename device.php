@@ -10,14 +10,11 @@ try {
     // Initialize database connection
     $database = new Database();
     $db = $database->getConnection();
-    error_log("Database connection successful in device.php");
 
     // Get device ID from URL
     $deviceId = isset($_GET['id']) ? $_GET['id'] : null;
-    error_log("Requested device ID: " . $deviceId);
 
     if (!$deviceId) {
-        error_log("No device ID provided, redirecting to index");
         header('Location: index.php');
         exit;
     }
@@ -26,8 +23,6 @@ try {
     function getDevice($db, $id) {
         try {
             $sql = "SELECT * FROM devices WHERE id = :id";
-            
-            error_log("Executing device query: " . $sql . " with ID: " . $id);
             
             $stmt = $db->prepare($sql);
             $stmt->execute([':id' => $id]);
@@ -52,14 +47,11 @@ try {
                     'tr069Password' => $row['tr069_password'],
                     'connectedClients' => $row['connected_clients']
                 ];
-                error_log("Device details: " . print_r($device, true));
                 return $device;
             }
             
             return null;
         } catch (PDOException $e) {
-            error_log("Database error in getDevice: " . $e->getMessage());
-            error_log("SQL State: " . $e->getCode());
             return null;
         }
     }
@@ -80,7 +72,6 @@ try {
             }
             return null;
         } catch (PDOException $e) {
-            error_log("Database error in getParameterValue: " . $e->getMessage());
             return null;
         }
     }
@@ -113,26 +104,57 @@ try {
             $stmt->execute([':deviceId' => $deviceId]);
             return $stmt->fetchAll(PDO::FETCH_ASSOC);
         } catch (PDOException $e) {
-            error_log("Database error in getConnectedClients: " . $e->getMessage());
             return [];
         }
     }
 
+    // Count active connected clients
+    function countConnectedClients($db, $deviceId) {
+        try {
+            $sql = "SELECT COUNT(*) as count FROM connected_clients WHERE device_id = :deviceId AND is_active = 1";
+            $stmt = $db->prepare($sql);
+            $stmt->execute([':deviceId' => $deviceId]);
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            return $result ? intval($result['count']) : 0;
+        } catch (PDOException $e) {
+            return 0;
+        }
+    }
+
     $device = getDevice($db, $deviceId);
-    error_log("Device retrieval result: " . ($device ? "success" : "failed"));
 
     if (!$device) {
-        error_log("Device not found, redirecting to index");
         header('Location: index.php');
         exit;
     }
 
+    // Always get the latest uptime value from parameters table
+    $latestUptime = getParameterValue($db, $deviceId, 'UpTime');
+    if ($latestUptime) {
+        $device['uptime'] = $latestUptime;
+    }
+    
+    // Always get the latest connected clients count
+    $connectedClientsCount = countConnectedClients($db, $deviceId);
+    $device['connectedClients'] = $connectedClientsCount;
+    
+    // Update the device record with the latest values
+    $updateSql = "UPDATE devices SET 
+                    uptime = :uptime, 
+                    connected_clients = :connectedClients 
+                WHERE id = :id";
+    $updateStmt = $db->prepare($updateSql);
+    $updateStmt->execute([
+        ':uptime' => $device['uptime'],
+        ':connectedClients' => $device['connectedClients'],
+        ':id' => $deviceId
+    ]);
+    
     // Check for missing values in device table but exist in parameters
     $keysToCheck = [
         ['deviceKey' => 'ssid', 'paramName' => 'SSID', 'dbColumn' => 'ssid'],
         ['deviceKey' => 'softwareVersion', 'paramName' => 'SoftwareVersion', 'dbColumn' => 'software_version'],
         ['deviceKey' => 'hardwareVersion', 'paramName' => 'HardwareVersion', 'dbColumn' => 'hardware_version'],
-        ['deviceKey' => 'uptime', 'paramName' => 'UpTime', 'dbColumn' => 'uptime'],
         ['deviceKey' => 'manufacturer', 'paramName' => 'Manufacturer', 'dbColumn' => 'manufacturer']
     ];
     
@@ -146,7 +168,6 @@ try {
                 $device[$keyInfo['deviceKey']] = $paramValue;
                 $updateValues[$keyInfo['dbColumn']] = $paramValue;
                 $needsUpdate = true;
-                error_log("Found {$keyInfo['paramName']} in parameters: " . $paramValue);
             }
         }
     }
@@ -157,12 +178,10 @@ try {
     
     if ($txPower) {
         $device['txPower'] = $txPower;
-        error_log("Found TX Power: " . $txPower);
     }
     
     if ($rxPower) {
         $device['rxPower'] = $rxPower;
-        error_log("Found RX Power: " . $rxPower);
     }
     
     // If we found values in parameters that aren't in the device table, update the device table
@@ -183,9 +202,8 @@ try {
         try {
             $updateStmt = $db->prepare($updateSql);
             $updateStmt->execute($updateParams);
-            error_log("Updated device with missing values: " . print_r($updateValues, true));
         } catch (PDOException $e) {
-            error_log("Error updating device: " . $e->getMessage());
+            // Continue silently
         }
     }
     
@@ -198,7 +216,6 @@ try {
     
     // Get connected clients
     $connectedClients = getConnectedClients($db, $deviceId);
-    error_log("Retrieved " . count($connectedClients) . " connected clients");
 
     // Check if device is online (last contact within 10 minutes)
     $tenMinutesAgo = date('Y-m-d H:i:s', strtotime('-10 minutes'));
@@ -206,9 +223,7 @@ try {
     $device['status'] = $isOnline ? 'online' : 'offline';
 
 } catch (Exception $e) {
-    error_log("Critical error in device.php: " . $e->getMessage());
-    error_log("Stack trace: " . $e->getTraceAsString());
-    die("An error occurred: " . $e->getMessage());
+    die("An error occurred");
 }
 ?>
 
@@ -421,7 +436,7 @@ try {
                     </div>
                     <div class="btn-toolbar mb-2 mb-md-0">
                         <div class="btn-group me-2">
-                            <button type="button" class="btn btn-sm btn-outline-primary"><i class='bx bx-refresh me-1'></i>Refresh</button>
+                            <button type="button" class="btn btn-sm btn-outline-primary" id="refresh-data-btn"><i class='bx bx-refresh me-1'></i>Refresh</button>
                             <button type="button" class="btn btn-sm btn-outline-primary"><i class='bx bx-edit me-1'></i>Edit</button>
                         </div>
                         <button type="button" class="btn btn-sm btn-primary"><i class='bx bx-cog me-1'></i>Configure</button>
@@ -590,8 +605,9 @@ try {
                 <?php if (!empty($connectedClients)): ?>
                 <!-- Connected Clients -->
                 <div class="card table-card mb-4">
-                    <div class="card-header">
+                    <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="card-title mb-0"><i class='bx bx-wifi me-2'></i>Connected Clients</h5>
+                        <span class="badge bg-primary"><?php echo count($connectedClients); ?> Active</span>
                     </div>
                     <div class="card-body p-0">
                         <div class="table-responsive">
@@ -692,6 +708,23 @@ try {
                     xhr.send();
                 });
             }
+            
+            // Add main data refresh handler
+            const refreshDataBtn = document.getElementById('refresh-data-btn');
+            if (refreshDataBtn) {
+                refreshDataBtn.addEventListener('click', function() {
+                    this.disabled = true;
+                    this.innerHTML = '<i class="bx bx-loader-alt bx-spin me-1"></i> Refreshing...';
+                    
+                    // Simple reload to get the latest data
+                    window.location.reload();
+                });
+            }
+            
+            // Set auto-refresh every 60 seconds to keep data current
+            setTimeout(function() {
+                window.location.reload();
+            }, 60000); // 60 seconds
         });
     </script>
 </body>
