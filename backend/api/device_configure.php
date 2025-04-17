@@ -84,6 +84,19 @@ try {
             
             writeToDeviceLog("[WiFi Config] Creating task for SSID: {$ssid}, Password length: " . strlen($password));
             
+            // First, check for any existing pending WiFi tasks and mark them as canceled
+            $cancelStmt = $db->prepare("
+                UPDATE device_tasks 
+                SET status = 'canceled', message = 'Superseded by newer task', updated_at = NOW()
+                WHERE device_id = :device_id AND task_type = 'wifi' AND status = 'pending'
+            ");
+            $cancelStmt->execute([':device_id' => $deviceId]);
+            $canceledCount = $cancelStmt->rowCount();
+            
+            if ($canceledCount > 0) {
+                writeToDeviceLog("[WiFi Config] Canceled {$canceledCount} older pending WiFi tasks");
+            }
+            
             // Insert task
             $stmt = $db->prepare("
                 INSERT INTO device_tasks (device_id, task_type, task_data, status, created_at)
@@ -98,12 +111,50 @@ try {
             $taskId = $db->lastInsertId();
             writeToDeviceLog("[Task Created] ID: {$taskId}, Type: wifi");
             
-            header('Content-Type: application/json');
-            echo json_encode([
-                'success' => true,
-                'message' => 'WiFi configuration task created successfully',
-                'task_id' => $taskId
-            ]);
+            // Prepare connection request data for frontend display
+            $ipAddress = $device['ip_address'] ?? '';
+            $serialNumber = $device['serial_number'] ?? '';
+            
+            // Build connection request URLs
+            if (!empty($ipAddress)) {
+                $ports = ['30005', '37215', '7547', '4567'];
+                $username = 'admin';
+                $password = 'admin';
+                
+                $connectionUrl = "http://{$ipAddress}:30005/acs";
+                $command = "curl -v -u \"{$username}:{$password}\" -d \"<cwmp:ID>API_".$taskId."</cwmp:ID>\" \"{$connectionUrl}\"";
+                
+                $altCommands = [];
+                foreach ($ports as $port) {
+                    if ($port === '30005') continue; // Skip default
+                    $altUrl = "http://{$ipAddress}:{$port}/acs";
+                    $altCommands[] = "curl -v -u \"{$username}:{$password}\" -d \"<cwmp:ID>API_".$taskId."</cwmp:ID>\" \"{$altUrl}\"";
+                }
+                
+                $connectionRequest = [
+                    'url' => $connectionUrl,
+                    'username' => $username,
+                    'password' => $password,
+                    'command' => $command,
+                    'alternative_commands' => $altCommands
+                ];
+                
+                header('Content-Type: application/json');
+                echo json_encode([
+                    'success' => true,
+                    'message' => 'WiFi configuration task created successfully',
+                    'task_id' => $taskId,
+                    'connection_request' => $connectionRequest,
+                    'tr069_session_id' => $GLOBALS['session_id'] ?? null
+                ]);
+            } else {
+                header('Content-Type: application/json');
+                echo json_encode([
+                    'success' => true,
+                    'message' => 'WiFi configuration task created successfully',
+                    'task_id' => $taskId
+                ]);
+            }
             break;
             
         case 'wan':
@@ -125,6 +176,19 @@ try {
             ]);
             
             writeToDeviceLog("[WAN Config] Creating task for IP: {$ipAddress}, Gateway: {$gateway}");
+            
+            // First, check for any existing pending WAN tasks and mark them as canceled
+            $cancelStmt = $db->prepare("
+                UPDATE device_tasks 
+                SET status = 'canceled', message = 'Superseded by newer task', updated_at = NOW()
+                WHERE device_id = :device_id AND task_type = 'wan' AND status = 'pending'
+            ");
+            $cancelStmt->execute([':device_id' => $deviceId]);
+            $canceledCount = $cancelStmt->rowCount();
+            
+            if ($canceledCount > 0) {
+                writeToDeviceLog("[WAN Config] Canceled {$canceledCount} older pending WAN tasks");
+            }
             
             // Insert task
             $stmt = $db->prepare("

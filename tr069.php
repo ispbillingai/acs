@@ -140,6 +140,12 @@ try {
                 // Store the first task to process after Inform
                 $GLOBALS['current_task'] = $pendingTasks[0];
                 tr069_log("Found pending task: " . $pendingTasks[0]['task_type'] . " - ID: " . $pendingTasks[0]['id'], "INFO");
+                
+                // Store the task in the session for later use
+                session_start();
+                $_SESSION['current_task'] = $pendingTasks[0];
+                $_SESSION['device_serial'] = $serialNumber;
+                session_write_close();
             }
         }
         
@@ -162,16 +168,33 @@ try {
         }
         
         // Process pending task if we have one
+        $current_task = null;
+        
+        // First check if we have a task in the global variable
         if ($GLOBALS['current_task']) {
-            $task = $GLOBALS['current_task'];
-            tr069_log("Processing task: {$task['task_type']} - ID: {$task['id']}", "INFO");
+            $current_task = $GLOBALS['current_task'];
+        } else {
+            // If not, try to get it from the session
+            session_start();
+            if (isset($_SESSION['current_task'])) {
+                $current_task = $_SESSION['current_task'];
+                // Also restore the device serial if available
+                if (isset($_SESSION['device_serial'])) {
+                    $serialNumber = $_SESSION['device_serial'];
+                }
+            }
+            session_write_close();
+        }
+        
+        if ($current_task) {
+            tr069_log("Processing task from session: {$current_task['task_type']} - ID: {$current_task['id']}", "INFO");
             
             // Generate parameters for this task
-            $parameterRequest = $taskHandler->generateParameterValues($task['task_type'], $task['task_data']);
+            $parameterRequest = $taskHandler->generateParameterValues($current_task['task_type'], $current_task['task_data']);
             
             if ($parameterRequest) {
                 // Log what we're about to do
-                tr069_log("Sending {$parameterRequest['method']} request for task {$task['id']}", "INFO");
+                tr069_log("Sending {$parameterRequest['method']} request for task {$current_task['id']}", "INFO");
                 
                 // Build the appropriate request
                 if ($parameterRequest['method'] === 'SetParameterValues') {
@@ -201,7 +224,7 @@ try {
     <cwmp:SetParameterValues>
       <ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[' . $paramCount . ']">
 ' . $paramXml . '      </ParameterList>
-      <ParameterKey>Task-' . $task['id'] . '-' . substr(md5(time()), 0, 8) . '</ParameterKey>
+      <ParameterKey>Task-' . $current_task['id'] . '-' . substr(md5(time()), 0, 8) . '</ParameterKey>
     </cwmp:SetParameterValues>
   </soapenv:Body>
 </soapenv:Envelope>';
@@ -210,7 +233,8 @@ try {
                     echo $setParamRequest;
                     
                     // Mark task as in progress
-                    $taskHandler->updateTaskStatus($task['id'], 'in_progress', 'Sent parameters to device');
+                    $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 'Sent parameters to device');
+                    tr069_log("Task marked as in_progress: {$current_task['id']}", "INFO");
                     
                     exit;
                 } elseif ($parameterRequest['method'] === 'Reboot') {
@@ -234,13 +258,14 @@ try {
                     echo $rebootRequest;
                     
                     // Mark task as in progress
-                    $taskHandler->updateTaskStatus($task['id'], 'in_progress', 'Sent reboot command to device');
+                    $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 'Sent reboot command to device');
+                    tr069_log("Task marked as in_progress: {$current_task['id']}", "INFO");
                     
                     exit;
                 }
             } else {
-                tr069_log("Failed to generate parameters for task {$task['id']}", "ERROR");
-                $taskHandler->updateTaskStatus($task['id'], 'failed', 'Failed to generate parameters');
+                tr069_log("Failed to generate parameters for task {$current_task['id']}", "ERROR");
+                $taskHandler->updateTaskStatus($current_task['id'], 'failed', 'Failed to generate parameters');
             }
         } else {
             tr069_log("No pending tasks to process", "DEBUG");
@@ -275,15 +300,35 @@ try {
         
         tr069_log("Received SetParameterValuesResponse with status: $status", "INFO");
         
-        // Update task status
+        // Get current task from session or global variable
+        $current_task = null;
         if ($GLOBALS['current_task']) {
-            if ($status === '0') {
-                $taskHandler->updateTaskStatus($GLOBALS['current_task']['id'], 'completed', 'Successfully applied ' . $GLOBALS['current_task']['task_type'] . ' configuration');
-                tr069_log("Task completed successfully: " . $GLOBALS['current_task']['id'], "INFO");
-            } else {
-                $taskHandler->updateTaskStatus($GLOBALS['current_task']['id'], 'failed', 'Device returned error status: ' . $status);
-                tr069_log("Task failed: " . $GLOBALS['current_task']['id'] . " - Status: " . $status, "ERROR");
+            $current_task = $GLOBALS['current_task'];
+        } else {
+            // Try to get it from the session
+            session_start();
+            if (isset($_SESSION['current_task'])) {
+                $current_task = $_SESSION['current_task'];
+                // Clear the session task as it's now processed
+                unset($_SESSION['current_task']);
             }
+            session_write_close();
+        }
+        
+        // Update task status
+        if ($current_task) {
+            if ($status === '0') {
+                $taskHandler->updateTaskStatus($current_task['id'], 'completed', 'Successfully applied ' . $current_task['task_type'] . ' configuration');
+                tr069_log("Task completed successfully: " . $current_task['id'], "INFO");
+            } else {
+                $taskHandler->updateTaskStatus($current_task['id'], 'failed', 'Device returned error status: ' . $status);
+                tr069_log("Task failed: " . $current_task['id'] . " - Status: " . $status, "ERROR");
+            }
+            
+            // Clear the global task as well
+            $GLOBALS['current_task'] = null;
+        } else {
+            tr069_log("No current task found to update status", "WARNING");
         }
         
         // Send empty response to complete the session
@@ -311,10 +356,30 @@ try {
         
         tr069_log("Received RebootResponse", "INFO");
         
-        // Update task status
+        // Get current task from session or global variable
+        $current_task = null;
         if ($GLOBALS['current_task']) {
-            $taskHandler->updateTaskStatus($GLOBALS['current_task']['id'], 'completed', 'Device reboot initiated successfully');
-            tr069_log("Reboot task completed: " . $GLOBALS['current_task']['id'], "INFO");
+            $current_task = $GLOBALS['current_task'];
+        } else {
+            // Try to get it from the session
+            session_start();
+            if (isset($_SESSION['current_task'])) {
+                $current_task = $_SESSION['current_task'];
+                // Clear the session task as it's now processed
+                unset($_SESSION['current_task']);
+            }
+            session_write_close();
+        }
+        
+        // Update task status
+        if ($current_task) {
+            $taskHandler->updateTaskStatus($current_task['id'], 'completed', 'Device reboot initiated successfully');
+            tr069_log("Reboot task completed: " . $current_task['id'], "INFO");
+            
+            // Clear the global task
+            $GLOBALS['current_task'] = null;
+        } else {
+            tr069_log("No current task found to update status for reboot", "WARNING");
         }
         
         // Send empty response to complete the session
