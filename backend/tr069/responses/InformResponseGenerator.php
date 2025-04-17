@@ -120,6 +120,58 @@ class InformResponseGenerator {
         return $response;
     }
     
+    // New method to generate SetParameterValues request for changing SSID
+    public function createSetSSIDRequest($ssid, $id = null) {
+        $soapId = $id ?? 'set-wifi-' . substr(md5(time()), 0, 8);
+        $parameterKey = 'ChangeSSID' . substr(md5(time()), 0, 3);
+        
+        $response = '<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <SOAP-ENV:Header>
+    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </SOAP-ENV:Header>
+  <SOAP-ENV:Body>
+    <cwmp:SetParameterValues>
+      <ParameterList SOAP-ENC:arrayType="cwmp:ParameterValueStruct[1]">
+        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID</Name>
+          <Value xsi:type="xsd:string">' . htmlspecialchars($ssid) . '</Value>
+        </ParameterValueStruct>
+      </ParameterList>
+      <ParameterKey>' . $parameterKey . '</ParameterKey>
+    </cwmp:SetParameterValues>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>';
+
+        return $response;
+    }
+    
+    // New method to generate SetParameterValues request for changing WiFi password
+    public function createSetWiFiPasswordRequest($password, $id = null) {
+        $soapId = $id ?? 'set-wifi-pass-' . substr(md5(time()), 0, 8);
+        $parameterKey = 'ChangeWiFiPass' . substr(md5(time()), 0, 3);
+        
+        $response = '<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <SOAP-ENV:Header>
+    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </SOAP-ENV:Header>
+  <SOAP-ENV:Body>
+    <cwmp:SetParameterValues>
+      <ParameterList SOAP-ENC:arrayType="cwmp:ParameterValueStruct[1]">
+        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase</Name>
+          <Value xsi:type="xsd:string">' . htmlspecialchars($password) . '</Value>
+        </ParameterValueStruct>
+      </ParameterList>
+      <ParameterKey>' . $parameterKey . '</ParameterKey>
+    </cwmp:SetParameterValues>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>';
+
+        return $response;
+    }
+    
     // Custom GetParameterValues request with specific parameter list
     public function createCustomGetParameterValuesRequest($id = null, $parameterNames = []) {
         $soapId = $id ?? '1';

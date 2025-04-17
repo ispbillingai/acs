@@ -14,12 +14,40 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
   const [wifiPassword, setWifiPassword] = useState('');
   const [wanIPAddress, setWanIPAddress] = useState('');
   const [wanGateway, setWanGateway] = useState('');
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     console.log("DeviceConfigurationPanel mounted with deviceId:", deviceId);
+    
+    // Fetch current device settings when component mounts
+    const fetchDeviceSettings = async () => {
+      try {
+        const formData = new FormData();
+        formData.append('device_id', deviceId);
+        formData.append('action', 'get_settings');
+        
+        const response = await fetch('/backend/api/device_configure.php', {
+          method: 'POST',
+          body: formData
+        });
+        
+        const result = await response.json();
+        if (result.success && result.settings) {
+          setWifiSSID(result.settings.ssid || '');
+          setWifiPassword(result.settings.password || '');
+          setWanIPAddress(result.settings.ip_address || '');
+          setWanGateway(result.settings.gateway || '');
+        }
+      } catch (error) {
+        console.error('Error fetching device settings:', error);
+      }
+    };
+    
+    fetchDeviceSettings();
   }, [deviceId]);
 
   const makeConfigRequest = async (action: string, data: Record<string, string>) => {
+    setLoading(true);
     try {
       console.log(`Making ${action} config request with data:`, data);
       
@@ -42,21 +70,31 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
       if (result.success) {
         toast.success(result.message);
       } else {
-        toast.error(result.message);
+        toast.error(result.message || 'Configuration failed');
       }
     } catch (error) {
       console.error(`Error in ${action} config:`, error);
-      toast.error('Configuration failed');
+      toast.error('Configuration failed due to server error');
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleWiFiUpdate = () => {
     console.log("WiFi update button clicked");
+    if (!wifiSSID.trim()) {
+      toast.error('WiFi SSID cannot be empty');
+      return;
+    }
     makeConfigRequest('wifi', { ssid: wifiSSID, password: wifiPassword });
   };
 
   const handleWANUpdate = () => {
     console.log("WAN update button clicked");
+    if (!wanIPAddress.trim()) {
+      toast.error('IP Address cannot be empty');
+      return;
+    }
     makeConfigRequest('wan', { ip_address: wanIPAddress, gateway: wanGateway });
   };
 
@@ -89,8 +127,9 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
           <Button 
             onClick={handleWiFiUpdate}
             className="w-full md:w-auto"
+            disabled={loading}
           >
-            Update WiFi
+            {loading ? "Updating..." : "Update WiFi"}
           </Button>
         </div>
       </div>
@@ -114,8 +153,9 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
           <Button 
             onClick={handleWANUpdate}
             className="w-full md:w-auto"
+            disabled={loading}
           >
-            Update WAN
+            {loading ? "Updating..." : "Update WAN"}
           </Button>
         </div>
       </div>
@@ -129,8 +169,9 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
           variant="destructive" 
           onClick={handleReboot}
           className="w-full md:w-auto"
+          disabled={loading}
         >
-          Reboot Device
+          {loading ? "Processing..." : "Reboot Device"}
         </Button>
       </div>
     </div>
