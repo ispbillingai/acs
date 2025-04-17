@@ -12,7 +12,7 @@ class AuthenticationHandler {
 
     public function authenticate() {
         if (!isset($_SERVER['PHP_AUTH_USER']) || !isset($_SERVER['PHP_AUTH_PW'])) {
-            // Log to device.log instead of separate error log
+            // Only log authentication failures
             error_log("TR-069 Authentication Failed: Missing credentials", 3, __DIR__ . '/../../../device.log');
             return false;
         }
@@ -29,10 +29,10 @@ class AuthenticationHandler {
                 return true;
             }
             
-            // Log failed authentication attempt to device.log
+            // Only log authentication failures
             error_log("TR-069 Authentication Failed: Invalid credentials", 3, __DIR__ . '/../../../device.log');
         } catch (Exception $e) {
-            // Log any database-related authentication errors to device.log
+            // Only log errors
             error_log("TR-069 Authentication Error: " . $e->getMessage(), 3, __DIR__ . '/../../../device.log');
         }
         

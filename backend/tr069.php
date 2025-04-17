@@ -1,3 +1,4 @@
+
 <?php
 // Disable all error logging
 error_reporting(0);
@@ -10,15 +11,20 @@ $GLOBALS['discoveredParameters'] = [];
 $GLOBALS['hostCount'] = 0;
 $GLOBALS['currentHostIndex'] = 1;
 
-// Remove debug log file and logging function
-function writeDebugLog($message) {
-    // Intentionally left empty to remove logging
-    return;
+// Log only important parameter set operations
+function writeLog($message, $isSetParam = false) {
+    if ($isSetParam) {
+        $logFile = __DIR__ . '/../device.log';
+        file_put_contents($logFile, date('Y-m-d H:i:s') . " [INFO] " . $message . "\n", FILE_APPEND);
+    }
 }
 
+// Minimal logging for router data
 function logRouterData($paramName, $paramValue) {
-    // Intentionally left empty to remove logging
-    return;
+    // Only log parameter set operations, ignore gets and queries
+    if (stripos($paramName, 'SetParameterValues') !== false) {
+        writeLog("Set Parameter: {$paramName} = {$paramValue}", true);
+    }
 }
 
 // Set unlimited execution time for long-running sessions
@@ -160,6 +166,32 @@ function generateParameterRequestXML($soapId, $parameters) {
     return $response;
 }
 
+// Function to generate a parameter SET request XML
+function generateSetParameterRequestXML($soapId, $paramName, $paramValue, $paramType = "xsd:string") {
+    // Log parameter set operations to device.log
+    writeLog("Setting parameter: {$paramName} = {$paramValue}", true);
+    
+    $response = '<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <SOAP-ENV:Header>
+    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </SOAP-ENV:Header>
+  <SOAP-ENV:Body>
+    <cwmp:SetParameterValues>
+      <ParameterList SOAP-ENC:arrayType="cwmp:ParameterValueStruct[1]">
+        <ParameterValueStruct>
+          <Name>' . htmlspecialchars($paramName) . '</Name>
+          <Value xsi:type="' . $paramType . '">' . htmlspecialchars($paramValue) . '</Value>
+        </ParameterValueStruct>
+      </ParameterList>
+      <ParameterKey></ParameterKey>
+    </cwmp:SetParameterValues>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>';
+
+    return $response;
+}
+
 // Skip processing for MikroTik devices entirely - they consistently fail
 if ($isMikroTik) {
     header('Content-Length: 0');
@@ -267,8 +299,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $GLOBALS['hostCount'] = intval($paramValue);
                     }
                     
-                    // Log the parameter
-                    logRouterData($paramName, $paramValue);
+                    // Log the parameter to the router_ssids.txt file
+                    file_put_contents($_SERVER['DOCUMENT_ROOT'] . '/router_ssids.txt', "{$paramName} = {$paramValue}\n", FILE_APPEND);
                 }
             }
             
@@ -360,7 +392,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // If we've tried everything, just complete the session
             if ($nextParam === null) {
                 // Store parameters in database before completing the session
-                storeParametersInDatabase();
+                $url = 'http://' . $_SERVER['HTTP_HOST'] . '/backend/api/store_tr069_data.php';
+                $ch = curl_init($url);
+                curl_setopt($ch, CURLOPT_POST, 1);
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_exec($ch);
+                curl_close($ch);
                 
                 header('Content-Type: text/xml');
                 echo '<?xml version="1.0" encoding="UTF-8"?>
@@ -388,6 +425,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
         
+        // Check for SetParameterValuesResponse
+        if (stripos($raw_post, 'SetParameterValuesResponse') !== false) {
+            // Extract the status
+            preg_match('/<Status>(.*?)<\/Status>/s', $raw_post, $statusMatches);
+            if (isset($statusMatches[1])) {
+                $status = trim($statusMatches[1]);
+                writeLog("Parameter set operation completed with status: " . $status, true);
+            }
+            
+            // Extract SOAP ID
+            preg_match('/<cwmp:ID SOAP-ENV:mustUnderstand="1">(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
+            $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
+            
+            // Send empty response to complete session
+            header('Content-Type: text/xml');
+            echo '<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <SOAP-ENV:Header>
+    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </SOAP-ENV:Header>
+  <SOAP-ENV:Body>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>';
+            exit;
+        }
+        
         // Check for fault messages
         if (stripos($raw_post, '<SOAP-ENV:Fault>') !== false || stripos($raw_post, '<cwmp:Fault>') !== false) {
             preg_match('/<FaultCode>(.*?)<\/FaultCode>.*?<FaultString>(.*?)<\/FaultString>/s', $raw_post, $faultMatches);
@@ -395,6 +458,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!empty($faultMatches)) {
                 $faultCode = $faultMatches[1];
                 $faultString = $faultMatches[2];
+                
+                // Only log faults for set operations
+                if (stripos($raw_post, 'SetParameterValues') !== false) {
+                    writeLog("SET Parameter Fault: Code=" . $faultCode . ", Message=" . $faultString, true);
+                }
                 
                 // Extract SOAP ID
                 preg_match('/<cwmp:ID SOAP-ENV:mustUnderstand="1">(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
@@ -479,7 +547,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // If we've tried everything, just complete the session
                 if ($nextParam === null) {
                     // Store parameters in database before completing
-                    storeParametersInDatabase();
+                    $url = 'http://' . $_SERVER['HTTP_HOST'] . '/backend/api/store_tr069_data.php';
+                    $ch = curl_init($url);
+                    curl_setopt($ch, CURLOPT_POST, 1);
+                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                    curl_exec($ch);
+                    curl_close($ch);
                     
                     header('Content-Type: text/xml');
                     echo '<?xml version="1.0" encoding="UTF-8"?>
@@ -586,4 +659,3 @@ if (stripos($raw_post, '<cwmp:Inform>') !== false) {
     echo $opticalRequest;
     exit;
 }
-?>
