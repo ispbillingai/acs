@@ -91,19 +91,11 @@ class MessageHandler {
             
             // Build a compound SOAP body: InformResponse + GetParameterValues
             // We need to inject the GetParameterValues into the SOAP body before it closes
-// Insert just before the closing </…:Body>, regardless of prefix case
-$compound = preg_replace(
-    '~</([A-Za-z0-9_-]+):Body>~',
-    $getParamXml . "\n  </$1:Body>",
-    $informResponse,
-    1                // replace first and only closing tag
-);
-
-$this->logger->logToFile(
-    'Compound SOAP (first 200 chars): ' . substr($compound, 0, 200)
-);
-
-
+            $compound = str_replace(
+                '</soapenv:Body>',
+                $getParamXml . "\n  </soapenv:Body>",
+                $informResponse
+            );
             
             $this->logger->logToFile("Combined response length: " . strlen($compound));
             $this->logger->logToFile("======= END HANDLING INFORM =======");
