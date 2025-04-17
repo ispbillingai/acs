@@ -341,6 +341,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $deviceId = $postData['device_id'];
             $ssid = $postData['ssid'] ?? null;
             $password = $postData['password'] ?? null;
+            $security = $postData['security'] ?? 'WPA2-PSK';  // Default to WPA2-PSK
             
             // Create a task for the device
             try {
@@ -351,8 +352,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 $taskData = json_encode([
                     'ssid' => $ssid,
-                    'password' => $password
+                    'password' => $password,
+                    'security' => $security
                 ]);
+                
+                writeLog("[WiFi Config] Creating task for SSID: $ssid, Password length: " . strlen($password) . ", Security: $security");
                 
                 $stmt->bindParam(':device_id', $deviceId);
                 $stmt->bindParam(':task_data', $taskData);
