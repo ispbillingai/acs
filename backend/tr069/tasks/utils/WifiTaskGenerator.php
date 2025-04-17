@@ -1,4 +1,3 @@
-
 <?php
 
 class WifiTaskGenerator {
@@ -10,61 +9,72 @@ class WifiTaskGenerator {
     }
     
     public function generateParameters($data) {
-        $ssid = $data['ssid'] ?? null;
-        $password = $data['password'] ?? null;
+        $ssid = trim($data['ssid'] ?? ''); // Trim to remove trailing spaces
+        $password = $data['password'] ?? '';
+        $security = $data['security'] ?? 'WPA2-PSK'; // Default to WPA2-PSK
         
-        if (!$ssid) {
+        // Validate SSID
+        if (empty($ssid)) {
             $this->logger->logToFile("SSID is required for WiFi configuration");
             return null;
         }
         
+        // Validate password if provided
+        if (!empty($password)) {
+            if (strlen($password) < 8 || strlen($password) > 63) {
+                $this->logger->logToFile("Password must be 8–63 characters for WPA2-PSK, got " . strlen($password));
+                return null;
+            }
+            // Check for invalid characters (basic validation, adjust as needed)
+            if (!preg_match('/^[a-zA-Z0-9!@#$%^&*()_+\-=\[\]{}|;:,.<>?]*$/', $password)) {
+                $this->logger->logToFile("Password contains invalid characters: $password");
+                return null;
+            }
+        }
+        
+        // Core parameters
         $parameters = [
-            [
-                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
-                'value' => $ssid,
-                'type' => 'xsd:string'
-            ],
-            // Always include Enable parameter to ensure WiFi is active
             [
                 'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Enable',
                 'value' => 'true',
                 'type' => 'xsd:boolean'
+            ],
+            [
+                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
+                'value' => $ssid,
+                'type' => 'xsd:string'
             ]
         ];
         
-        // Only add password parameter if provided
-        if ($password) {
-            // Add Huawei-specific security mode parameter
+        // Add password and security parameters if password is provided
+        if (!empty($password)) {
             $parameters[] = [
                 'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_SecurityMode',
-                'value' => 'WPA2-PSK',  // Using WPA2-PSK as the default security mode
+                'value' => 'WPA2-PSK', // Huawei-specific, consistent with HG8546M
                 'type' => 'xsd:string'
             ];
-            
-            // For Huawei devices, use KeyPassphrase
             $parameters[] = [
-                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
-                'value' => $password,
+                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_WPAPSK',
+                'value' => $password, // Huawei-specific for WPA pre-shared key
                 'type' => 'xsd:string'
             ];
-            
-            // Add security mode parameter to ensure password is applied
-            $parameters[] = [
-                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
-                'value' => 'WPAand11i',
-                'type' => 'xsd:string'
-            ];
-            
-            // Make sure encryption is enabled
+            // Set encryption to AES, required for WPA2-PSK
             $parameters[] = [
                 'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.WPAEncryptionModes',
                 'value' => 'AESEncryption',
                 'type' => 'xsd:string'
             ];
+        } else {
+            // If no password, set security to None (open network)
+            $parameters[] = [
+                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_SecurityMode',
+                'value' => 'None',
+                'type' => 'xsd:string'
+            ];
         }
         
         $this->logger->logToFile("Generated WiFi parameters - SSID: $ssid, Password length: " . 
-                 ($password ? strlen($password) : 0) . " chars");
+                                 strlen($password) . " chars, Security: $security");
         
         return [
             'method' => 'SetParameterValues',
