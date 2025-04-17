@@ -1,56 +1,69 @@
 
 <?php
+
 class XMLGenerator {
-    public static function generateParameterRequestXML($soapId, $parameters) {
-        $arraySize = count($parameters);
-        $parameterStrings = '';
-        
-        foreach ($parameters as $param) {
-            $parameterStrings .= "        <string>" . htmlspecialchars($param) . "</string>\n";
+    public static function generateEmptyResponse($id) {
+        return '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $id . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+  </soapenv:Body>
+</soapenv:Envelope>';
+    }
+
+    public static function generateSetParameterRequestXML($id, $name, $value, $type) {
+        return '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope 
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0" 
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $id . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:SetParameterValues>
+      <ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[1]">
+        <ParameterValueStruct>
+          <Name>' . htmlspecialchars($name) . '</Name>
+          <Value xsi:type="' . $type . '">' . htmlspecialchars($value) . '</Value>
+        </ParameterValueStruct>
+      </ParameterList>
+      <ParameterKey>' . uniqid() . '</ParameterKey>
+    </cwmp:SetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>';
+    }
+    
+    public static function generateGetParameterValuesXML($id, $parameterNames) {
+        $parameterNamesXml = '';
+        foreach ($parameterNames as $name) {
+            $parameterNamesXml .= "\n        <string>" . htmlspecialchars($name) . "</string>";
         }
         
         return '<?xml version="1.0" encoding="UTF-8"?>
-<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-  <SOAP-ENV:Header>
-    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </SOAP-ENV:Header>
-  <SOAP-ENV:Body>
+<soapenv:Envelope 
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0" 
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $id . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
     <cwmp:GetParameterValues>
-      <ParameterNames SOAP-ENC:arrayType="xsd:string[' . $arraySize . ']">
-' . $parameterStrings . '      </ParameterNames>
+      <ParameterNames soap-enc:arrayType="xsd:string[' . count($parameterNames) . ']">' . $parameterNamesXml . '
+      </ParameterNames>
     </cwmp:GetParameterValues>
-  </SOAP-ENV:Body>
-</SOAP-ENV:Envelope>';
-    }
-
-    public static function generateSetParameterRequestXML($soapId, $paramName, $paramValue, $paramType = "xsd:string") {
-        return '<?xml version="1.0" encoding="UTF-8"?>
-<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-  <SOAP-ENV:Header>
-    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </SOAP-ENV:Header>
-  <SOAP-ENV:Body>
-    <cwmp:SetParameterValues>
-      <ParameterList SOAP-ENC:arrayType="cwmp:ParameterValueStruct[1]">
-        <ParameterValueStruct>
-          <Name>' . htmlspecialchars($paramName) . '</Name>
-          <Value xsi:type="' . $paramType . '">' . htmlspecialchars($paramValue) . '</Value>
-        </ParameterValueStruct>
-      </ParameterList>
-      <ParameterKey></ParameterKey>
-    </cwmp:SetParameterValues>
-  </SOAP-ENV:Body>
-</SOAP-ENV:Envelope>';
-    }
-
-    public static function generateEmptyResponse($soapId) {
-        return '<?xml version="1.0" encoding="UTF-8"?>
-<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-  <SOAP-ENV:Header>
-    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </SOAP-ENV:Header>
-  <SOAP-ENV:Body>
-  </SOAP-ENV:Body>
-</SOAP-ENV:Envelope>';
+  </soapenv:Body>
+</soapenv:Envelope>';
     }
 }
