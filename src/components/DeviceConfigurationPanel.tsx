@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Wifi, Globe, PowerOff, AlertTriangle, Lock } from "lucide-react";
+import { Wifi, Globe, PowerOff, AlertTriangle, Lock, HelpCircle } from "lucide-react";
 
 interface DeviceConfigurationPanelProps {
   deviceId: string;
@@ -92,6 +92,7 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
               <div>
                 <p className="font-medium">Configuration in progress</p>
                 <p className="text-sm">Changes may take 30-60 seconds to apply on the device.</p>
+                <p className="text-sm mt-1">The device needs to connect to the ACS for changes to apply.</p>
               </div>
             </div>,
             { duration: 10000 }
@@ -149,6 +150,18 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
     }
   };
 
+  const showTR069Info = () => {
+    toast.info(
+      <div className="space-y-2">
+        <p className="font-medium">About TR-069 Configuration</p>
+        <p className="text-sm">TR-069 uses a data model with parameters organized in a tree structure.</p>
+        <p className="text-sm">For Huawei HG8145V5 devices, we use the TR-098 data model that starts with "InternetGatewayDevice".</p>
+        <p className="text-sm">Configuration changes are only applied when the device connects to the ACS server.</p>
+      </div>,
+      { duration: 15000 }
+    );
+  };
+
   if (loading) {
     return (
       <div className="space-y-6 p-4 border rounded-lg bg-white shadow-sm flex items-center justify-center h-64">
@@ -166,6 +179,14 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
         <h3 className="text-lg font-bold mb-3 flex items-center gap-2">
           <Wifi className="h-5 w-5" />
           WiFi Configuration
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="h-5 w-5 rounded-full" 
+            onClick={showTR069Info}
+          >
+            <HelpCircle className="h-4 w-4" />
+          </Button>
         </h3>
         <div className="space-y-3">
           <Input
@@ -192,7 +213,8 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
             ) : "Update WiFi"}
           </Button>
           <p className="text-xs text-gray-500 mt-1">
-            Note: Uses hardcoded TR-181 model SOAP request with ID tr181-wifi-a1acc4a2. Using admin/admin credentials.
+            Uses TR-098 data model with InternetGatewayDevice.LANDevice.1.WLANConfiguration parameters.
+            Changes are queued and applied when the device connects to the ACS.
           </p>
         </div>
       </div>

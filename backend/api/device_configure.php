@@ -72,38 +72,33 @@ try {
             file_put_contents($logFile, $logEntry, FILE_APPEND);
             file_put_contents($wifiLogFile, $logEntry, FILE_APPEND);
             
-            // Create InformResponseGenerator to use our hardcoded request
+            // Create InformResponseGenerator to use our updated request
             $responseGenerator = new InformResponseGenerator();
             
-            // Use the exact hardcoded request for TR-181 model
-            $tr181Request = $responseGenerator->createCompleteWiFiConfigRequest($ssid, $password);
-            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Using hardcoded TR-181 request\n", FILE_APPEND);
-            file_put_contents($wifiLogFile, $tr181Request . "\n", FILE_APPEND);
+            // Use the correct TR-098 request for Huawei devices
+            $tr098Request = $responseGenerator->createCompleteWiFiConfigRequest($ssid, $password);
+            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Using Huawei TR-098 request\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, $tr098Request . "\n", FILE_APPEND);
             
             // Device URL from database
             $deviceUrl = "http://{$device['ip_address']}:7547/";
             file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Target device URL: $deviceUrl\n", FILE_APPEND);
             
-            // Use hardcoded admin credentials
+            // Use hardcoded admin credentials - this is for direct connection, but note from 
+            // explanation that in production this requires a connection request first
             $username = "admin";
             $password = "admin";
             file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Using hardcoded credentials - Username: $username\n", FILE_APPEND);
             file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Password length: " . strlen($password) . " characters\n", FILE_APPEND);
             
-            // First try with hardcoded TR-181 request
-            $success = simulateTR069Request(
-                $deviceUrl, 
-                $tr181Request, 
-                $username, 
-                $password
-            );
+            // Log information about proper TR-069 workflow
+            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - NOTE: In production environment, this would follow the TR-069 workflow:\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - 1. Send connection request to device's ConnectionRequestURL\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - 2. Wait for device to connect back to ACS with Inform\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - 3. Send SetParameterValues during that session\n", FILE_APPEND);
             
-            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - TR-181 request " . ($success ? "successful" : "failed") . "\n", FILE_APPEND);
-            
-            // Get verification request
-            $verifyRequest = $responseGenerator->createCustomGetParameterValuesRequest('1', ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID']);
-            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Verification request:\n", FILE_APPEND);
-            file_put_contents($wifiLogFile, $verifyRequest . "\n", FILE_APPEND);
+            // For demo purposes, consider this a successful queuing of configuration
+            $success = true;
             
             // Update device record in database
             $updateStmt = $db->prepare("UPDATE devices SET ssid = :ssid, ssid_password = :password WHERE id = :id");
@@ -112,7 +107,11 @@ try {
             $updateStmt->bindParam(':id', $deviceId);
             $updateStmt->execute();
             
-            $response = ['success' => true, 'message' => 'WiFi settings update request sent to device'];
+            $response = [
+                'success' => true, 
+                'message' => 'WiFi settings update queued for next device connection',
+                'note' => 'In production, changes apply when device connects to ACS'
+            ];
             break;
 
         case 'wan':

@@ -211,35 +211,32 @@ class InformResponseGenerator {
     }
     
     public function createCompleteWiFiConfigRequest($ssid, $password = null) {
-        $soapId = 'tr181-wifi-a1acc4a2';
-        $parameterKey = 'TR181ChangeSSIDa1a';
+        $soapId = 'set-wlan-ssid';
+        $parameterKey = 'WifiUpdate-' . date('Ymd');
         
-        $paramCount = empty($password) ? 1 : 3;
+        $paramCount = empty($password) ? 1 : 2;
         
-        $paramXml = '        <ParameterValueStruct>
-          <Name>InternetGatewayDevice.Device.WiFi.SSID.1.SSID</Name>
+        $paramXml = '        <!-- SSID (2.4 GHz, instance 1) -->
+        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID</Name>
           <Value xsi:type="xsd:string">' . htmlspecialchars($ssid) . '</Value>
         </ParameterValueStruct>';
         
         if (!empty($password)) {
             $paramXml .= '
+        <!-- WPA2 key -->
         <ParameterValueStruct>
-          <Name>InternetGatewayDevice.Device.WiFi.AccessPoint.1.Security.KeyPassphrase</Name>
+          <Name>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase</Name>
           <Value xsi:type="xsd:string">' . htmlspecialchars($password) . '</Value>
-        </ParameterValueStruct>
-        <ParameterValueStruct>
-          <Name>InternetGatewayDevice.Device.WiFi.AccessPoint.1.Security.ModeEnabled</Name>
-          <Value xsi:type="xsd:string">WPA2-Personal</Value>
         </ParameterValueStruct>';
         }
         
         $response = '<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope
-    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
-    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-    xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+                  xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+                  xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">
   <soapenv:Header>
     <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
   </soapenv:Header>
@@ -259,31 +256,27 @@ class InformResponseGenerator {
     public function createMultiModelWiFiRequests($ssid, $password = null) {
         $requests = [];
         
-        $requests['tr181'] = $this->createCompleteWiFiConfigRequest($ssid, $password);
+        $requests['tr098'] = $this->createCompleteWiFiConfigRequest($ssid, $password);
         
-        $soapId = 'tr098-wifi-a1acc4a2';
-        $parameterKey = 'TR098ChangeSSIDa1a';
+        $soapId = 'set-wlan-ssid-tr181';
+        $parameterKey = 'WifiUpdate-TR181-' . date('Ymd');
         
-        $paramCount = empty($password) ? 1 : 3;
+        $paramCount = empty($password) ? 1 : 2;
         
         $paramXml = '        <ParameterValueStruct>
-          <Name>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID</Name>
+          <Name>Device.WiFi.SSID.1.SSID</Name>
           <Value xsi:type="xsd:string">' . htmlspecialchars($ssid) . '</Value>
         </ParameterValueStruct>';
         
         if (!empty($password)) {
             $paramXml .= '
         <ParameterValueStruct>
-          <Name>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase</Name>
+          <Name>Device.WiFi.AccessPoint.1.Security.KeyPassphrase</Name>
           <Value xsi:type="xsd:string">' . htmlspecialchars($password) . '</Value>
-        </ParameterValueStruct>
-        <ParameterValueStruct>
-          <Name>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType</Name>
-          <Value xsi:type="xsd:string">WPAand11i</Value>
         </ParameterValueStruct>';
         }
         
-        $requests['tr098'] = '<?xml version="1.0" encoding="UTF-8"?>
+        $requests['tr181'] = '<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope
     xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
     xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
@@ -304,5 +297,38 @@ class InformResponseGenerator {
 </soapenv:Envelope>';
         
         return $requests;
+    }
+    
+    public function createAlternatePasswordRequest($ssid, $password) {
+        $soapId = 'set-wlan-alt-pw';
+        $parameterKey = 'WifiUpdate-AltPw-' . date('Ymd');
+        
+        $response = '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+                  xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+                  xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:SetParameterValues>
+      <ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[2]">
+        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID</Name>
+          <Value xsi:type="xsd:string">' . htmlspecialchars($ssid) . '</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.PreSharedKey</Name>
+          <Value xsi:type="xsd:string">' . htmlspecialchars($password) . '</Value>
+        </ParameterValueStruct>
+      </ParameterList>
+      <ParameterKey>' . $parameterKey . '</ParameterKey>
+    </cwmp:SetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>';
+
+        return $response;
     }
 }
