@@ -5,6 +5,7 @@ require_once __DIR__ . '/utils/WifiTaskGenerator.php';
 require_once __DIR__ . '/utils/WanTaskGenerator.php';
 require_once __DIR__ . '/utils/RebootTaskGenerator.php';
 require_once __DIR__ . '/utils/CommitHelper.php';
+require_once __DIR__ . '/../core/XMLGenerator.php';
 
 class TaskHandler {
     private $db;
@@ -72,6 +73,9 @@ class TaskHandler {
                 foreach ($tasks as $task) {
                     $this->logToFile("Task ID: {$task['id']} - Type: {$task['task_type']} - Data: {$task['task_data']}");
                 }
+                
+                // Store the first task as a pending request in XMLGenerator
+                $this->storeTaskAsPendingRequest($deviceSerialNumber, $tasks[0]);
             } else {
                 $this->logToFile("No pending tasks for device ID: $deviceId");
             }
@@ -80,6 +84,38 @@ class TaskHandler {
         } catch (PDOException $e) {
             $this->logToFile("Database error in getPendingTasks: " . $e->getMessage());
             return [];
+        }
+    }
+    
+    // Store a task as a pending request in XMLGenerator
+    private function storeTaskAsPendingRequest($deviceSerialNumber, $task) {
+        $this->logToFile("Storing task as pending request - Serial: $deviceSerialNumber, Task ID: {$task['id']}");
+        
+        // Generate the parameters for this task
+        $parameterRequest = $this->generateParameterValues($task['task_type'], $task['task_data']);
+        
+        if ($parameterRequest) {
+            // Store the task as a pending request
+            $stored = XMLGenerator::storeRequestAsPending(
+                $deviceSerialNumber, 
+                $parameterRequest['method'], 
+                $parameterRequest['parameters'] ?? []
+            );
+            
+            if ($stored) {
+                $this->logToFile("Successfully stored task as pending request - Task ID: {$task['id']}");
+                
+                // Mark task as in progress
+                $this->updateTaskStatus($task['id'], 'in_progress', 'Stored as pending request');
+                
+                return true;
+            } else {
+                $this->logToFile("Failed to store task as pending request - Task ID: {$task['id']}");
+                return false;
+            }
+        } else {
+            $this->logToFile("Failed to generate parameters for task {$task['id']}");
+            return false;
         }
     }
     
