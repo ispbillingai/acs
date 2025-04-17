@@ -53,7 +53,7 @@ class WifiTaskGenerator
         }
 
         $task = [
-            'method'     => 'SetParameterValues+Commit', // handler must send SPV then Commit
+            'method'     => 'SetParameterValues+Commit', // Updated to indicate Commit is needed
             'parameters' => $params,
         ];
 
