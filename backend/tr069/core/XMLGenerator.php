@@ -2,60 +2,35 @@
 
 class XMLGenerator {
     private static function ensureLogDirectoryExists() {
-        error_log("TR-069 XMLGenerator: Ensuring log directory exists");
         $logDir = __DIR__ . '/../../../../retrieve_logs';
         if (!is_dir($logDir)) {
-            error_log("TR-069 XMLGenerator: Creating log directory: " . $logDir);
-            $result = mkdir($logDir, 0777, true);
-            if (!$result) {
-                error_log("TR-069 XMLGenerator: ERROR - Failed to create log directory: " . $logDir);
-            } else {
-                error_log("TR-069 XMLGenerator: Successfully created log directory: " . $logDir);
-                chmod($logDir, 0777);
-            }
-        } else {
-            error_log("TR-069 XMLGenerator: Log directory already exists: " . $logDir);
+            mkdir($logDir, 0777, true);
         }
         return $logDir;
     }
 
     private static function writeLog($message) {
-        error_log("TR-069 XMLGenerator writeLog: " . $message);
+        $logDir = self::ensureLogDirectoryExists();
+        $logFile = $logDir . '/retrieve_' . date('Y-m-d') . '.log';
         
-        try {
-            $logDir = self::ensureLogDirectoryExists();
-            $logFile = $logDir . '/retrieve_' . date('Y-m-d') . '.log';
-            
-            // Ensure the log file is writable
-            if (!file_exists($logFile)) {
-                error_log("TR-069 XMLGenerator: Creating log file: " . $logFile);
-                $result = touch($logFile);
-                if (!$result) {
-                    error_log("TR-069 XMLGenerator: ERROR - Failed to create log file: " . $logFile);
-                } else {
-                    error_log("TR-069 XMLGenerator: Successfully created log file: " . $logFile);
-                    chmod($logFile, 0666);
-                }
-            }
-            
-            // Write the log message with timestamp
-            $logEntry = date('Y-m-d H:i:s') . " - " . $message . "\n";
-            $result = file_put_contents($logFile, $logEntry, FILE_APPEND);
-            
-            if ($result === false) {
-                error_log("TR-069 XMLGenerator: ERROR - Failed to write to log file: " . $logFile);
-            } else {
-                error_log("TR-069 XMLGenerator: Successfully wrote " . $result . " bytes to log file");
-            }
-        } catch (Exception $e) {
-            error_log("TR-069 XMLGenerator: EXCEPTION in writeLog: " . $e->getMessage());
+        // Ensure the log file is writable
+        if (!file_exists($logFile)) {
+            touch($logFile);
+            chmod($logFile, 0666);
         }
+        
+        // Write the log message with timestamp
+        $logEntry = date('Y-m-d H:i:s') . " - " . $message . "\n";
+        file_put_contents($logFile, $logEntry, FILE_APPEND);
+        
+        // Also log to error_log as a backup
+        error_log("TR-069 RETRIEVE LOG: " . $message);
     }
 
     public static function generateEmptyResponse($id) {
-        error_log("TR-069 XMLGenerator: generateEmptyResponse with ID: " . $id);
         self::writeLog("Generating empty response with ID: $id");
         
+        error_log("TR-069: Generating empty response with ID: $id");
         return '<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope
     xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
@@ -71,9 +46,9 @@ class XMLGenerator {
     }
 
     public static function generateSetParameterRequestXML($id, $name, $value, $type) {
-        error_log("TR-069 XMLGenerator: generateSetParameterRequestXML: $name=$value with ID: $id");
         self::writeLog("Generating SetParameter request for $name=$value with ID: $id");
         
+        error_log("TR-069: Generating SetParameter request for $name=$value with ID: $id");
         return '<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope 
     xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
@@ -99,15 +74,12 @@ class XMLGenerator {
     }
     
     public static function generateGetParameterValuesXML($id, $parameterNames) {
-        error_log("TR-069 XMLGenerator: Generating GetParameterValuesXML for " . count($parameterNames) . " parameters with ID: $id");
-        
-        self::writeLog("Generating GetParameterValues for " . implode(', ', $parameterNames));
-        
         $parameterNamesXml = '';
         foreach ($parameterNames as $name) {
             $parameterNamesXml .= "\n        <string>" . htmlspecialchars($name) . "</string>";
         }
         
+        error_log("TR-069: Generating GetParameterValues XML for " . count($parameterNames) . " parameters with ID: $id");
         return '<cwmp:GetParameterValues>
       <ParameterNames soap-enc:arrayType="xsd:string[' . count($parameterNames) . ']" xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">' . $parameterNamesXml . '
       </ParameterNames>
@@ -115,15 +87,12 @@ class XMLGenerator {
     }
 
     public static function generateFullGetParameterValuesRequestXML($id, $parameterNames) {
-        error_log("TR-069 XMLGenerator: Generating FULL GetParameterValuesRequestXML for " . count($parameterNames) . " parameters with ID: $id");
-        
-        self::writeLog("Generating FULL GetParameterValuesRequest for " . count($parameterNames) . " parameters: " . implode(', ', $parameterNames));
-        
         $parameterNamesXml = '';
         foreach ($parameterNames as $name) {
             $parameterNamesXml .= "\n        <string>" . htmlspecialchars($name) . "</string>";
         }
         
+        error_log("TR-069: Generating FULL GetParameterValues request XML with ID: $id");
         return '<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope
     xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
@@ -144,9 +113,9 @@ class XMLGenerator {
     }
 
     public static function generateInformResponseXML($id) {
-        error_log("TR-069 XMLGenerator: Generating InformResponseXML with ID: $id");
         self::writeLog("Generating InformResponse XML with ID: $id");
         
+        error_log("TR-069: Generating InformResponse XML with ID: $id");
         return '<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope
     xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
@@ -165,20 +134,13 @@ class XMLGenerator {
     }
 
     public static function generateCompoundInformResponseWithGPV($soapId, $parameterNames) {
-        error_log("TR-069 XMLGenerator: generateCompoundInformResponseWithGPV with ID: $soapId for " . count($parameterNames) . " parameters");
         self::writeLog("Generating compound response with InformResponse + GetParameterValues");
         self::writeLog("Parameters requested: " . implode(', ', $parameterNames));
         
-        error_log("TR-069 XMLGenerator: Attempting to create/check retrieve.log directly");
-        $retrieveLog = __DIR__ . '/../../../retrieve.log';
-        if (!file_exists($retrieveLog)) {
-            error_log("TR-069 XMLGenerator: Creating retrieve.log at " . $retrieveLog);
-            touch($retrieveLog);
-            chmod($retrieveLog, 0666);
-        }
-        file_put_contents($retrieveLog, date('Y-m-d H:i:s') . " Starting compound response generation\n", FILE_APPEND);
-        file_put_contents($retrieveLog, date('Y-m-d H:i:s') . " Parameters: " . implode(', ', $parameterNames) . "\n", FILE_APPEND);
+        error_log("TR-069: CRITICAL - Generating compound response with InformResponse + GetParameterValues");
         
+        // We need to modify this to make a properly formatted XML response with both elements
+        // The key issue was that we were trying to combine two complete XML documents
         $compound = '<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope 
     xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
@@ -196,41 +158,22 @@ class XMLGenerator {
   </soapenv:Body>
 </soapenv:Envelope>';
 
+        // Log this for debugging
         $logDir = __DIR__ . '/../../../logs';
         if (!is_dir($logDir)) {
-            error_log("TR-069 XMLGenerator: Creating logs directory at " . $logDir);
-            $result = mkdir($logDir, 0777, true);
-            if (!$result) {
-                error_log("TR-069 XMLGenerator: ERROR - Failed to create logs directory");
-            } else {
-                error_log("TR-069 XMLGenerator: Successfully created logs directory");
-            }
+            mkdir($logDir, 0777, true);
         }
         
+        // Save the compound XML for inspection
         $logFile = $logDir . '/tr069_compound_' . date('Ymd_His') . '.xml';
         file_put_contents($logFile, $compound);
-        error_log("TR-069 XMLGenerator: Saved compound XML to: $logFile");
+        error_log("TR-069: Saved compound XML to: $logFile");
         
-        file_put_contents($retrieveLog, date('Y-m-d H:i:s') . " Generated compound response XML\n", FILE_APPEND);
-        file_put_contents($retrieveLog, date('Y-m-d H:i:s') . " Compound XML length: " . strlen($compound) . "\n", FILE_APPEND);
+        // NEW - Write to retrieve.log specifically
+        file_put_contents(__DIR__ . '/../../../retrieve.log', date('Y-m-d H:i:s') . " Generated compound response XML\n", FILE_APPEND);
+        file_put_contents(__DIR__ . '/../../../retrieve.log', date('Y-m-d H:i:s') . " Compound XML length: " . strlen($compound) . "\n", FILE_APPEND);
+        file_put_contents(__DIR__ . '/../../../retrieve.log', date('Y-m-d H:i:s') . " Parameters requested: " . implode(', ', $parameterNames) . "\n", FILE_APPEND);
         
         return $compound;
-    }
-    
-    public static function directLogToFile($message, $filename = null) {
-        error_log("TR-069 XMLGenerator: Direct logging message: " . $message);
-        
-        if ($filename === null) {
-            $filename = __DIR__ . '/../../../direct_debug.log';
-        }
-        
-        $logEntry = date('Y-m-d H:i:s') . " - " . $message . "\n";
-        $result = file_put_contents($filename, $logEntry, FILE_APPEND);
-        
-        if ($result === false) {
-            error_log("TR-069 XMLGenerator: ERROR - Failed direct logging to: " . $filename);
-        } else {
-            error_log("TR-069 XMLGenerator: Direct logged " . $result . " bytes to: " . $filename);
-        }
     }
 }
