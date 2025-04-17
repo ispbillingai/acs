@@ -1,3 +1,4 @@
+
 <?php
 
 class WifiTaskGenerator
@@ -53,8 +54,9 @@ class WifiTaskGenerator
         }
 
         $task = [
-            'method'     => 'SetParameterValues+Commit', // Updated to indicate Commit is needed
+            'method'     => 'SetParameterValues',  // Changed to actual RPC name
             'parameters' => $params,
+            'requires_commit' => true              // Flag to indicate Commit is needed
         ];
 
         $this->log('Task JSON returned to handler: ' . json_encode($task));
