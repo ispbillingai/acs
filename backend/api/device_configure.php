@@ -158,24 +158,49 @@ try {
             break;
             
         case 'wan':
-            // Validate parameters
-            if (!isset($_POST['ip_address'])) {
-                writeToDeviceLog("[Error] Missing IP address for WAN configuration");
-                header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'message' => 'IP address is required']);
-                exit;
+            // Get connection type (DHCP, PPPoE, Static)
+            $connectionType = $_POST['connection_type'] ?? 'DHCP';
+            writeToDeviceLog("[WAN Config] Connection type: {$connectionType}");
+            
+            // Prepare task data based on connection type
+            $taskData = [
+                'connection_type' => $connectionType
+            ];
+            
+            // Add connection-type specific parameters
+            if ($connectionType === 'Static') {
+                if (!isset($_POST['ip_address']) || !isset($_POST['subnet_mask'])) {
+                    writeToDeviceLog("[Error] Missing IP address or subnet mask for Static IP configuration");
+                    header('Content-Type: application/json');
+                    echo json_encode(['success' => false, 'message' => 'IP address and subnet mask are required for Static IP configuration']);
+                    exit;
+                }
+                
+                $taskData['ip_address'] = $_POST['ip_address'];
+                $taskData['subnet_mask'] = $_POST['subnet_mask'];
+                $taskData['gateway'] = $_POST['gateway'] ?? '';
+                $taskData['dns_server1'] = $_POST['dns_server1'] ?? '';
+                $taskData['dns_server2'] = $_POST['dns_server2'] ?? '';
+                
+                writeToDeviceLog("[WAN Config] Creating Static IP task with IP: {$taskData['ip_address']}, Subnet: {$taskData['subnet_mask']}");
+            } 
+            elseif ($connectionType === 'PPPoE') {
+                if (!isset($_POST['pppoe_username'])) {
+                    writeToDeviceLog("[Error] Missing username for PPPoE configuration");
+                    header('Content-Type: application/json');
+                    echo json_encode(['success' => false, 'message' => 'Username is required for PPPoE configuration']);
+                    exit;
+                }
+                
+                $taskData['pppoe_username'] = $_POST['pppoe_username'];
+                $taskData['pppoe_password'] = $_POST['pppoe_password'] ?? '';
+                
+                writeToDeviceLog("[WAN Config] Creating PPPoE task with Username: {$taskData['pppoe_username']}");
             }
-            
-            $ipAddress = $_POST['ip_address'];
-            $gateway = $_POST['gateway'] ?? '';
-            
-            // Create task data
-            $taskData = json_encode([
-                'ip_address' => $ipAddress,
-                'gateway' => $gateway
-            ]);
-            
-            writeToDeviceLog("[WAN Config] Creating task for IP: {$ipAddress}, Gateway: {$gateway}");
+            else {
+                // DHCP - no additional parameters needed
+                writeToDeviceLog("[WAN Config] Creating DHCP task");
+            }
             
             // First, check for any existing pending WAN tasks and mark them as canceled
             $cancelStmt = $db->prepare("
@@ -198,18 +223,56 @@ try {
             
             $stmt->execute([
                 ':device_id' => $deviceId,
-                ':task_data' => $taskData
+                ':task_data' => json_encode($taskData)
             ]);
             
             $taskId = $db->lastInsertId();
             writeToDeviceLog("[Task Created] ID: {$taskId}, Type: wan");
             
-            header('Content-Type: application/json');
-            echo json_encode([
-                'success' => true,
-                'message' => 'WAN configuration task created successfully',
-                'task_id' => $taskId
-            ]);
+            // Prepare connection request data for frontend display
+            $ipAddress = $device['ip_address'] ?? '';
+            $serialNumber = $device['serial_number'] ?? '';
+            
+            // Build connection request URLs
+            if (!empty($ipAddress)) {
+                $ports = ['30005', '37215', '7547', '4567'];
+                $username = 'admin';
+                $password = 'admin';
+                
+                $connectionUrl = "http://{$ipAddress}:30005/acs";
+                $command = "curl -v -u \"{$username}:{$password}\" -d \"<cwmp:ID>API_".$taskId."</cwmp:ID>\" \"{$connectionUrl}\"";
+                
+                $altCommands = [];
+                foreach ($ports as $port) {
+                    if ($port === '30005') continue; // Skip default
+                    $altUrl = "http://{$ipAddress}:{$port}/acs";
+                    $altCommands[] = "curl -v -u \"{$username}:{$password}\" -d \"<cwmp:ID>API_".$taskId."</cwmp:ID>\" \"{$altUrl}\"";
+                }
+                
+                $connectionRequest = [
+                    'url' => $connectionUrl,
+                    'username' => $username,
+                    'password' => $password,
+                    'command' => $command,
+                    'alternative_commands' => $altCommands
+                ];
+                
+                header('Content-Type: application/json');
+                echo json_encode([
+                    'success' => true,
+                    'message' => 'WAN configuration task created successfully',
+                    'task_id' => $taskId,
+                    'connection_request' => $connectionRequest,
+                    'tr069_session_id' => $GLOBALS['session_id'] ?? null
+                ]);
+            } else {
+                header('Content-Type: application/json');
+                echo json_encode([
+                    'success' => true,
+                    'message' => 'WAN configuration task created successfully',
+                    'task_id' => $taskId
+                ]);
+            }
             break;
             
         case 'reboot':
