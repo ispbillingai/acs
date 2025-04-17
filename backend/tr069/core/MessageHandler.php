@@ -30,6 +30,7 @@ class MessageHandler {
             
             // Extract additional device parameters from inform message
             $deviceParams = $this->extractDeviceParams($raw_post);
+            $this->logger->logToFile("Extracted parameters: " . json_encode($deviceParams));
             
             // Update device with all extracted parameters
             $this->updateDeviceWithParams($serialNumber, $deviceParams);
@@ -40,6 +41,24 @@ class MessageHandler {
             $pendingTasks = $this->taskHandler->getPendingTasks($serialNumber);
             if (!empty($pendingTasks)) {
                 $this->sessionManager->setCurrentTask($pendingTasks[0]);
+            }
+            
+            // After processing the Inform, we should generate a GetParameterValues request
+            // for additional parameters we want to track
+            $this->logger->logToFile("Checking if we need to request additional parameters");
+            
+            $needsParameterRequest = true; // Flag to determine if we need to request parameters
+            
+            // If we received important parameters already, we might not need to request them again
+            if (isset($deviceParams['ipAddress']) && isset($deviceParams['ssid']) && isset($deviceParams['uptime'])) {
+                $this->logger->logToFile("All important parameters already received in Inform message");
+                $needsParameterRequest = false;
+            }
+            
+            if ($needsParameterRequest) {
+                $this->logger->logToFile("Important parameters missing, will need to request them");
+                // We can't request parameters here directly as we need to first send the InformResponse
+                // The parameter request would be handled in the next session step in tr069.php
             }
         }
         
@@ -66,16 +85,19 @@ class MessageHandler {
         // Extract IP address
         if (preg_match('/<Name>InternetGatewayDevice\.WANDevice\.1\.WANConnectionDevice\.1\.WANIPConnection\.1\.ExternalIPAddress<\/Name>\s*<Value[^>]*>(.*?)<\/Value>/s', $raw_post, $matches)) {
             $params['ipAddress'] = trim($matches[1]);
+            $this->logger->logToFile("Found IP Address in Inform: " . $params['ipAddress']);
         }
         
         // Extract SSID
         if (preg_match('/<Name>InternetGatewayDevice\.LANDevice\.1\.WLANConfiguration\.1\.SSID<\/Name>\s*<Value[^>]*>(.*?)<\/Value>/s', $raw_post, $matches)) {
             $params['ssid'] = trim($matches[1]);
+            $this->logger->logToFile("Found SSID in Inform: " . $params['ssid']);
         }
         
         // Extract uptime
         if (preg_match('/<Name>InternetGatewayDevice\.DeviceInfo\.UpTime<\/Name>\s*<Value[^>]*>(.*?)<\/Value>/s', $raw_post, $matches)) {
             $params['uptime'] = (int)trim($matches[1]);
+            $this->logger->logToFile("Found Uptime in Inform: " . $params['uptime']);
         }
         
         // Extract software version
@@ -86,6 +108,20 @@ class MessageHandler {
         // Extract hardware version
         if (preg_match('/<Name>InternetGatewayDevice\.DeviceInfo\.HardwareVersion<\/Name>\s*<Value[^>]*>(.*?)<\/Value>/s', $raw_post, $matches)) {
             $params['hardwareVersion'] = trim($matches[1]);
+        }
+        
+        // Additional logging for debugging all parameters
+        preg_match_all('/<ParameterValueStruct>\s*<Name>(.*?)<\/Name>\s*<Value[^>]*>(.*?)<\/Value>\s*<\/ParameterValueStruct>/s', $raw_post, $allParams, PREG_SET_ORDER);
+        
+        if (!empty($allParams)) {
+            $this->logger->logToFile("All parameters in Inform message:");
+            foreach ($allParams as $param) {
+                $paramName = trim($param[1]);
+                $paramValue = trim($param[2]);
+                $this->logger->logToFile("  Parameter: $paramName = $paramValue");
+            }
+        } else {
+            $this->logger->logToFile("No parameters found in ParameterValueStruct blocks");
         }
         
         return $params;
@@ -130,14 +166,24 @@ class MessageHandler {
                     if ($dbField) {
                         $updateFields[] = "$dbField = :$key";
                         $updateValues[':' . $key] = $value;
+                        $this->logger->logToFile("Will update field: $dbField with value: $value");
                     }
                 }
                 
                 $sql = "UPDATE devices SET " . implode(', ', $updateFields) . " WHERE serial_number = :serial";
                 
                 $this->logger->logToFile("Updating device with SQL: $sql");
+                $this->logger->logToFile("Parameter values: " . json_encode($updateValues));
+                
                 $stmt = $this->db->prepare($sql);
-                $stmt->execute($updateValues);
+                $result = $stmt->execute($updateValues);
+                
+                if ($result) {
+                    $this->logger->logToFile("Database update successful");
+                } else {
+                    $errorInfo = $stmt->errorInfo();
+                    $this->logger->logToFile("Database update failed: " . $errorInfo[2]);
+                }
             }
             
             $this->logger->logToFile("Device $serialNumber updated successfully with parameters: " . json_encode($params));
