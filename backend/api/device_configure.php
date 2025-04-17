@@ -63,8 +63,11 @@ try {
                 throw new Exception("SSID cannot be empty");
             }
             
+            // Generate current timestamp for logging
+            $timestamp = date('Y-m-d H:i:s');
+            
             // Log WiFi configuration change attempt with more details
-            $logEntry = date('Y-m-d H:i:s') . " - Device $deviceId: WiFi configuration change\n";
+            $logEntry = "$timestamp - Device $deviceId: WiFi configuration change\n";
             $logEntry .= "  New SSID: $ssid\n";
             $logEntry .= "  Password Length: " . strlen($password) . " characters\n";
             
@@ -75,42 +78,55 @@ try {
             // Create InformResponseGenerator to use our updated request
             $responseGenerator = new InformResponseGenerator();
             
-            // Use the correct TR-098 request for Huawei devices
+            // Explain TR-069 workflow in detail
+            file_put_contents($wifiLogFile, "$timestamp - TR-069 CORRECT WORKFLOW EXPLANATION:\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "$timestamp - 1. ACS initiates a Connection Request to device via ConnectionRequestURL\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "$timestamp - 2. Device responds with 204 No Content\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "$timestamp - 3. Device initiates a session by sending an Inform to ACS\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "$timestamp - 4. ACS responds with InformResponse\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "$timestamp - 5. ACS then sends SetParameterValues in same session\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "$timestamp - 6. Device confirms with SetParameterValuesResponse\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "$timestamp - 7. ACS may send GetParameterValues to verify\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "$timestamp - 8. Device may need explicit Commit command\n\n", FILE_APPEND);
+            
+            // Generate the correct TR-098 request for Huawei HG8145V5 devices
             $tr098Request = $responseGenerator->createCompleteWiFiConfigRequest($ssid, $password);
-            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Using Huawei TR-098 request\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "$timestamp - Using Huawei HG8145V5 TR-098 request:\n", FILE_APPEND);
             file_put_contents($wifiLogFile, $tr098Request . "\n", FILE_APPEND);
             
-            // Device URL from database
-            $deviceUrl = "http://{$device['ip_address']}:7547/";
-            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Target device URL: $deviceUrl\n", FILE_APPEND);
+            // For connection request simulation
+            $connectionRequestUsername = $device['connection_request_username'] ?? 'admin';
+            $connectionRequestPassword = $device['connection_request_password'] ?? 'admin';
+            $connectionRequestPort = 4567; // Standard TR-069 connection request port
+            $connectionRequestUrl = "http://{$device['ip_address']}:$connectionRequestPort/";
             
-            // Use hardcoded admin credentials - this is for direct connection, but note from 
-            // explanation that in production this requires a connection request first
-            $username = "admin";
-            $password = "admin";
-            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Using hardcoded credentials - Username: $username\n", FILE_APPEND);
-            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Password length: " . strlen($password) . " characters\n", FILE_APPEND);
+            $connectionRequest = $responseGenerator->createConnectionRequestTrigger(
+                $connectionRequestUsername,
+                $connectionRequestPassword,
+                $connectionRequestUrl
+            );
             
-            // Log information about proper TR-069 workflow
-            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - NOTE: In production environment, this would follow the TR-069 workflow:\n", FILE_APPEND);
-            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - 1. Send connection request to device's ConnectionRequestURL\n", FILE_APPEND);
-            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - 2. Wait for device to connect back to ACS with Inform\n", FILE_APPEND);
-            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - 3. Send SetParameterValues during that session\n", FILE_APPEND);
-            
-            // For demo purposes, consider this a successful queuing of configuration
-            $success = true;
+            file_put_contents($wifiLogFile, "$timestamp - CONNECTION REQUEST CURL COMMAND:\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "$timestamp - " . $connectionRequest['command'] . "\n\n", FILE_APPEND);
             
             // Update device record in database
             $updateStmt = $db->prepare("UPDATE devices SET ssid = :ssid, ssid_password = :password WHERE id = :id");
             $updateStmt->bindParam(':ssid', $ssid);
-            $updateStmt->bindParam(':password', $_POST['password'] ?? '');
+            $updateStmt->bindParam(':password', $password);
             $updateStmt->bindParam(':id', $deviceId);
             $updateStmt->execute();
             
             $response = [
                 'success' => true, 
                 'message' => 'WiFi settings update queued for next device connection',
-                'note' => 'In production, changes apply when device connects to ACS'
+                'connection_request' => $connectionRequest,
+                'tr069_workflow' => [
+                    'step1' => 'Connection Request to device',
+                    'step2' => 'Device responds with 204 No Content',
+                    'step3' => 'Device sends Inform to ACS',
+                    'step4' => 'ACS sends SetParameterValues during session',
+                    'note' => 'Configuration changes are applied when the device connects to the ACS'
+                ]
             ];
             break;
 

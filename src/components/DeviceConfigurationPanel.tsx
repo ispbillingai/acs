@@ -2,7 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Wifi, Globe, PowerOff, AlertTriangle, Lock, HelpCircle } from "lucide-react";
+import { Wifi, Globe, PowerOff, AlertTriangle, Lock, HelpCircle, RefreshCw } from "lucide-react";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 
 interface DeviceConfigurationPanelProps {
   deviceId: string;
@@ -17,6 +23,7 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
   const [connectionRequestPassword, setConnectionRequestPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [configuring, setConfiguring] = useState(false);
+  const [connectionRequest, setConnectionRequest] = useState<any>(null);
 
   useEffect(() => {
     console.log("DeviceConfigurationPanel mounted with deviceId:", deviceId);
@@ -85,17 +92,26 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
       if (result.success) {
         toast.success(result.message);
         
+        if (result.connection_request) {
+          setConnectionRequest(result.connection_request);
+        }
+        
         if (action === 'wifi') {
           toast.info(
             <div className="flex items-start gap-2">
               <AlertTriangle className="h-5 w-5 text-yellow-500 flex-shrink-0 mt-0.5" />
               <div>
-                <p className="font-medium">Configuration in progress</p>
-                <p className="text-sm">Changes may take 30-60 seconds to apply on the device.</p>
-                <p className="text-sm mt-1">The device needs to connect to the ACS for changes to apply.</p>
+                <p className="font-medium">TR-069 Configuration Workflow</p>
+                <p className="text-sm">Configuration requires a full TR-069 session:</p>
+                <ol className="text-sm list-decimal pl-5 mt-1">
+                  <li>ACS sends connection request to device</li>
+                  <li>Device opens session with ACS (Inform)</li>
+                  <li>ACS applies configuration during this session</li>
+                </ol>
+                <p className="text-sm mt-1 italic">Changes apply when the device connects to the ACS.</p>
               </div>
             </div>,
-            { duration: 10000 }
+            { duration: 15000 }
           );
         }
       } else {
@@ -156,7 +172,12 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
         <p className="font-medium">About TR-069 Configuration</p>
         <p className="text-sm">TR-069 uses a data model with parameters organized in a tree structure.</p>
         <p className="text-sm">For Huawei HG8145V5 devices, we use the TR-098 data model that starts with "InternetGatewayDevice".</p>
-        <p className="text-sm">Configuration changes are only applied when the device connects to the ACS server.</p>
+        <p className="text-sm">Configuration uses this specific workflow:</p>
+        <ol className="text-sm list-decimal pl-5">
+          <li>ACS sends a connection request to the device</li>
+          <li>Device initiates a session with the ACS (Inform)</li>
+          <li>During this session, the ACS applies configuration changes</li>
+        </ol>
       </div>,
       { duration: 15000 }
     );
@@ -188,6 +209,26 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
             <HelpCircle className="h-4 w-4" />
           </Button>
         </h3>
+        
+        {connectionRequest && (
+          <div className="mb-4 p-3 border rounded-md bg-slate-50">
+            <h4 className="text-sm font-semibold mb-2 flex items-center">
+              <RefreshCw className="h-4 w-4 mr-1" /> TR-069 Connection Request Details
+            </h4>
+            <div className="text-xs space-y-1 font-mono bg-slate-100 p-2 rounded">
+              <div><span className="text-slate-500">URL:</span> {connectionRequest.url}</div>
+              <div><span className="text-slate-500">Username:</span> {connectionRequest.username}</div>
+              <div><span className="text-slate-500">Password:</span> {connectionRequest.password}</div>
+              <div className="pt-1 mt-1 border-t border-slate-200">
+                <div className="text-slate-500">Connection Request Command:</div>
+                <div className="break-all bg-black text-white p-1 rounded mt-1">
+                  {connectionRequest.command}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        
         <div className="space-y-3">
           <Input
             placeholder="WiFi Network Name"
@@ -212,10 +253,31 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
               </>
             ) : "Update WiFi"}
           </Button>
-          <p className="text-xs text-gray-500 mt-1">
-            Uses TR-098 data model with InternetGatewayDevice.LANDevice.1.WLANConfiguration parameters.
-            Changes are queued and applied when the device connects to the ACS.
-          </p>
+          
+          <Accordion type="single" collapsible className="w-full">
+            <AccordionItem value="tr069-info">
+              <AccordionTrigger className="text-xs text-gray-500">
+                TR-069 Implementation Details
+              </AccordionTrigger>
+              <AccordionContent>
+                <div className="text-xs text-gray-600 space-y-2">
+                  <p>For Huawei HG8145V5 devices, we use these TR-098 parameters:</p>
+                  <ul className="list-disc pl-5 space-y-1">
+                    <li><code className="bg-slate-100 px-1 rounded">InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID</code> (2.4GHz WiFi name)</li>
+                    <li><code className="bg-slate-100 px-1 rounded">InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase</code> (WiFi password)</li>
+                  </ul>
+                  <p>The TR-069 workflow requires:</p>
+                  <ol className="list-decimal pl-5 space-y-1">
+                    <li>Connection request from ACS to device</li>
+                    <li>Device opens session with ACS (Inform)</li>
+                    <li>ACS responds with InformResponse</li>
+                    <li>ACS sends SetParameterValues</li>
+                    <li>Device applies changes</li>
+                  </ol>
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
         </div>
       </div>
 

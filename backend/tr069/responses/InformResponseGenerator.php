@@ -253,52 +253,6 @@ class InformResponseGenerator {
         return $response;
     }
     
-    public function createMultiModelWiFiRequests($ssid, $password = null) {
-        $requests = [];
-        
-        $requests['tr098'] = $this->createCompleteWiFiConfigRequest($ssid, $password);
-        
-        $soapId = 'set-wlan-ssid-tr181';
-        $parameterKey = 'WifiUpdate-TR181-' . date('Ymd');
-        
-        $paramCount = empty($password) ? 1 : 2;
-        
-        $paramXml = '        <ParameterValueStruct>
-          <Name>Device.WiFi.SSID.1.SSID</Name>
-          <Value xsi:type="xsd:string">' . htmlspecialchars($ssid) . '</Value>
-        </ParameterValueStruct>';
-        
-        if (!empty($password)) {
-            $paramXml .= '
-        <ParameterValueStruct>
-          <Name>Device.WiFi.AccessPoint.1.Security.KeyPassphrase</Name>
-          <Value xsi:type="xsd:string">' . htmlspecialchars($password) . '</Value>
-        </ParameterValueStruct>';
-        }
-        
-        $requests['tr181'] = '<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope
-    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
-    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-    xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">
-  <soapenv:Header>
-    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </soapenv:Header>
-  <soapenv:Body>
-    <cwmp:SetParameterValues>
-      <ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[' . $paramCount . ']">
-' . $paramXml . '
-      </ParameterList>
-      <ParameterKey>' . $parameterKey . '</ParameterKey>
-    </cwmp:SetParameterValues>
-  </soapenv:Body>
-</soapenv:Envelope>';
-        
-        return $requests;
-    }
-    
     public function createAlternatePasswordRequest($ssid, $password) {
         $soapId = 'set-wlan-alt-pw';
         $parameterKey = 'WifiUpdate-AltPw-' . date('Ymd');
@@ -326,6 +280,34 @@ class InformResponseGenerator {
       </ParameterList>
       <ParameterKey>' . $parameterKey . '</ParameterKey>
     </cwmp:SetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>';
+
+        return $response;
+    }
+    
+    public function createConnectionRequestTrigger($username, $password, $connectionRequestUrl) {
+        return [
+            'username' => $username,
+            'password' => $password,
+            'url' => $connectionRequestUrl,
+            'command' => "curl -i -u \"$username:$password\" \"$connectionRequestUrl\""
+        ];
+    }
+    
+    public function createCommitRequest($id = null) {
+        $soapId = $id ?? 'commit-' . substr(md5(time()), 0, 8);
+        
+        $response = '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+                  xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:Commit/>
   </soapenv:Body>
 </soapenv:Envelope>';
 
