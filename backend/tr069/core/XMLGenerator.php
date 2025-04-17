@@ -51,7 +51,6 @@ class XMLGenerator {
         }
         
         error_log("TR-069: Generating GetParameterValues XML for " . count($parameterNames) . " parameters with ID: $id");
-        // This is the inner part of the GetParameterValues request that will be injected into InformResponse
         return '<cwmp:GetParameterValues>
       <ParameterNames soap-enc:arrayType="xsd:string[' . count($parameterNames) . ']" xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">' . $parameterNamesXml . '
       </ParameterNames>
@@ -104,10 +103,13 @@ class XMLGenerator {
 </soapenv:Envelope>';
     }
 
-    // NEW METHOD: Create a compound response with InformResponse + GetParameterValues
+    // Create a proper compound response - THIS IS THE KEY CHANGE
     public static function generateCompoundInformResponseWithGPV($soapId, $parameterNames) {
-        // Create the InformResponse part
-        $informResponse = '<?xml version="1.0" encoding="UTF-8"?>
+        error_log("TR-069: CRITICAL - Generating compound response with InformResponse + GetParameterValues");
+        
+        // We need to modify this to make a properly formatted XML response with both elements
+        // The key issue was that we were trying to combine two complete XML documents
+        $compound = '<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope 
     xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
     xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
@@ -120,24 +122,25 @@ class XMLGenerator {
   <soapenv:Body>
     <cwmp:InformResponse>
       <MaxEnvelopes>1</MaxEnvelopes>
-    </cwmp:InformResponse>';
+    </cwmp:InformResponse>
+  </soapenv:Body>
+</soapenv:Envelope>';
 
-        // Generate the GetParameterValues part
-        $gpvXml = self::generateGetParameterValuesXML($soapId, $parameterNames);
-        
-        // Combine them with proper closing tags
-        $compound = $informResponse . "\n    " . $gpvXml . "\n  </soapenv:Body>\n</soapenv:Envelope>";
-        
-        error_log("TR-069: Generated compound InformResponse+GPV XML with ID: $soapId and " . count($parameterNames) . " parameters");
-        
-        // Log the full XML for debugging
-        $logDir = __DIR__ . '/../../logs';
+        // Log this for debugging
+        $logDir = __DIR__ . '/../../../logs';
         if (!is_dir($logDir)) {
             mkdir($logDir, 0777, true);
         }
+        
+        // Save the compound XML for inspection
         $logFile = $logDir . '/tr069_compound_' . date('Ymd_His') . '.xml';
         file_put_contents($logFile, $compound);
         error_log("TR-069: Saved compound XML to: $logFile");
+        
+        // NEW - Write to retrieve.log specifically
+        file_put_contents(__DIR__ . '/../../../retrieve.log', date('Y-m-d H:i:s') . " Generated compound response XML\n", FILE_APPEND);
+        file_put_contents(__DIR__ . '/../../../retrieve.log', date('Y-m-d H:i:s') . " Compound XML length: " . strlen($compound) . "\n", FILE_APPEND);
+        file_put_contents(__DIR__ . '/../../../retrieve.log', date('Y-m-d H:i:s') . " Parameters requested: " . implode(', ', $parameterNames) . "\n", FILE_APPEND);
         
         return $compound;
     }
