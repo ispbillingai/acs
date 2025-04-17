@@ -1,4 +1,3 @@
-
 <?php
 // Disable all error logging
 error_reporting(0);
@@ -438,7 +437,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             preg_match('/<cwmp:ID SOAP-ENV:mustUnderstand="1">(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
             $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
             
-            // Send empty response to complete session
+            // Respond to the client with a proper header
             header('Content-Type: text/xml');
             echo '<?xml version="1.0" encoding="UTF-8"?>
 <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
@@ -446,8 +445,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
   </SOAP-ENV:Header>
   <SOAP-ENV:Body>
+    <cwmp:SetParameterValuesResponse>
+      <Status>0</Status>
+    </cwmp:SetParameterValuesResponse>
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
+                
             exit;
         }
         
