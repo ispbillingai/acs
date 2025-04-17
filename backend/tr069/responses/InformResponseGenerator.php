@@ -79,7 +79,7 @@ class InformResponseGenerator {
         return $request;
     }
     
-    // New method to create a detailed SetParameterValues request
+    // Method to create a detailed SetParameterValues request
     public function createDetailedSetParameterValuesRequest($soapId, $parameterStructs) {
         $this->log("TR-069 SET PARAMETERS: Generating SetParameterValues request with ID: $soapId");
         
@@ -87,12 +87,15 @@ class InformResponseGenerator {
         $parameterXml = '';
         
         foreach ($parameterStructs as $param) {
-            $paramValue = $param['name'] === 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase' ? '[HIDDEN]' : $param['value'];
+            $paramValue = $param['name'] === 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase' || 
+                           $param['name'] === 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase' ? 
+                          '[HIDDEN]' : $param['value'];
             $this->log("TR-069 PARAMETER: Setting {$param['name']} = $paramValue");
             
             $parameterXml .= "        <ParameterValueStruct>\n";
-            $parameterXml .= "          <Name>" . htmlspecialchars($param['name']) . "</Name>\n";
-            $parameterXml .= "          <Value xsi:type=\"" . $param['type'] . "\">" . htmlspecialchars($param['value']) . "</Value>\n";
+            $parameterXml .= "          <Name>" . htmlspecialchars($param['name'], ENT_XML1 | ENT_QUOTES, 'UTF-8') . "</Name>\n";
+            $parameterXml .= "          <Value xsi:type=\"" . $param['type'] . "\">" . 
+                              htmlspecialchars($param['value'], ENT_XML1 | ENT_QUOTES, 'UTF-8') . "</Value>\n";
             $parameterXml .= "        </ParameterValueStruct>\n";
         }
         
@@ -116,5 +119,76 @@ class InformResponseGenerator {
 </SOAP-ENV:Envelope>';
 
         return $request;
+    }
+    
+    // New method to create a direct connection to a device
+    public function makeDirectConnection($deviceIp, $port, $soapRequest, $username = 'admin', $password = 'admin', $timeout = 10) {
+        $this->log("TR-069 DIRECT CONNECTION: Attempting to connect to device at $deviceIp:$port");
+        
+        if (function_exists('curl_init')) {
+            // Use cURL for the connection (preferred method)
+            $ch = curl_init("http://$deviceIp:$port/");
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                'Content-Type: text/xml; charset=utf-8',
+                'Authorization: Basic ' . base64_encode("$username:$password")
+            ]);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $soapRequest);
+            
+            $result = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $error = curl_error($ch);
+            curl_close($ch);
+            
+            if ($result !== false) {
+                $this->log("TR-069 DIRECT CONNECTION: HTTP $httpCode response received");
+                return [
+                    'success' => ($httpCode >= 200 && $httpCode < 300),
+                    'http_code' => $httpCode,
+                    'response' => $result
+                ];
+            } else {
+                $this->log("TR-069 DIRECT CONNECTION ERROR: $error");
+                return [
+                    'success' => false,
+                    'error' => $error
+                ];
+            }
+        } else {
+            // Fall back to file_get_contents if cURL is not available
+            $context = stream_context_create([
+                'http' => [
+                    'method' => 'POST',
+                    'header' => "Content-Type: text/xml; charset=utf-8\r\n" .
+                               "Authorization: Basic " . base64_encode("$username:$password"),
+                    'content' => $soapRequest,
+                    'timeout' => $timeout,
+                    'ignore_errors' => true
+                ]
+            ]);
+            
+            $result = @file_get_contents("http://$deviceIp:$port/", false, $context);
+            
+            if (isset($http_response_header)) {
+                $statusLine = $http_response_header[0];
+                preg_match('{HTTP/\S*\s(\d+)}', $statusLine, $match);
+                $statusCode = $match[1] ?? 'unknown';
+                
+                $this->log("TR-069 DIRECT CONNECTION: HTTP $statusCode response received");
+                return [
+                    'success' => ($statusCode >= 200 && $statusCode < 300),
+                    'http_code' => $statusCode,
+                    'response' => $result
+                ];
+            } else {
+                $this->log("TR-069 DIRECT CONNECTION ERROR: Failed to connect");
+                return [
+                    'success' => false,
+                    'error' => 'Connection failed'
+                ];
+            }
+        }
     }
 }
