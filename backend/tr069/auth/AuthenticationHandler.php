@@ -4,16 +4,22 @@ require_once __DIR__ . '/../../config/database.php';
 
 class AuthenticationHandler {
     private $db;
+    private $logFile;
     
     public function __construct() {
         $database = new Database();
         $this->db = $database->getConnection();
+        $this->logFile = __DIR__ . '/../../../device.log';
+    }
+
+    private function writeLog($message) {
+        $timestamp = date('Y-m-d H:i:s');
+        file_put_contents($this->logFile, "$timestamp - $message\n", FILE_APPEND);
     }
 
     public function authenticate() {
         if (!isset($_SERVER['PHP_AUTH_USER']) || !isset($_SERVER['PHP_AUTH_PW'])) {
-            // Only log authentication failures
-            error_log("TR-069 Authentication Failed: Missing credentials", 3, __DIR__ . '/../../../device.log');
+            $this->writeLog("TR-069 AUTHENTICATION FAILED: Missing credentials from " . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
             return false;
         }
 
@@ -26,14 +32,13 @@ class AuthenticationHandler {
             $config = $stmt->fetch(PDO::FETCH_ASSOC);
             
             if ($config && $username === $config['username'] && $password === $config['password']) {
+                $this->writeLog("TR-069 AUTHENTICATION SUCCESS: Device from " . ($_SERVER['REMOTE_ADDR'] ?? 'unknown') . " authenticated");
                 return true;
             }
             
-            // Only log authentication failures
-            error_log("TR-069 Authentication Failed: Invalid credentials", 3, __DIR__ . '/../../../device.log');
+            $this->writeLog("TR-069 AUTHENTICATION FAILED: Invalid credentials from " . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
         } catch (Exception $e) {
-            // Only log errors
-            error_log("TR-069 Authentication Error: " . $e->getMessage(), 3, __DIR__ . '/../../../device.log');
+            $this->writeLog("TR-069 AUTHENTICATION ERROR: " . $e->getMessage());
         }
         
         return false;
