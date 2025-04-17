@@ -4,10 +4,29 @@ require_once __DIR__ . '/../../config/database.php';
 
 class TaskHandler {
     private $db;
+    private $logFile;
     
     public function __construct() {
         $database = new Database();
         $this->db = $database->getConnection();
+        $this->logFile = $_SERVER['DOCUMENT_ROOT'] . '/device.log';
+        
+        // Make sure log directory exists
+        if (!file_exists(dirname($this->logFile))) {
+            mkdir(dirname($this->logFile), 0755, true);
+        }
+    }
+    
+    // Log to device.log file
+    private function logToFile($message) {
+        $timestamp = date('Y-m-d H:i:s');
+        $logMessage = "[{$timestamp}] [TR-069] {$message}" . PHP_EOL;
+        
+        // Log to Apache error log as backup
+        error_log("[TR-069] {$message}", 0);
+        
+        // Log to dedicated device.log file
+        file_put_contents($this->logFile, $logMessage, FILE_APPEND);
     }
     
     public function getPendingTasks($deviceSerialNumber) {
@@ -18,7 +37,7 @@ class TaskHandler {
             $deviceId = $deviceStmt->fetchColumn();
             
             if (!$deviceId) {
-                error_log("[TR-069] No device found with serial number: $deviceSerialNumber", 0);
+                $this->logToFile("No device found with serial number: $deviceSerialNumber");
                 return [];
             }
             
@@ -33,12 +52,19 @@ class TaskHandler {
             $tasks = $stmt->fetchAll(PDO::FETCH_ASSOC);
             
             if (!empty($tasks)) {
-                error_log("[TR-069] Found " . count($tasks) . " pending tasks for device ID: $deviceId", 0);
+                $this->logToFile("Found " . count($tasks) . " pending tasks for device ID: $deviceId");
+                
+                // Log details of each task
+                foreach ($tasks as $task) {
+                    $this->logToFile("Task ID: {$task['id']} - Type: {$task['task_type']} - Data: {$task['task_data']}");
+                }
+            } else {
+                $this->logToFile("No pending tasks for device ID: $deviceId");
             }
             
             return $tasks;
         } catch (PDOException $e) {
-            error_log("[TR-069] Database error in getPendingTasks: " . $e->getMessage(), 0);
+            $this->logToFile("Database error in getPendingTasks: " . $e->getMessage());
             return [];
         }
     }
@@ -58,10 +84,10 @@ class TaskHandler {
                 ':id' => $taskId
             ]);
             
-            error_log("[TR-069] Updated task ID: $taskId - Status: $status - Message: $message", 0);
+            $this->logToFile("Updated task ID: $taskId - Status: $status - Message: $message");
             return true;
         } catch (PDOException $e) {
-            error_log("[TR-069] Database error in updateTaskStatus: " . $e->getMessage(), 0);
+            $this->logToFile("Database error in updateTaskStatus: " . $e->getMessage());
             return false;
         }
     }
@@ -70,9 +96,11 @@ class TaskHandler {
         $data = json_decode($taskData, true);
         
         if (!$data) {
-            error_log("[TR-069] Invalid task data JSON: $taskData", 0);
+            $this->logToFile("Invalid task data JSON: $taskData");
             return null;
         }
+        
+        $this->logToFile("Generating parameters for task type: $taskType with data: $taskData");
         
         switch ($taskType) {
             case 'wifi':
@@ -82,7 +110,7 @@ class TaskHandler {
             case 'reboot':
                 return $this->generateRebootCommand();
             default:
-                error_log("[TR-069] Unsupported task type: $taskType", 0);
+                $this->logToFile("Unsupported task type: $taskType");
                 return null;
         }
     }
@@ -92,7 +120,7 @@ class TaskHandler {
         $password = $data['password'] ?? null;
         
         if (!$ssid) {
-            error_log("[TR-069] SSID is required for WiFi configuration", 0);
+            $this->logToFile("SSID is required for WiFi configuration");
             return null;
         }
         
@@ -121,8 +149,8 @@ class TaskHandler {
             ];
         }
         
-        error_log("[TR-069] Generated WiFi parameters - SSID: $ssid, Password length: " . 
-                 ($password ? strlen($password) : 0) . " chars", 0);
+        $this->logToFile("Generated WiFi parameters - SSID: $ssid, Password length: " . 
+                 ($password ? strlen($password) : 0) . " chars");
         
         return [
             'method' => 'SetParameterValues',
@@ -135,7 +163,7 @@ class TaskHandler {
         $gateway = $data['gateway'] ?? null;
         
         if (!$ipAddress) {
-            error_log("[TR-069] IP Address is required for WAN configuration", 0);
+            $this->logToFile("IP Address is required for WAN configuration");
             return null;
         }
         
@@ -155,7 +183,7 @@ class TaskHandler {
             ];
         }
         
-        error_log("[TR-069] Generated WAN parameters - IP: $ipAddress, Gateway: $gateway", 0);
+        $this->logToFile("Generated WAN parameters - IP: $ipAddress, Gateway: $gateway");
         
         return [
             'method' => 'SetParameterValues',
@@ -164,7 +192,7 @@ class TaskHandler {
     }
     
     private function generateRebootCommand() {
-        error_log("[TR-069] Generated Reboot command", 0);
+        $this->logToFile("Generated Reboot command");
         
         return [
             'method' => 'Reboot',

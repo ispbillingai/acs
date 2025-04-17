@@ -9,10 +9,27 @@ ini_set('log_errors', 1);
 $GLOBALS['session_id'] = 'session-' . substr(md5(time()), 0, 8);
 $GLOBALS['current_task'] = null;
 
-// Log detailed information to Apache error log
+// Define device.log file path
+$GLOBALS['device_log'] = __DIR__ . '/device.log';
+
+// Ensure the log file exists
+if (!file_exists($GLOBALS['device_log'])) {
+    touch($GLOBALS['device_log']);
+    chmod($GLOBALS['device_log'], 0666); // Make writable
+}
+
+// Log detailed information to both Apache error log and device.log
 function tr069_log($message, $level = 'INFO') {
+    $timestamp = date('Y-m-d H:i:s');
     $logMessage = "[TR-069][$level][{$GLOBALS['session_id']}] $message";
+    
+    // Log to Apache error log
     error_log($logMessage, 0);
+    
+    // Log to device.log file
+    if (isset($GLOBALS['device_log']) && is_writable($GLOBALS['device_log'])) {
+        file_put_contents($GLOBALS['device_log'], "[$timestamp] $logMessage\n", FILE_APPEND);
+    }
     
     // Also append to our custom log file if directory exists
     $logDir = __DIR__ . '/logs';
