@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Wifi, Globe, PowerOff, AlertTriangle } from "lucide-react";
+import { Wifi, Globe, PowerOff, AlertTriangle, Lock } from "lucide-react";
 
 interface DeviceConfigurationPanelProps {
   deviceId: string;
@@ -14,6 +14,8 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
   const [wifiPassword, setWifiPassword] = useState('');
   const [wanIPAddress, setWanIPAddress] = useState('');
   const [wanGateway, setWanGateway] = useState('');
+  const [connectionRequestUsername, setConnectionRequestUsername] = useState('');
+  const [connectionRequestPassword, setConnectionRequestPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [configuring, setConfiguring] = useState(false);
 
@@ -41,6 +43,8 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
           setWifiPassword(result.settings.password || '');
           setWanIPAddress(result.settings.ip_address || '');
           setWanGateway(result.settings.gateway || '');
+          setConnectionRequestUsername(result.settings.connection_request_username || '');
+          setConnectionRequestPassword(result.settings.connection_request_password || '');
         } else {
           toast.error("Failed to load device settings");
         }
@@ -119,6 +123,22 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
       return;
     }
     makeConfigRequest('wan', { ip_address: wanIPAddress, gateway: wanGateway });
+  };
+
+  const handleConnectionRequestUpdate = () => {
+    console.log("Connection Request update button clicked");
+    if (!connectionRequestUsername.trim()) {
+      toast.error('Connection Request Username cannot be empty');
+      return;
+    }
+    if (!connectionRequestPassword.trim()) {
+      toast.error('Connection Request Password cannot be empty');
+      return;
+    }
+    makeConfigRequest('connection_request', { 
+      username: connectionRequestUsername, 
+      password: connectionRequestPassword 
+    });
   };
 
   const handleReboot = () => {
@@ -204,6 +224,41 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
               </>
             ) : "Update WAN"}
           </Button>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-lg font-bold mb-3 flex items-center gap-2">
+          <Lock className="h-5 w-5" />
+          Connection Request Settings
+        </h3>
+        <div className="space-y-3">
+          <Input
+            placeholder="Connection Request Username"
+            value={connectionRequestUsername}
+            onChange={(e) => setConnectionRequestUsername(e.target.value)}
+          />
+          <Input
+            type="password"
+            placeholder="Connection Request Password"
+            value={connectionRequestPassword}
+            onChange={(e) => setConnectionRequestPassword(e.target.value)}
+          />
+          <Button 
+            onClick={handleConnectionRequestUpdate}
+            className="w-full md:w-auto"
+            disabled={configuring}
+          >
+            {configuring ? (
+              <>
+                <span className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full mr-2"></span>
+                Updating...
+              </>
+            ) : "Update Connection Settings"}
+          </Button>
+          <p className="text-xs text-gray-500 mt-1">
+            These credentials are used by the ACS to authenticate when making requests to the device.
+          </p>
         </div>
       </div>
 

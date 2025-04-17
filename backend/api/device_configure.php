@@ -1,4 +1,3 @@
-
 <?php
 header('Content-Type: application/json');
 
@@ -49,7 +48,9 @@ try {
                     'ssid' => $device['ssid'] ?? '',
                     'password' => $device['ssid_password'] ?? '',
                     'ip_address' => $device['ip_address'] ?? '',
-                    'gateway' => ''  // Get from database if available
+                    'gateway' => '',  // Get from database if available
+                    'connection_request_username' => $device['connection_request_username'] ?? '',
+                    'connection_request_password' => $device['connection_request_password'] ?? ''
                 ]
             ];
             break;
@@ -92,10 +93,21 @@ try {
             // through the ACS system. Here we're simulating that action.
             
             // Attempt to send TR-069 request (simulated for this implementation)
-            $success = simulateTR069Request($deviceUrl, $tr098Request);
+            $success = simulateTR069Request(
+                $deviceUrl, 
+                $tr098Request, 
+                $device['connection_request_username'] ?? null, 
+                $device['connection_request_password'] ?? null
+            );
+            
             if (!$success) {
                 // Try TR-181 as fallback
-                $success = simulateTR069Request($deviceUrl, $tr181Request);
+                $success = simulateTR069Request(
+                    $deviceUrl, 
+                    $tr181Request, 
+                    $device['connection_request_username'] ?? null, 
+                    $device['connection_request_password'] ?? null
+                );
                 file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Fallback to TR-181: " . ($success ? "success" : "failed") . "\n", FILE_APPEND);
             } else {
                 file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - TR-098 request successful\n", FILE_APPEND);
@@ -137,13 +149,65 @@ try {
             $response = ['success' => true, 'message' => 'WAN settings updated successfully'];
             break;
 
+        case 'connection_request':
+            $username = $_POST['username'] ?? '';
+            $password = $_POST['password'] ?? '';
+            
+            if (empty($username)) {
+                throw new Exception("Connection Request Username cannot be empty");
+            }
+            
+            if (empty($password)) {
+                throw new Exception("Connection Request Password cannot be empty");
+            }
+            
+            // Log connection request settings change
+            $logEntry = date('Y-m-d H:i:s') . " - Device $deviceId: Connection Request settings changed\n";
+            $logEntry .= "  New Username: $username\n";
+            $logEntry .= "  Password Length: " . strlen($password) . " characters\n";
+            file_put_contents($logFile, $logEntry, FILE_APPEND);
+            
+            // Update connection request credentials in database
+            // First check if the columns exist
+            try {
+                $checkStmt = $db->query("SHOW COLUMNS FROM devices LIKE 'connection_request_username'");
+                $columnExists = $checkStmt->fetchColumn() !== false;
+                
+                if (!$columnExists) {
+                    // Add the columns if they don't exist
+                    $db->exec("ALTER TABLE devices ADD COLUMN connection_request_username VARCHAR(255)");
+                    $db->exec("ALTER TABLE devices ADD COLUMN connection_request_password VARCHAR(255)");
+                }
+                
+                // Now update the credentials
+                $updateStmt = $db->prepare("UPDATE devices SET connection_request_username = :username, connection_request_password = :password WHERE id = :id");
+                $updateStmt->bindParam(':username', $username);
+                $updateStmt->bindParam(':password', $password);
+                $updateStmt->bindParam(':id', $deviceId);
+                $updateStmt->execute();
+                
+                $response = ['success' => true, 'message' => 'Connection Request settings updated successfully'];
+            } catch (PDOException $e) {
+                throw new Exception("Database error: " . $e->getMessage());
+            }
+            break;
+
         case 'reboot':
             // Log device reboot attempt
             $logEntry = date('Y-m-d H:i:s') . " - Device $deviceId: Reboot initiated\n";
             file_put_contents($logFile, $logEntry, FILE_APPEND);
             
-            // Create TR-069 reboot request (not implemented in this example)
-            // In a real environment, this would send a Reboot request to the device
+            // Create TR-069 reboot request
+            $rebootRequest = createRebootRequest();
+            
+            // Attempt to send reboot request
+            $deviceUrl = "http://{$device['ip_address']}:7547/";
+            $success = simulateTR069Request(
+                $deviceUrl, 
+                $rebootRequest, 
+                $device['connection_request_username'] ?? null,
+                $device['connection_request_password'] ?? null
+            );
             
             $response = ['success' => true, 'message' => 'Reboot command sent to device'];
             break;
@@ -307,21 +371,45 @@ function createGetParameterValuesRequest($parameterName) {
     return $request;
 }
 
-// Function to simulate sending a TR-069 request to the device
-// In a real implementation, this would use the ACS system to communicate with the device
-function simulateTR069Request($deviceUrl, $soapRequest) {
+// New function to create a reboot request
+function createRebootRequest() {
+    $soapId = 'reboot-' . substr(md5(time()), 0, 8);
+    
+    $request = '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:Reboot>
+      <CommandKey>Reboot' . substr(md5(time()), 0, 3) . '</CommandKey>
+    </cwmp:Reboot>
+  </soapenv:Body>
+</soapenv:Envelope>';
+
+    return $request;
+}
+
+// Updated simulateTR069Request to handle connection request authentication
+function simulateTR069Request($deviceUrl, $soapRequest, $username = null, $password = null) {
     global $wifiLogFile;
     
     try {
-        // This is a simulation - in a real environment, you would use cURL or another
-        // mechanism to send the request to the ACS server or directly to the device
-        
         // Log attempt to send request
         if (isset($wifiLogFile)) {
             file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Attempting to send request to: $deviceUrl\n", FILE_APPEND);
             
-            // In a real implementation, this would be replaced with actual HTTP response data
-            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Response would be processed here\n", FILE_APPEND);
+            // Log authentication details if provided
+            if ($username && $password) {
+                file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Using connection request auth - Username: $username\n", FILE_APPEND);
+                file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Password length: " . strlen($password) . " characters\n", FILE_APPEND);
+            } else {
+                file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - No connection request credentials available\n", FILE_APPEND);
+            }
         }
         
         // For testing purposes, we'll try to actually make a connection
@@ -329,7 +417,8 @@ function simulateTR069Request($deviceUrl, $soapRequest) {
         $context = stream_context_create([
             'http' => [
                 'method' => 'POST',
-                'header' => 'Content-Type: text/xml; charset=utf-8',
+                'header' => 'Content-Type: text/xml; charset=utf-8' . 
+                    ($username && $password ? "\r\nAuthorization: Basic " . base64_encode("$username:$password)") : ""),
                 'content' => $soapRequest,
                 'timeout' => 5, // Short timeout for testing
             ]
