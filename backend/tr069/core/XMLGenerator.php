@@ -79,4 +79,31 @@ class XMLGenerator {
   </soapenv:Body>
 </soapenv:Envelope>';
     }
+
+    // NEW METHOD: Create a compound response with InformResponse + GetParameterValues
+    public static function generateCompoundInformResponseWithGPV($soapId, $parameterNames) {
+        // Create the InformResponse part
+        $informResponse = '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope 
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:InformResponse>
+      <MaxEnvelopes>1</MaxEnvelopes>
+    </cwmp:InformResponse>';
+
+        // Generate the GetParameterValues part
+        $gpvXml = self::generateGetParameterValuesXML(uniqid(), $parameterNames);
+        
+        // Combine them with proper closing tags
+        $compound = $informResponse . "\n    " . $gpvXml . "\n  </soapenv:Body>\n</soapenv:Envelope>";
+        
+        return $compound;
+    }
 }
