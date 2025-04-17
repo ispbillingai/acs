@@ -1,8 +1,8 @@
 
 <?php
-error_reporting(0);
+error_reporting(E_ALL);
 ini_set('display_errors', 0);
-ini_set('log_errors', 0);
+ini_set('log_errors', 1);
 
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/tr069/core/SessionManager.php';
@@ -39,48 +39,61 @@ $messageHandler = new MessageHandler($db, $logger, $sessionManager, $taskHandler
 try {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $raw_post = file_get_contents('php://input');
-        $logger->logToFile("Received request: " . substr($raw_post, 0, 100) . "...");
+        $logger->logToFile("==== NEW REQUEST ====");
+        $logger->logToFile("Received request length: " . strlen($raw_post));
+        $logger->logToFile("Request first 100 chars: " . substr($raw_post, 0, 100) . "...");
         
         if (!empty($raw_post)) {
             // Handle Inform messages
             if (stripos($raw_post, '<cwmp:Inform>') !== false) {
+                $logger->logToFile("Detected Inform message");
                 $response = $messageHandler->handleInform($raw_post);
                 header('Content-Type: text/xml');
+                $logger->logToFile("Sending response length: " . strlen($response));
                 echo $response;
                 exit;
             }
             
             // Handle GetParameterValuesResponse messages
             if (stripos($raw_post, '<cwmp:GetParameterValuesResponse>') !== false) {
-                $logger->logToFile("Received GetParameterValuesResponse");
+                $logger->logToFile("Detected GetParameterValuesResponse message");
                 $response = $messageHandler->handleGetParameterValuesResponse($raw_post);
                 header('Content-Type: text/xml');
+                $logger->logToFile("Sending response length: " . strlen($response));
                 echo $response;
                 exit;
             }
             
             // Handle empty POST or the next step in the session after Inform response
-            if (empty(trim($raw_post)) || stripos($raw_post, '<cwmp:GetParameterValuesResponse>') !== false) {
+            if (empty(trim($raw_post)) || stripos($raw_post, '<cwmp:SetParameterValuesResponse>') !== false) {
+                $logger->logToFile("Detected empty POST or SetParameterValuesResponse");
                 $response = $messageHandler->handleEmptyPost();
                 header('Content-Type: text/xml');
+                $logger->logToFile("Sending response length: " . strlen($response));
                 echo $response;
                 exit;
             }
         } else {
             // Handle completely empty POST
+            $logger->logToFile("Detected completely empty POST");
             $response = $messageHandler->handleEmptyPost();
             header('Content-Type: text/xml');
+            $logger->logToFile("Sending response length: " . strlen($response));
             echo $response;
             exit;
         }
         
         // Default response for unhandled cases
+        $logger->logToFile("Unhandled message type, sending empty response");
         header('Content-Type: text/xml');
-        echo XMLGenerator::generateEmptyResponse(uniqid());
+        $emptyResponse = XMLGenerator::generateEmptyResponse(uniqid());
+        $logger->logToFile("Sending response length: " . strlen($emptyResponse));
+        echo $emptyResponse;
         exit;
     }
 } catch (Exception $e) {
     $logger->logToFile("Exception: " . $e->getMessage());
+    $logger->logToFile("Stack trace: " . $e->getTraceAsString());
     header('Content-Type: text/xml');
     echo XMLGenerator::generateEmptyResponse(uniqid());
 }

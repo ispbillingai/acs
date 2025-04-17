@@ -1,3 +1,4 @@
+
 <?php
 
 class XMLGenerator {
@@ -51,5 +52,30 @@ class XMLGenerator {
       <ParameterNames soap-enc:arrayType="xsd:string[' . count($parameterNames) . ']">' . $parameterNamesXml . '
       </ParameterNames>
     </cwmp:GetParameterValues>';
+    }
+
+    public static function generateFullGetParameterValuesRequestXML($id, $parameterNames) {
+        $parameterNamesXml = '';
+        foreach ($parameterNames as $name) {
+            $parameterNamesXml .= "\n        <string>" . htmlspecialchars($name) . "</string>";
+        }
+        
+        return '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $id . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:GetParameterValues>
+      <ParameterNames soap-enc:arrayType="xsd:string[' . count($parameterNames) . ']">' . $parameterNamesXml . '
+      </ParameterNames>
+    </cwmp:GetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>';
     }
 }
