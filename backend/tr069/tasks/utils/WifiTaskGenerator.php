@@ -1,67 +1,74 @@
-
 <?php
 
-class WifiTaskGenerator {
-    
+class WifiTaskGenerator
+{
     private $logger;
-    
-    public function __construct($logger) {
+
+    public function __construct($logger)
+    {
         $this->logger = $logger;
     }
-    
-    public function generateParameters($data) {
-        $ssid = $data['ssid'] ?? null;
+
+    public function generateParameters($data)
+    {
+        // ---------- START‑OF‑FUNCTION marker ----------
+        $this->logger->logToFile('WifiTaskGenerator START  ▶  payload: ' .
+            json_encode($data, JSON_UNESCAPED_SLASHES));
+
+        $ssid     = $data['ssid']     ?? null;
         $password = $data['password'] ?? null;
-        
+
         if (!$ssid) {
-            $this->logger->logToFile("SSID is required for WiFi configuration");
+            $this->logger->logToFile('SSID is required for WiFi configuration → abort');
             return null;
         }
-        
+
         $parameters = [
             [
-                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
+                'name'  => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
                 'value' => $ssid,
-                'type' => 'xsd:string'
+                'type'  => 'xsd:string',
             ],
-            // Always include Enable parameter to ensure WiFi is active
             [
-                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Enable',
+                'name'  => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Enable',
                 'value' => 'true',
-                'type' => 'xsd:boolean'
-            ]
+                'type'  => 'xsd:boolean',
+            ],
         ];
-        
-        // Only add password parameter if provided
-        if ($password) {
-            // For Huawei devices, only use KeyPassphrase (not both)
+
+        if ($password !== null && $password !== '') {
             $parameters[] = [
-                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
+                'name'  => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
                 'value' => $password,
-                'type' => 'xsd:string'
+                'type'  => 'xsd:string',
             ];
-            
-            // Add security mode parameter to ensure password is applied
             $parameters[] = [
-                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
+                'name'  => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
                 'value' => 'WPAand11i',
-                'type' => 'xsd:string'
+                'type'  => 'xsd:string',
             ];
-            
-            // Make sure encryption is enabled
             $parameters[] = [
-                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.WPAEncryptionModes',
+                'name'  => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.WPAEncryptionModes',
                 'value' => 'AESEncryption',
-                'type' => 'xsd:string'
+                'type'  => 'xsd:string',
             ];
         }
-        
-        $this->logger->logToFile("Generated WiFi parameters - SSID: $ssid, Password length: " . 
-                 ($password ? strlen($password) : 0) . " chars");
-        
+
+        // ---------- PARAM‑LIST dump ----------
+        $this->logger->logToFile(
+            'WifiTaskGenerator PARAM LIST (' . count($parameters) . ' total) → ' .
+            json_encode($parameters, JSON_UNESCAPED_SLASHES)
+        );
+
+        // Final summary
+        $this->logger->logToFile(
+            "Generated WiFi parameters – SSID: $ssid, Password length: " .
+            ($password ? strlen($password) : 0) . ' chars'
+        );
+
         return [
-            'method' => 'SetParameterValues',
-            'parameters' => $parameters
+            'method'     => 'SetParameterValues', // add +Commit in handler if needed
+            'parameters' => $parameters,
         ];
     }
 }
