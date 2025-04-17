@@ -1,3 +1,4 @@
+
 <?php
 require_once __DIR__ . '/../responses/InformResponseGenerator.php';
 require_once __DIR__ . '/../device_manager.php';
@@ -50,27 +51,46 @@ class MessageHandler {
                 'InternetGatewayDevice.DeviceInfo.SoftwareVersion',
                 'InternetGatewayDevice.DeviceInfo.HardwareVersion'
             ];
-            $this->logger->logToFile("Will request parameters: " . implode(', ', $want));
-            error_log("TR-069: Will request parameters: " . implode(', ', $want));
+            $this->logger->logToFile("Embedding GPV for: " . implode(', ', $want));
+            error_log("TR-069: Embedding GetParameterValues for: " . implode(', ', $want));
     
-            /* IMPORTANT CHANGE: Use the NEW compound method instead of separate calls */
-            $compound = XMLGenerator::generateCompoundInformResponseWithGPV($soapId, $want);
+            /* build InformResponse */
+            $respGen = new InformResponseGenerator();
+            $inform = $respGen->createResponse($soapId);
             
-            $this->logger->logToFile("Generated compound response with BOTH InformResponse AND GetParameterValues");
-            error_log("TR-069: Generated compound response with BOTH InformResponse AND GetParameterValues");
-            error_log("TR-069: Compound response length: " . strlen($compound));
-            error_log("TR-069: Compound response first 500 chars: " . substr($compound, 0, 500));
+            error_log("TR-069: Base InformResponse generated, length: " . strlen($inform));
+    
+            /* inner GPV RPC - Generate the XML for GetParameterValues */
+            $gpvBlock = XMLGenerator::generateGetParameterValuesXML(uniqid(), $want);
             
-            // Write the full response to a file for debugging
-            $logDir = __DIR__ . '/../../logs';
-            if (!is_dir($logDir)) {
-                mkdir($logDir, 0777, true);
+            /* Log the GetParameterValues block */
+            $this->logger->logToFile("GetParameterValues XML block: " . $gpvBlock);
+            error_log("TR-069: GetParameterValues XML block: " . $gpvBlock);
+    
+            /* normalize whitespace before closing body tag to ensure regex works */
+            $inform = preg_replace('~\s+</([A-Za-z0-9_-]+):Body>~', '</\1:Body>', $inform, 1);
+            
+            /* inject GPV just before the closing body tag */
+            $compound = preg_replace(
+                '~</([A-Za-z0-9_-]+):Body>~',
+                $gpvBlock . "\n  </\\1:Body>",
+                $inform,
+                1
+            );
+    
+            if ($compound === $inform) {
+                $this->logger->logToFile('ERROR – failed to inject GetParameterValues');
+                error_log("TR-069 ERROR: Failed to inject GetParameterValues into InformResponse");
+                // As a fallback, send plain InformResponse
+                $this->logger->logToFile("======= END HANDLING INFORM (ERROR) =======");
+                return $inform;
+            } else {
+                $this->logger->logToFile('Compound SOAP successfully created, length: ' . strlen($compound));
+                error_log("TR-069: Compound SOAP created successfully, length: " . strlen($compound));
+                error_log("TR-069: Compound response first 200 chars: " . substr($compound, 0, 200));
             }
-            $responseLogFile = $logDir . '/tr069_response_' . date('Ymd_His') . '.xml';
-            file_put_contents($responseLogFile, $compound);
-            error_log("TR-069: Saved full response to file: $responseLogFile");
     
-            $this->logger->logToFile("======= END HANDLING INFORM (returning compound) =======");
+            $this->logger->logToFile("======= END HANDLING INFORM =======");
             return $compound;               // <-- single return in this branch
         }
     
@@ -88,17 +108,8 @@ class MessageHandler {
     
     public function handleGetParameterValuesResponse($raw_post) {
         $this->logger->logToFile("======= START HANDLING GetParameterValuesResponse =======");
-        error_log("TR-069: *** RECEIVED GetParameterValuesResponse ***");
+        error_log("TR-069: START HANDLING GetParameterValuesResponse");
         error_log("TR-069: Raw response first 300 chars: " . substr($raw_post, 0, 300));
-        
-        // Create a backup of the raw response for debugging
-        $logDir = __DIR__ . '/../../logs';
-        if (!is_dir($logDir)) {
-            mkdir($logDir, 0777, true);
-        }
-        $responseLogFile = $logDir . '/tr069_gpv_response_' . date('Ymd_His') . '.xml';
-        file_put_contents($responseLogFile, $raw_post);
-        error_log("TR-069: Saved raw GPV response to file: $responseLogFile");
         
         // Extract the SOAP ID
         preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
@@ -199,8 +210,6 @@ class MessageHandler {
                             $this->logger->logToFile("Error updating device record: " . $e->getMessage());
                             error_log("TR-069 ERROR: Failed to update device record: " . $e->getMessage());
                         }
-                    } else {
-                        error_log("TR-069 WARNING: No device values to update from parameters");
                     }
                 } else {
                     $this->logger->logToFile("Error: Could not find device ID for serial: $serialNumber");
