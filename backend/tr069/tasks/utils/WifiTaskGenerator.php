@@ -1,112 +1,98 @@
+
 <?php
 
-class WifiTaskGenerator
-{
-    /** @var object  must expose ->logToFile(string $msg)  */
+class WifiTaskGenerator {
+    
     private $logger;
-
-    // ---------- constructor --------------------------------------------------
-    public function __construct($logger)
-    {
-        $this->logger = $logger;   // same pattern as your other generators
+    
+    public function __construct($logger) {
+        $this->logger = $logger;
     }
-
-    // ---------- public API ---------------------------------------------------
-    /**
-     * Build parameter list for a Wi‑Fi update.
-     *
-     * Expected $data (decoded JSON from API):
-     *   {
-     *     "ssid"        : "MySSID",                 // required
-     *     "password"    : "secretPass",             // optional (open if missing)
-     *     "instance_24g": 1,                        // defaults to 1
-     *     "instance_5g" : 5                         // optional – add if present
-     *   }
-     *
-     * Returns:
-     *   [
-     *     'method'     => 'SetParameterValues+Commit',
-     *     'parameters' => [ ParameterValueStruct[] ]
-     *   ]
-     */
-    public function generateParameters(array $data)
-    {
-        $ssid      = trim($data['ssid'] ?? '');
-        $password  = (string) ($data['password'] ?? '');
-        $inst24    = (int)   ($data['instance_24g'] ?? 1);
-        $inst5     = isset($data['instance_5g']) ? (int) $data['instance_5g'] : null;
-
-        $this->log("=== WiFi task generator start ===");
-        $this->log('Incoming payload: ' . json_encode($data, JSON_UNESCAPED_SLASHES));
-
-        if ($ssid === '') {
-            $this->log('SSID missing ‑‑ aborting task build');
+    
+    public function generateParameters($data) {
+        $ssid = trim($data['ssid'] ?? '');
+        $password = $data['password'] ?? '';
+        $security = $data['security'] ?? 'WPA2-PSK';
+        
+        // Log the incoming request for debugging
+        $this->logger->logToFile("Attempting WiFi configuration with SSID: $ssid");
+        
+        // Validate SSID
+        if (empty($ssid)) {
+            $this->logger->logToFile("SSID is required for WiFi configuration");
             return null;
         }
-
-        // ------- build ParameterValueStructs --------------------------------
-        $params = [];
-        $this->addRadioParams($params, $inst24, $ssid, $password);
-        if ($inst5) {
-            $this->addRadioParams($params, $inst5, $ssid, $password);
-        }
-
-        // ------- log result --------------------------------------------------
-        $this->log('Parameter list (' . count($params) . ' entries):');
-        foreach ($params as $p) {
-            $this->log("  {$p['name']} = {$p['value']} ({$p['type']})");
-        }
-
-        $task = [
-            'method'     => 'SetParameterValues+Commit',  // handler looks for +Commit
-            'parameters' => $params
+        
+        // Test different password parameter paths based on device model
+        $parameters = [
+            [
+                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Enable',
+                'value' => 'true',
+                'type' => 'xsd:boolean'
+            ],
+            [
+                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
+                'value' => $ssid,
+                'type' => 'xsd:string'
+            ]
         ];
-
-        $this->log('Task JSON returned: ' . json_encode($task));
-        $this->log('=== WiFi task generator end ===');
-
-        return $task;
-    }
-
-    // ---------- helpers ------------------------------------------------------
-    private function addRadioParams(array &$params, int $instance, string $ssid, string $password): void
-    {
-        $this->log("Building params for WLANConfiguration instance $instance");
-
-        // SSID
-        $params[] = [
-            'name'  => "InternetGatewayDevice.LANDevice.1.WLANConfiguration.$instance.SSID",
-            'value' => $ssid,
-            'type'  => 'xsd:string'
-        ];
-
-        // ensure radio enabled
-        $params[] = [
-            'name'  => "InternetGatewayDevice.LANDevice.1.WLANConfiguration.$instance.Enable",
-            'value' => 'true',
-            'type'  => 'xsd:boolean'
-        ];
-
-        // password & security
-        if ($password !== '') {
-            $params[] = [
-                'name'  => "InternetGatewayDevice.LANDevice.1.WLANConfiguration.$instance.PreSharedKey.1.PreSharedKey",
+        
+        if (!empty($password)) {
+            // Try TR-098 path first
+            $parameters[] = [
+                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.PreSharedKey',
                 'value' => $password,
-                'type'  => 'xsd:string'
+                'type' => 'xsd:string'
             ];
-            $this->log("Using PreSharedKey path for instance $instance");
+            
+            // Alternative: Try direct WPA PSK path
+            $parameters[] = [
+                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_WPAPSK',
+                'value' => $password,
+                'type' => 'xsd:string'
+            ];
+            
+            // Alternative: Try TR-181 path
+            $parameters[] = [
+                'name' => 'Device.WiFi.SSID.1.PreSharedKey',
+                'value' => $password,
+                'type' => 'xsd:string'
+            ];
+            
+            // Security mode parameters
+            $parameters[] = [
+                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_SecurityMode',
+                'value' => $security,
+                'type' => 'xsd:string'
+            ];
+            
+            // Encryption parameters
+            $parameters[] = [
+                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.WPAEncryptionModes',
+                'value' => 'AESEncryption',
+                'type' => 'xsd:string'
+            ];
+            
+            // Additional security parameters to try
+            $parameters[] = [
+                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
+                'value' => 'WPAand11i',
+                'type' => 'xsd:string'
+            ];
         } else {
-            // open network
-            $params[] = [
-                'name'  => "InternetGatewayDevice.LANDevice.1.WLANConfiguration.$instance.X_HW_SecurityMode",
+            // If no password, set security to None (open network)
+            $parameters[] = [
+                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_SecurityMode',
                 'value' => 'None',
-                'type'  => 'xsd:string'
+                'type' => 'xsd:string'
             ];
         }
-    }
-
-    private function log(string $msg): void
-    {
-        $this->logger->logToFile("WifiTaskGenerator " . $msg);
+        
+        $this->logger->logToFile("Generated WiFi parameters - SSID: $ssid, Testing multiple password paths");
+        
+        return [
+            'method' => 'SetParameterValues',
+            'parameters' => $parameters
+        ];
     }
 }
