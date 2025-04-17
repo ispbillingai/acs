@@ -1,4 +1,3 @@
-
 <?php
 // Enable error reporting for development
 error_reporting(E_ALL);
@@ -39,27 +38,6 @@ function writeLog($message) {
 
 writeLog("REST API Request: " . $_SERVER['REQUEST_METHOD'] . " " . $_SERVER['REQUEST_URI']);
 writeLog("Request parameters: " . print_r($_REQUEST, true));
-
-// Create device_parameters table if it doesn't exist
-try {
-    $createParametersTable = "CREATE TABLE IF NOT EXISTS device_parameters (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        device_id INT NOT NULL,
-        param_name VARCHAR(255) NOT NULL,
-        param_value TEXT,
-        param_type VARCHAR(50) DEFAULT 'string',
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY device_param_idx (device_id, param_name),
-        FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB";
-    
-    $db->exec($createParametersTable);
-    writeLog("Checked and created device_parameters table if needed");
-} catch (PDOException $e) {
-    writeLog("Error creating device_parameters table: " . $e->getMessage());
-    // Continue processing - we'll handle table errors later
-}
 
 // Process GET requests
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
@@ -158,11 +136,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         if (isset($_GET['param'])) {
             $paramName = $_GET['param'];
             
-            // Check if parameter exists in device_parameters table
+            // Check if parameter exists in parameters table
             try {
                 $paramStmt = $db->prepare("
                     SELECT param_name, param_value, param_type
-                    FROM device_parameters
+                    FROM parameters
                     WHERE device_id = :device_id AND param_name = :param_name
                     LIMIT 1
                 ");
@@ -178,7 +156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                         'parameter' => $parameter
                     ]);
                 } else {
-                    // Parameter not found in device_parameters, check if it's a device property
+                    // Parameter not found in parameters, check if it's a device property
                     if (array_key_exists($paramName, $device)) {
                         echo json_encode([
                             'success' => true,
@@ -214,11 +192,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         try {
             $params = [];
             
-            // Try to get parameters from device_parameters table
+            // Try to get parameters from parameters table
             try {
                 $paramsStmt = $db->prepare("
                     SELECT param_name, param_value, param_type
-                    FROM device_parameters
+                    FROM parameters
                     WHERE device_id = :device_id
                 ");
                 $paramsStmt->bindParam(':device_id', $device['id']);
@@ -314,7 +292,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 // Try to insert or update the parameter
                 $stmt = $db->prepare("
-                    INSERT INTO device_parameters (device_id, param_name, param_value, param_type)
+                    INSERT INTO parameters (device_id, param_name, param_value, param_type)
                     VALUES (:device_id, :param_name, :param_value, :param_type)
                     ON DUPLICATE KEY UPDATE param_value = :param_value, param_type = :param_type
                 ");
@@ -511,4 +489,3 @@ echo json_encode([
     'error' => 'Method not allowed',
     'details' => "The HTTP method '{$_SERVER['REQUEST_METHOD']}' is not supported"
 ]);
-
