@@ -18,15 +18,6 @@ function logAction($message, $level = 'INFO') {
     file_put_contents($logFile, $logEntry, FILE_APPEND);
 }
 
-// Function to log database operations specifically
-function logDatabaseOperation($operation, $details, $success = true) {
-    $logFile = __DIR__ . '/../../database_operations.log';
-    $timestamp = date('Y-m-d H:i:s');
-    $status = $success ? "SUCCESS" : "FAILED";
-    $logEntry = "$timestamp - [DATABASE $status] $operation: $details\n";
-    file_put_contents($logFile, $logEntry, FILE_APPEND);
-}
-
 // Function to store a task for later execution
 function storeDeviceTask($db, $deviceId, $taskType, $taskData) {
     try {
@@ -41,16 +32,13 @@ function storeDeviceTask($db, $deviceId, $taskType, $taskData) {
         if ($result) {
             $taskId = $db->lastInsertId();
             logAction("Task created: ID=$taskId, Type=$taskType, Device=$deviceId");
-            logDatabaseOperation("CREATE_TASK", "ID=$taskId, Type=$taskType, Device=$deviceId");
             return $taskId;
         }
         
         logAction("Failed to create task: Type=$taskType, Device=$deviceId", 'ERROR');
-        logDatabaseOperation("CREATE_TASK", "Type=$taskType, Device=$deviceId", false);
         return false;
     } catch (PDOException $e) {
         logAction("DATABASE ERROR: " . $e->getMessage(), 'ERROR');
-        logDatabaseOperation("CREATE_TASK", "Error: " . $e->getMessage(), false);
         return false;
     }
 }
@@ -106,20 +94,6 @@ function updateDeviceStatus($serialNumber, $status) {
         $database = new Database();
         $db = $database->getConnection();
         
-        // Log the current state before update
-        $checkSql = "SELECT id, status, last_contact FROM devices WHERE serial_number = :serial_number";
-        $checkStmt = $db->prepare($checkSql);
-        $checkStmt->execute([':serial_number' => $serialNumber]);
-        $currentDevice = $checkStmt->fetch(PDO::FETCH_ASSOC);
-        
-        if ($currentDevice) {
-            logAction("Current device state before update - ID: {$currentDevice['id']}, Status: {$currentDevice['status']}, Last Contact: {$currentDevice['last_contact']}");
-        } else {
-            logAction("Device not found: $serialNumber", 'WARNING');
-            return false;
-        }
-        
-        // Update the device with new status and current timestamp
         $sql = "UPDATE devices SET status = :status, last_contact = NOW() WHERE serial_number = :serial_number";
         $stmt = $db->prepare($sql);
         $result = $stmt->execute([
@@ -128,25 +102,14 @@ function updateDeviceStatus($serialNumber, $status) {
         ]);
         
         if ($result) {
-            // Verify the update was successful
-            $verifyStmt = $db->prepare($checkSql);
-            $verifyStmt->execute([':serial_number' => $serialNumber]);
-            $updatedDevice = $verifyStmt->fetch(PDO::FETCH_ASSOC);
-            
-            if ($updatedDevice) {
-                logAction("Updated device status: $serialNumber is now {$updatedDevice['status']}, Last Contact: {$updatedDevice['last_contact']}");
-                logDatabaseOperation("UPDATE_DEVICE_STATUS", 
-                    "Serial: $serialNumber, New Status: {$updatedDevice['status']}, New Last Contact: {$updatedDevice['last_contact']}");
-                return true;
-            }
+            logAction("Updated device status: $serialNumber is now $status");
+            return true;
         }
         
         logAction("Failed to update device status for $serialNumber", 'ERROR');
-        logDatabaseOperation("UPDATE_DEVICE_STATUS", "Serial: $serialNumber, Status: $status", false);
         return false;
     } catch (PDOException $e) {
         logAction("DATABASE ERROR updating device status: " . $e->getMessage(), 'ERROR');
-        logDatabaseOperation("UPDATE_DEVICE_STATUS", "Error: " . $e->getMessage(), false);
         return false;
     }
 }
@@ -155,7 +118,6 @@ function updateDeviceStatus($serialNumber, $status) {
 try {
     $database = new Database();
     $db = $database->getConnection();
-    logAction("Database connection successful");
 } catch (Exception $e) {
     echo json_encode(['success' => false, 'message' => 'Database connection failed']);
     logAction("Database connection failed: " . $e->getMessage(), 'ERROR');
@@ -445,41 +407,9 @@ try {
         case 'check_connection':
             // Request to check device connection status
             try {
-                logAction("Checking connection status for device: {$device['serial_number']}");
-                
-                // Update the device's last_contact time in the database
-                $updateContactSql = "UPDATE devices SET last_contact = NOW() WHERE id = :id";
-                $updateContactStmt = $db->prepare($updateContactSql);
-                $updateContactResult = $updateContactStmt->execute([':id' => $deviceId]);
-                
-                if ($updateContactResult) {
-                    logAction("Updated last_contact time for device: {$device['serial_number']}");
-                    logDatabaseOperation("UPDATE_LAST_CONTACT", "Device ID: $deviceId, Serial: {$device['serial_number']}");
-                } else {
-                    logAction("Failed to update last_contact time for device: {$device['serial_number']}", "ERROR");
-                    logDatabaseOperation("UPDATE_LAST_CONTACT", "Device ID: $deviceId", false);
-                }
-                
                 // Check device status based on last_contact
-                $fiveMinutesAgo = date('Y-m-d H:i:s', strtotime('-5 minutes'));
-                
-                // Re-fetch the device to get the updated last_contact time
-                $refreshSql = "SELECT * FROM devices WHERE id = :id";
-                $refreshStmt = $db->prepare($refreshSql);
-                $refreshStmt->execute([':id' => $deviceId]);
-                $refreshedDevice = $refreshStmt->fetch(PDO::FETCH_ASSOC);
-                
-                if (!$refreshedDevice) {
-                    logAction("Failed to refresh device data after update", "ERROR");
-                    $isOnline = false;
-                } else {
-                    $lastContactStr = $refreshedDevice['last_contact'] ?? null;
-                    logAction("Refreshed device data - Last Contact: $lastContactStr");
-                    
-                    $isOnline = $lastContactStr && strtotime($lastContactStr) >= strtotime($fiveMinutesAgo);
-                    logAction("Device online status: " . ($isOnline ? "Online" : "Offline") . 
-                              ", Last contact: $lastContactStr, Five minutes ago: $fiveMinutesAgo");
-                }
+                $fifteenMinutesAgo = date('Y-m-d H:i:s', strtotime('-15 minutes'));
+                $isOnline = $device['last_contact'] && strtotime($device['last_contact']) >= strtotime($fifteenMinutesAgo);
                 
                 // Check if the status has changed and update it if necessary
                 if (($isOnline && $device['status'] !== 'online') || (!$isOnline && $device['status'] !== 'offline')) {
@@ -492,16 +422,15 @@ try {
                     ]);
                     
                     logAction("Updated device status from {$device['status']} to {$newStatus} for device: {$device['serial_number']}");
-                    logDatabaseOperation("UPDATE_DEVICE_STATUS", "Device ID: $deviceId, New Status: $newStatus");
                 }
                 
-                // Calculate time since last contact for display
+                // Calculate time since last contact
                 $lastContactTime = '';
-                if (!empty($refreshedDevice['last_contact'])) {
-                    $lastContactDate = new DateTime($refreshedDevice['last_contact']);
-                    $now = new DateTime();
-                    $diff = $now->getTimestamp() - $lastContactDate->getTimestamp();
-                    $diffMinutes = round($diff / 60);
+                if (!empty($device['last_contact'])) {
+                    $lastContactDate = new Date($device['last_contact']);
+                    $now = new Date();
+                    $diff = $now->getTime() - $lastContactDate->getTime();
+                    $diffMinutes = round($diff / 60000);
                     
                     if ($diffMinutes < 60) {
                         $lastContactTime = "$diffMinutes minutes ago";
@@ -514,14 +443,14 @@ try {
                     }
                 }
                 
-                logAction("Connection check complete for device {$device['serial_number']}: " . ($isOnline ? 'Online' : 'Offline'));
+                logAction("Connection check for device {$device['serial_number']}: " . ($isOnline ? 'Online' : 'Offline'));
                 
                 echo json_encode([
                     'success' => true,
                     'connection_status' => [
                         'success' => $isOnline,
                         'message' => $isOnline ? 'Device is online' : 'Device appears to be offline',
-                        'last_contact' => $refreshedDevice['last_contact'] ?? null,
+                        'last_contact' => $device['last_contact'],
                         'last_contact_relative' => $lastContactTime,
                         'updated_status' => ($isOnline && $device['status'] !== 'online') || (!$isOnline && $device['status'] !== 'offline')
                     ]
@@ -529,7 +458,6 @@ try {
                 exit;
             } catch (Exception $e) {
                 logAction("Error checking device connection: " . $e->getMessage(), 'ERROR');
-                logDatabaseOperation("CHECK_CONNECTION", "Error: " . $e->getMessage(), false);
                 echo json_encode(['success' => false, 'message' => 'Failed to check device connection']);
                 exit;
             }
