@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { toast } from "sonner";
 import {
@@ -11,7 +10,7 @@ import { Wifi, Globe, PowerOff, Server } from "lucide-react";
 
 // Fix import statements to use default imports
 import WifiConfiguration from './deviceConfiguration/WifiConfiguration';
-import WanConfiguration from './deviceConfiguration/WanConfiguration';
+import { WanConfiguration } from './deviceConfiguration/WanConfiguration';
 import RebootConfiguration from './deviceConfiguration/RebootConfiguration';
 import TR069Management from './deviceConfiguration/TR069Management';
 import ConnectionRequestSettings from './deviceConfiguration/ConnectionRequestSettings';
