@@ -137,22 +137,4 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
   );
 };
 
-// Create a function to render the component for non-React environments
-// This will be called from the device.php page
-if (typeof window !== 'undefined') {
-  (window as any).renderDeviceConfigPanel = (deviceId: string) => {
-    const container = document.getElementById('configuration-panel');
-    if (container && React && ReactDOM) {
-      ReactDOM.render(
-        React.createElement(DeviceConfigurationPanel, { deviceId }),
-        container
-      );
-    } else {
-      console.error('Could not render DeviceConfigurationPanel', { 
-        container, 
-        React: typeof React,
-        ReactDOM: typeof ReactDOM
-      });
-    }
-  };
-}
+export default DeviceConfigurationPanel;

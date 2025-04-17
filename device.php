@@ -470,7 +470,7 @@ try {
                             <button type="button" class="btn btn-sm btn-outline-primary" id="refresh-data-btn"><i class='bx bx-refresh me-1'></i>Refresh</button>
                             <button type="button" class="btn btn-sm btn-outline-primary"><i class='bx bx-edit me-1'></i>Edit</button>
                         </div>
-                        <button type="button" class="btn btn-sm btn-primary" id="configure-device-btn"><i class='bx bx-cog me-1'></i>Configure</button>
+                        <a href="configure_device.php?id=<?php echo $deviceId; ?>" class="btn btn-sm btn-primary"><i class='bx bx-cog me-1'></i>Configure</a>
                     </div>
                 </div>
 
@@ -595,7 +595,7 @@ try {
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="card-title mb-0"><i class='bx bx-signal-5 me-2'></i>Optical Signal Readings</h5>
                         <button class="btn btn-sm btn-outline-primary" id="refresh-optical">
-                            <i class='bx bx-refresh me-1'></i>Refresh Optical Readings
+                            <i class='bx bx-refresh me-1'></i> Refresh Optical Readings
                         </button>
                     </div>
                     <div class="card-body">
@@ -693,20 +693,7 @@ try {
         </div>
     </div>
 
-    <!-- Configuration Modal -->
-    <div id="configurationModal" class="modal">
-        <div class="modal-content">
-            <span class="close-modal">&times;</span>
-            <h2 class="mb-4">Configure Device: <?php echo htmlspecialchars($device['model'] ?: 'Device'); ?></h2>
-            <div id="configuration-panel" data-device-id="<?php echo htmlspecialchars($deviceId); ?>"></div>
-        </div>
-    </div>
-
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sonner@1.5.0/dist/sonner.js"></script>
-    <script src="dist/device-config-panel.js"></script>
     <script>
         // Initialize tooltips
         var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
@@ -723,38 +710,6 @@ try {
                     sidebar.classList.add('collapse');
                 }
             }
-            
-            // Configuration modal functionality
-            const modal = document.getElementById("configurationModal");
-            const configBtn = document.getElementById("configure-device-btn");
-            const closeBtn = document.querySelector(".close-modal");
-            
-            configBtn.addEventListener("click", function() {
-                console.log("Configure button clicked");
-                modal.style.display = "block";
-                
-                // Get device ID from the configuration panel element
-                const configPanel = document.getElementById("configuration-panel");
-                const deviceId = configPanel.getAttribute("data-device-id");
-                
-                // Initialize React component
-                try {
-                    console.log("Initializing DeviceConfigurationPanel with deviceId:", deviceId);
-                    window.renderDeviceConfigPanel(deviceId);
-                } catch (error) {
-                    console.error("Error rendering configuration panel:", error);
-                }
-            });
-            
-            closeBtn.addEventListener("click", function() {
-                modal.style.display = "none";
-            });
-            
-            window.addEventListener("click", function(event) {
-                if (event.target == modal) {
-                    modal.style.display = "none";
-                }
-            });
             
             // Add optical readings refresh handler
             const refreshOpticalBtn = document.getElementById('refresh-optical');
