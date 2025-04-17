@@ -566,4 +566,24 @@ if (stripos($raw_post, '<cwmp:Inform>') !== false) {
     
     // Create a custom SOAP envelope for optical power readings
     $opticalRequest = '<?xml version="1.0" encoding="UTF-8"?>
-<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <SOAP-ENV:Header>
+    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </SOAP-ENV:Header>
+  <SOAP-ENV:Body>
+    <cwmp:GetParameterValues>
+      <ParameterNames SOAP-ENC:arrayType="xsd:string[4]">
+        <string>InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.TXPower</string>
+        <string>InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.RXPower</string>
+        <string>InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.TXPower</string>
+        <string>InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.RXPower</string>
+      </ParameterNames>
+    </cwmp:GetParameterValues>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>';
+    
+    header('Content-Type: text/xml');
+    echo $opticalRequest;
+    exit;
+}
+?>

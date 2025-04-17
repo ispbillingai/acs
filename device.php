@@ -1,8 +1,8 @@
 <?php
-// Enable error reporting
+// Enable error reporting to device.log
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
-ini_set('error_log', __DIR__ . '/acs.log');
+ini_set('error_log', __DIR__ . '/device.log');
 
 require_once __DIR__ . '/backend/config/database.php';
 

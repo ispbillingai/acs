@@ -11,8 +11,9 @@ class AuthenticationHandler {
     }
 
     public function authenticate() {
-        // Simplified authentication using only ACS credentials
         if (!isset($_SERVER['PHP_AUTH_USER']) || !isset($_SERVER['PHP_AUTH_PW'])) {
+            // Log to device.log instead of separate error log
+            error_log("TR-069 Authentication Failed: Missing credentials", 3, __DIR__ . '/../../../device.log');
             return false;
         }
 
@@ -27,8 +28,12 @@ class AuthenticationHandler {
             if ($config && $username === $config['username'] && $password === $config['password']) {
                 return true;
             }
+            
+            // Log failed authentication attempt to device.log
+            error_log("TR-069 Authentication Failed: Invalid credentials", 3, __DIR__ . '/../../../device.log');
         } catch (Exception $e) {
-            error_log("TR-069 Authentication Error: " . $e->getMessage());
+            // Log any database-related authentication errors to device.log
+            error_log("TR-069 Authentication Error: " . $e->getMessage(), 3, __DIR__ . '/../../../device.log');
         }
         
         return false;
