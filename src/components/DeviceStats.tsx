@@ -17,24 +17,6 @@ export const DeviceStats = ({ device }: DeviceStatsProps) => {
 
   // Check actual device status in case the displayed status is incorrect
   useEffect(() => {
-    const determineStatus = (lastContactTime: string | undefined): 'online' | 'offline' | 'unknown' => {
-      if (!lastContactTime) return 'unknown';
-      
-      // Consider a device online if last contact was within the last 15 minutes
-      const lastContact = new Date(lastContactTime);
-      const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
-      
-      return lastContact > fifteenMinutesAgo ? 'online' : 'offline';
-    };
-    
-    // Initial status check based on device.lastContact
-    if (device.lastContact) {
-      const calculatedStatus = determineStatus(device.lastContact);
-      setCurrentStatus(calculatedStatus);
-      setLastChecked(new Date().toLocaleString());
-      console.log(`Initial status check based on lastContact (${device.lastContact}): ${calculatedStatus}`);
-    }
-    
     const checkDeviceStatus = async () => {
       if (!device.id) {
         console.log("No device ID available, skipping status check");
@@ -56,12 +38,8 @@ export const DeviceStats = ({ device }: DeviceStatsProps) => {
         console.log("Device status check result:", result);
         
         if (result.success && result.connection_status) {
-          const newStatus = result.connection_status.success ? 'online' : 'offline';
-          setCurrentStatus(newStatus);
+          setCurrentStatus(result.connection_status.success ? 'online' : 'offline');
           setLastChecked(new Date().toLocaleString());
-          
-          console.log(`Status updated from API check: ${newStatus}`);
-          console.log(`Last contact from API: ${result.connection_status.last_contact}`);
         }
       } catch (error) {
         console.error("Error checking device status:", error);
@@ -71,11 +49,11 @@ export const DeviceStats = ({ device }: DeviceStatsProps) => {
     // Check status when component mounts
     checkDeviceStatus();
     
-    // Set up an interval to periodically check status (every 60 seconds)
-    const interval = setInterval(checkDeviceStatus, 60000);
+    // Set up an interval to periodically check status (every 30 seconds)
+    const interval = setInterval(checkDeviceStatus, 30000);
     
     return () => clearInterval(interval);
-  }, [device.id, device.lastContact]);
+  }, [device.id]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -110,34 +88,6 @@ export const DeviceStats = ({ device }: DeviceStatsProps) => {
     }
   };
 
-  // Calculate how long ago the last contact was
-  const getLastContactTime = (lastContact: string | undefined): string => {
-    if (!lastContact) return 'Never';
-    
-    try {
-      const lastContactDate = new Date(lastContact);
-      const now = new Date();
-      const diffMs = now.getTime() - lastContactDate.getTime();
-      
-      // Convert to appropriate time units
-      const diffMins = Math.floor(diffMs / 60000);
-      if (diffMins < 60) {
-        return `${diffMins} minute${diffMins !== 1 ? 's' : ''} ago`;
-      }
-      
-      const diffHours = Math.floor(diffMins / 60);
-      if (diffHours < 24) {
-        return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
-      }
-      
-      const diffDays = Math.floor(diffHours / 24);
-      return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
-    } catch (e) {
-      console.error("Error calculating last contact time:", e);
-      return lastContact; // Fallback to raw timestamp
-    }
-  };
-
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
       <Card className="p-4 bg-gradient-to-br from-white to-blue-50 border border-blue-100 shadow-sm">
@@ -155,11 +105,6 @@ export const DeviceStats = ({ device }: DeviceStatsProps) => {
         <p className={`text-2xl font-bold ${getStatusColor(currentStatus)}`}>
           {currentStatus.charAt(0).toUpperCase() + currentStatus.slice(1)}
         </p>
-        {device.lastContact && (
-          <p className="text-xs text-gray-500 mt-1">
-            Last contact: {getLastContactTime(device.lastContact)}
-          </p>
-        )}
       </Card>
       
       <Card className="p-4 bg-gradient-to-br from-white to-blue-50 border border-blue-100 shadow-sm">
