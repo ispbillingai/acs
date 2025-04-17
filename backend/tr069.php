@@ -39,7 +39,6 @@ $messageHandler = new MessageHandler($db, $logger, $sessionManager, $taskHandler
 try {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $raw_post = file_get_contents('php://input');
-        $logger->logToFile("Received request: " . substr($raw_post, 0, 100) . "...");
         
         if (!empty($raw_post)) {
             // Handle Inform messages

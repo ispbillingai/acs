@@ -18,13 +18,6 @@ class SessionManager {
         $_SESSION['successful_parameters'] = [];
         $_SESSION['host_count'] = 0;
         $_SESSION['current_host_index'] = 1;
-        
-        // Clear any previous task
-        if (isset($_SESSION['current_task'])) {
-            unset($_SESSION['current_task']);
-        }
-        
-        $this->logger->logToFile("Started new session for device: $serialNumber");
     }
 
     public function getCurrentTask() {
@@ -33,15 +26,13 @@ class SessionManager {
 
     public function setCurrentTask($task) {
         $_SESSION['current_task'] = $task;
-        $this->logger->logToFile("Set current task: " . ($task ? $task['task_type'] : 'null'));
     }
 
-    public function getCurrentSessionDeviceSerial() {
+    public function getDeviceSerial() {
         return $_SESSION['device_serial'] ?? null;
     }
 
     public function cleanupSession() {
         session_destroy();
-        $this->logger->logToFile("Session cleaned up");
     }
 }
