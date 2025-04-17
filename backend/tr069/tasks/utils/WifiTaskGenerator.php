@@ -1,4 +1,3 @@
-
 <?php
 
 class WifiTaskGenerator {
@@ -10,12 +9,9 @@ class WifiTaskGenerator {
     }
     
     public function generateParameters($data) {
-        $ssid = trim($data['ssid'] ?? '');
+        $ssid = trim($data['ssid'] ?? ''); // Trim to remove trailing spaces
         $password = $data['password'] ?? '';
-        $security = $data['security'] ?? 'WPA2-PSK';
-        
-        // Log the incoming request for debugging
-        $this->logger->logToFile("Attempting WiFi configuration with SSID: $ssid");
+        $security = $data['security'] ?? 'WPA2-PSK'; // Default to WPA2-PSK
         
         // Validate SSID
         if (empty($ssid)) {
@@ -23,7 +19,20 @@ class WifiTaskGenerator {
             return null;
         }
         
-        // Test different password parameter paths based on device model
+        // Validate password if provided
+        if (!empty($password)) {
+            if (strlen($password) < 8 || strlen($password) > 63) {
+                $this->logger->logToFile("Password must be 8–63 characters for WPA2-PSK, got " . strlen($password));
+                return null;
+            }
+            // Check for invalid characters (basic validation, adjust as needed)
+            if (!preg_match('/^[a-zA-Z0-9!@#$%^&*()_+\-=\[\]{}|;:,.<>?]*$/', $password)) {
+                $this->logger->logToFile("Password contains invalid characters: $password");
+                return null;
+            }
+        }
+        
+        // Core parameters
         $parameters = [
             [
                 'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Enable',
@@ -37,46 +46,22 @@ class WifiTaskGenerator {
             ]
         ];
         
+        // Add password and security parameters if password is provided
         if (!empty($password)) {
-            // Try TR-098 path first
-            $parameters[] = [
-                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.PreSharedKey',
-                'value' => $password,
-                'type' => 'xsd:string'
-            ];
-            
-            // Alternative: Try direct WPA PSK path
-            $parameters[] = [
-                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_WPAPSK',
-                'value' => $password,
-                'type' => 'xsd:string'
-            ];
-            
-            // Alternative: Try TR-181 path
-            $parameters[] = [
-                'name' => 'Device.WiFi.SSID.1.PreSharedKey',
-                'value' => $password,
-                'type' => 'xsd:string'
-            ];
-            
-            // Security mode parameters
             $parameters[] = [
                 'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_SecurityMode',
-                'value' => $security,
+                'value' => 'WPA2-PSK', // Huawei-specific, consistent with HG8546M
                 'type' => 'xsd:string'
             ];
-            
-            // Encryption parameters
+            $parameters[] = [
+                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_WPAPSK',
+                'value' => $password, // Huawei-specific for WPA pre-shared key
+                'type' => 'xsd:string'
+            ];
+            // Set encryption to AES, required for WPA2-PSK
             $parameters[] = [
                 'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.WPAEncryptionModes',
                 'value' => 'AESEncryption',
-                'type' => 'xsd:string'
-            ];
-            
-            // Additional security parameters to try
-            $parameters[] = [
-                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
-                'value' => 'WPAand11i',
                 'type' => 'xsd:string'
             ];
         } else {
@@ -88,7 +73,8 @@ class WifiTaskGenerator {
             ];
         }
         
-        $this->logger->logToFile("Generated WiFi parameters - SSID: $ssid, Testing multiple password paths");
+        $this->logger->logToFile("Generated WiFi parameters - SSID: $ssid, Password length: " . 
+                                 strlen($password) . " chars, Security: $security");
         
         return [
             'method' => 'SetParameterValues',
