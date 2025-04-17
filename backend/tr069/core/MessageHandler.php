@@ -20,6 +20,7 @@ class MessageHandler {
     public function handleInform($raw_post)
     {
         $this->logger->logToFile("======= START HANDLING INFORM =======");
+        error_log("TR-069: Starting to handle Inform message");
     
         /* -------------------------------------------------
          * 1.  Extract SOAP‑ID and SerialNumber
@@ -31,6 +32,7 @@ class MessageHandler {
         $serialNumber = isset($m[1]) ? trim($m[1]) : null;
     
         $this->logger->logToFile("SOAP‑ID: $soapId   Serial: " . ($serialNumber ?: 'none'));
+        error_log("TR-069: Extracted SOAP-ID: $soapId and Serial: " . ($serialNumber ?: 'none'));
     
         /* -------------------------------------------------
          * 2.  If serial present, update DB and build compound
@@ -41,7 +43,7 @@ class MessageHandler {
             $this->updateDeviceWithParams($serialNumber, $deviceParams);
             $this->sessionManager->startNewSession($serialNumber);
     
-            /* always request these parameters */
+            /* always request these parameters - CRITICAL for dashboard display */
             $want = [
                 'InternetGatewayDevice.DeviceInfo.UpTime',
                 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
@@ -50,31 +52,42 @@ class MessageHandler {
                 'InternetGatewayDevice.DeviceInfo.HardwareVersion'
             ];
             $this->logger->logToFile("Embedding GPV for: " . implode(', ', $want));
+            error_log("TR-069: Embedding GetParameterValues for: " . implode(', ', $want));
     
             /* build InformResponse */
-            $respGen  = new InformResponseGenerator();
-            $inform   = $respGen->createResponse($soapId);
+            $respGen = new InformResponseGenerator();
+            $inform = $respGen->createResponse($soapId);
+            
+            error_log("TR-069: Base InformResponse generated, length: " . strlen($inform));
     
-            /* inner GPV RPC */
+            /* inner GPV RPC - Generate the XML for GetParameterValues */
             $gpvBlock = XMLGenerator::generateGetParameterValuesXML(uniqid(), $want);
+            
+            /* Log the GetParameterValues block */
+            $this->logger->logToFile("GetParameterValues XML block: " . $gpvBlock);
+            error_log("TR-069: GetParameterValues XML block: " . $gpvBlock);
     
-            /* normalise any whitespace before </*:Body> so regex hits */
-            $inform = preg_replace('~\s+</([A-Za-z0-9_-]+):Body>~', '</$1:Body>', $inform, 1);
-    
-            /* inject GPV just before the closing tag */
+            /* normalize whitespace before closing body tag to ensure regex works */
+            $inform = preg_replace('~\s+</([A-Za-z0-9_-]+):Body>~', '</\1:Body>', $inform, 1);
+            
+            /* inject GPV just before the closing body tag */
             $compound = preg_replace(
                 '~</([A-Za-z0-9_-]+):Body>~',
-                $gpvBlock . "\n  </$1:Body>",
+                $gpvBlock . "\n  </\\1:Body>",
                 $inform,
                 1
             );
     
             if ($compound === $inform) {
                 $this->logger->logToFile('ERROR – failed to inject GetParameterValues');
+                error_log("TR-069 ERROR: Failed to inject GetParameterValues into InformResponse");
+                // As a fallback, send plain InformResponse
+                $this->logger->logToFile("======= END HANDLING INFORM (ERROR) =======");
+                return $inform;
             } else {
-                $this->logger->logToFile(
-                    'Compound SOAP OK (first 200): ' . substr($compound, 0, 200) . '…'
-                );
+                $this->logger->logToFile('Compound SOAP successfully created, length: ' . strlen($compound));
+                error_log("TR-069: Compound SOAP created successfully, length: " . strlen($compound));
+                error_log("TR-069: Compound response first 200 chars: " . substr($compound, 0, 200));
             }
     
             $this->logger->logToFile("======= END HANDLING INFORM =======");
@@ -85,8 +98,9 @@ class MessageHandler {
          * 3.  Fallback: no serial → plain InformResponse
          * ------------------------------------------------*/
         $respGen = new InformResponseGenerator();
-        $plain   = $respGen->createResponse($soapId);
+        $plain = $respGen->createResponse($soapId);
         $this->logger->logToFile("No serial – plain InformResponse sent");
+        error_log("TR-069: No serial number found - sending plain InformResponse");
         $this->logger->logToFile("======= END HANDLING INFORM =======");
         return $plain;
     }
@@ -94,7 +108,8 @@ class MessageHandler {
     
     public function handleGetParameterValuesResponse($raw_post) {
         $this->logger->logToFile("======= START HANDLING GetParameterValuesResponse =======");
-        $this->logger->logToFile("Raw response first 300 chars: " . substr($raw_post, 0, 300));
+        error_log("TR-069: START HANDLING GetParameterValuesResponse");
+        error_log("TR-069: Raw response first 300 chars: " . substr($raw_post, 0, 300));
         
         // Extract the SOAP ID
         preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
@@ -105,10 +120,12 @@ class MessageHandler {
         
         if (!empty($params)) {
             $this->logger->logToFile("Found " . count($params) . " parameters in response");
+            error_log("TR-069: Found " . count($params) . " parameters in GetParameterValuesResponse");
             
             $serialNumber = $this->sessionManager->getCurrentSessionDeviceSerial();
             if ($serialNumber) {
                 $this->logger->logToFile("Found session for device: " . $serialNumber);
+                error_log("TR-069: Found session for device: " . $serialNumber);
                 
                 // Get device ID
                 $stmt = $this->db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
@@ -117,6 +134,7 @@ class MessageHandler {
                 
                 if ($deviceId) {
                     $this->logger->logToFile("Found device ID: " . $deviceId);
+                    error_log("TR-069: Found device ID: " . $deviceId);
                     $updateValues = [];
                     
                     foreach ($params as $param) {
@@ -124,6 +142,7 @@ class MessageHandler {
                         $paramValue = trim($param[2]);
                         
                         $this->logger->logToFile("Processing parameter: $paramName = $paramValue");
+                        error_log("TR-069: Processing parameter: $paramName = $paramValue");
                         
                         // Store all parameters in the parameters table
                         try {
@@ -140,26 +159,33 @@ class MessageHandler {
                             ]);
                             
                             $this->logger->logToFile("Stored parameter in parameters table");
+                            error_log("TR-069: Stored parameter in parameters table: $paramName");
                         } catch (PDOException $e) {
                             $this->logger->logToFile("Error storing parameter: " . $e->getMessage());
+                            error_log("TR-069 ERROR: Failed to store parameter: " . $e->getMessage());
                         }
                         
                         // Update specific fields in the devices table
                         if (strpos($paramName, '.UpTime') !== false) {
                             $updateValues['uptime'] = (int)$paramValue;
                             $this->logger->logToFile("Will update uptime: $paramValue");
+                            error_log("TR-069: Will update uptime: $paramValue");
                         } else if (strpos($paramName, '.SSID') !== false) {
                             $updateValues['ssid'] = $paramValue;
                             $this->logger->logToFile("Will update SSID: $paramValue");
+                            error_log("TR-069: Will update SSID: $paramValue");
                         } else if (strpos($paramName, '.ExternalIPAddress') !== false) {
                             $updateValues['ip_address'] = $paramValue;
                             $this->logger->logToFile("Will update IP: $paramValue");
+                            error_log("TR-069: Will update IP: $paramValue");
                         } else if (strpos($paramName, '.SoftwareVersion') !== false) {
                             $updateValues['software_version'] = $paramValue;
                             $this->logger->logToFile("Will update Software Version: $paramValue");
+                            error_log("TR-069: Will update Software Version: $paramValue");
                         } else if (strpos($paramName, '.HardwareVersion') !== false) {
                             $updateValues['hardware_version'] = $paramValue;
                             $this->logger->logToFile("Will update Hardware Version: $paramValue");
+                            error_log("TR-069: Will update Hardware Version: $paramValue");
                         }
                     }
                     
@@ -179,21 +205,27 @@ class MessageHandler {
                             $stmt = $this->db->prepare($updateSql);
                             $stmt->execute($updateParams);
                             $this->logger->logToFile("Updated device record with parameters: " . json_encode($updateValues));
+                            error_log("TR-069: Updated device record with parameters: " . json_encode($updateValues));
                         } catch (PDOException $e) {
                             $this->logger->logToFile("Error updating device record: " . $e->getMessage());
+                            error_log("TR-069 ERROR: Failed to update device record: " . $e->getMessage());
                         }
                     }
                 } else {
                     $this->logger->logToFile("Error: Could not find device ID for serial: $serialNumber");
+                    error_log("TR-069 ERROR: Could not find device ID for serial: $serialNumber");
                 }
             } else {
                 $this->logger->logToFile("Error: No device serial in current session");
+                error_log("TR-069 ERROR: No device serial in current session");
             }
         } else {
             $this->logger->logToFile("Warning: No parameters found in GetParameterValuesResponse");
+            error_log("TR-069 WARNING: No parameters found in GetParameterValuesResponse");
         }
         
         $this->logger->logToFile("======= END HANDLING GetParameterValuesResponse =======");
+        error_log("TR-069: END HANDLING GetParameterValuesResponse");
         
         // Return an empty response to complete this transaction
         return XMLGenerator::generateEmptyResponse($soapId);

@@ -48,8 +48,9 @@ class XMLGenerator {
             $parameterNamesXml .= "\n        <string>" . htmlspecialchars($name) . "</string>";
         }
         
+        // This is the inner part of the GetParameterValues request that will be injected into InformResponse
         return '<cwmp:GetParameterValues>
-      <ParameterNames soap-enc:arrayType="xsd:string[' . count($parameterNames) . ']">' . $parameterNamesXml . '
+      <ParameterNames soap-enc:arrayType="xsd:string[' . count($parameterNames) . ']" xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">' . $parameterNamesXml . '
       </ParameterNames>
     </cwmp:GetParameterValues>';
     }
