@@ -1,4 +1,3 @@
-
 <?php
 class InformResponseGenerator {
     public function createResponse($id = null) {
@@ -18,7 +17,6 @@ class InformResponseGenerator {
         return $response;
     }
     
-    // Simplified request to get only SSID parameters for WLAN1
     public function createSSIDDiscoveryRequest($id = null) {
         $soapId = $id ?? '1';
         $response = '<?xml version="1.0" encoding="UTF-8"?>
@@ -38,7 +36,6 @@ class InformResponseGenerator {
         return $response;
     }
     
-    // For WLANConfiguration discovery (used as first step)
     public function createWifiDiscoveryRequest($id = null) {
         $soapId = $id ?? '1';
         $response = '<?xml version="1.0" encoding="UTF-8"?>
@@ -57,7 +54,6 @@ class InformResponseGenerator {
         return $response;
     }
     
-    // For Huawei HG8546M - specifically crafted request for this model (WLAN1 only)
     public function createHG8546MRequest($id = null) {
         $soapId = $id ?? '1';
         $response = '<?xml version="1.0" encoding="UTF-8"?>
@@ -77,7 +73,6 @@ class InformResponseGenerator {
         return $response;
     }
     
-    // New method for HG8145V5 optical power readings
     public function createOpticalPowerRequest($id = null) {
         $soapId = $id ?? '1';
         $response = '<?xml version="1.0" encoding="UTF-8"?>
@@ -102,7 +97,6 @@ class InformResponseGenerator {
         return $response;
     }
     
-    // Acknowledge a parameter response
     public function createParameterResponseAcknowledgement($id = null) {
         $soapId = $id ?? '1';
         $response = '<?xml version="1.0" encoding="UTF-8"?>
@@ -120,33 +114,36 @@ class InformResponseGenerator {
         return $response;
     }
     
-    // New method to generate SetParameterValues request for changing SSID
     public function createSetSSIDRequest($ssid, $id = null) {
-        $soapId = $id ?? 'set-wifi-' . substr(md5(time()), 0, 8);
-        $parameterKey = 'ChangeSSID' . substr(md5(time()), 0, 3);
+        $soapId = $id ?? 'tr181-wifi-a1acc4a2';
+        $parameterKey = 'TR181ChangeSSIDa1a';
         
         $response = '<?xml version="1.0" encoding="UTF-8"?>
-<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-  <SOAP-ENV:Header>
-    <cwmp:ID SOAP-ENV:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </SOAP-ENV:Header>
-  <SOAP-ENV:Body>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
     <cwmp:SetParameterValues>
-      <ParameterList SOAP-ENC:arrayType="cwmp:ParameterValueStruct[1]">
+      <ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[1]">
         <ParameterValueStruct>
-          <Name>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID</Name>
+          <Name>InternetGatewayDevice.Device.WiFi.SSID.1.SSID</Name>
           <Value xsi:type="xsd:string">' . htmlspecialchars($ssid) . '</Value>
         </ParameterValueStruct>
       </ParameterList>
       <ParameterKey>' . $parameterKey . '</ParameterKey>
     </cwmp:SetParameterValues>
-  </SOAP-ENV:Body>
-</SOAP-ENV:Envelope>';
+  </soapenv:Body>
+</soapenv:Envelope>';
 
         return $response;
     }
     
-    // New method to generate SetParameterValues request for changing WiFi password
     public function createSetWiFiPasswordRequest($password, $id = null) {
         $soapId = $id ?? 'set-wifi-pass-' . substr(md5(time()), 0, 8);
         $parameterKey = 'ChangeWiFiPass' . substr(md5(time()), 0, 3);
@@ -172,16 +169,13 @@ class InformResponseGenerator {
         return $response;
     }
     
-    // Custom GetParameterValues request with specific parameter list
     public function createCustomGetParameterValuesRequest($id = null, $parameterNames = []) {
         $soapId = $id ?? '1';
         
-        // Default to SSID only if no parameters specified
         if (empty($parameterNames)) {
             $parameterNames = ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID'];
         }
         
-        // Filter out any WLAN 2-5 parameters
         $filteredParameters = [];
         foreach ($parameterNames as $param) {
             if (!preg_match('/WLANConfiguration\.[2-5]/', $param)) {

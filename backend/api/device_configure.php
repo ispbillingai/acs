@@ -84,20 +84,15 @@ try {
             file_put_contents($wifiLogFile, $tr181Request . "\n", FILE_APPEND);
             
             // Check if device exists in TR-069 system - if not, add it
-            // This is a simplified simulation - in a real implementation, 
-            // we would ensure the device is properly registered with the ACS
             $deviceUrl = "http://{$device['ip_address']}:7547/";
             file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Target device URL: $deviceUrl\n", FILE_APPEND);
             
-            // In a real implementation, we would send this request to the device
-            // through the ACS system. Here we're simulating that action.
-            
-            // Attempt to send TR-069 request (simulated for this implementation)
+            // Always use hardcoded admin/admin credentials regardless of database values
             $success = simulateTR069Request(
                 $deviceUrl, 
                 $tr098Request, 
-                $device['connection_request_username'] ?? null, 
-                $device['connection_request_password'] ?? null
+                'admin', 
+                'admin'
             );
             
             if (!$success) {
@@ -105,8 +100,8 @@ try {
                 $success = simulateTR069Request(
                     $deviceUrl, 
                     $tr181Request, 
-                    $device['connection_request_username'] ?? null, 
-                    $device['connection_request_password'] ?? null
+                    'admin', 
+                    'admin'
                 );
                 file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Fallback to TR-181: " . ($success ? "success" : "failed") . "\n", FILE_APPEND);
             } else {
@@ -200,13 +195,13 @@ try {
             // Create TR-069 reboot request
             $rebootRequest = createRebootRequest();
             
-            // Attempt to send reboot request
+            // Attempt to send reboot request with hardcoded admin/admin credentials
             $deviceUrl = "http://{$device['ip_address']}:7547/";
             $success = simulateTR069Request(
                 $deviceUrl, 
                 $rebootRequest, 
-                $device['connection_request_username'] ?? null,
-                $device['connection_request_password'] ?? null
+                'admin', 
+                'admin'
             );
             
             $response = ['success' => true, 'message' => 'Reboot command sent to device'];
@@ -394,31 +389,28 @@ function createRebootRequest() {
     return $request;
 }
 
-// Updated simulateTR069Request to handle connection request authentication
+// Updated simulateTR069Request to always use admin credentials if provided
 function simulateTR069Request($deviceUrl, $soapRequest, $username = null, $password = null) {
     global $wifiLogFile;
     
     try {
+        // Use hardcoded admin credentials if not provided
+        if (!$username) $username = 'admin';
+        if (!$password) $password = 'admin';
+        
         // Log attempt to send request
         if (isset($wifiLogFile)) {
             file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Attempting to send request to: $deviceUrl\n", FILE_APPEND);
-            
-            // Log authentication details if provided
-            if ($username && $password) {
-                file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Using connection request auth - Username: $username\n", FILE_APPEND);
-                file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Password length: " . strlen($password) . " characters\n", FILE_APPEND);
-            } else {
-                file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - No connection request credentials available\n", FILE_APPEND);
-            }
+            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Using connection request auth - Username: $username\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, date('Y-m-d H:i:s') . " - Password length: " . strlen($password) . " characters\n", FILE_APPEND);
         }
         
         // For testing purposes, we'll try to actually make a connection
-        // but this would normally be handled by your ACS system
         $context = stream_context_create([
             'http' => [
                 'method' => 'POST',
                 'header' => 'Content-Type: text/xml; charset=utf-8' . 
-                    ($username && $password ? "\r\nAuthorization: Basic " . base64_encode("$username:$password)") : ""),
+                    "\r\nAuthorization: Basic " . base64_encode("$username:$password"),
                 'content' => $soapRequest,
                 'timeout' => 5, // Short timeout for testing
             ]

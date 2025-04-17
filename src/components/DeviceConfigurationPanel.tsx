@@ -191,7 +191,7 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
             ) : "Update WiFi"}
           </Button>
           <p className="text-xs text-gray-500 mt-1">
-            Note: WiFi changes may take 30-60 seconds to apply on the router.
+            Note: WiFi changes may take 30-60 seconds to apply on the router. Using hardcoded admin/admin credentials.
           </p>
         </div>
       </div>
@@ -237,17 +237,19 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
             placeholder="Connection Request Username"
             value={connectionRequestUsername}
             onChange={(e) => setConnectionRequestUsername(e.target.value)}
+            disabled={true}
           />
           <Input
             type="password"
             placeholder="Connection Request Password"
             value={connectionRequestPassword}
             onChange={(e) => setConnectionRequestPassword(e.target.value)}
+            disabled={true}
           />
           <Button 
             onClick={handleConnectionRequestUpdate}
             className="w-full md:w-auto"
-            disabled={configuring}
+            disabled={true}
           >
             {configuring ? (
               <>
@@ -257,7 +259,7 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
             ) : "Update Connection Settings"}
           </Button>
           <p className="text-xs text-gray-500 mt-1">
-            These credentials are used by the ACS to authenticate when making requests to the device.
+            Hardcoded to admin/admin for testing purposes. These credentials are used by the ACS to authenticate when making requests to the device.
           </p>
         </div>
       </div>
