@@ -1,99 +1,106 @@
-
 <?php
+/* -----------------------------------------------------------------
+ *  ultra‑minimal TR‑069 endpoint – single file demo
+ * ----------------------------------------------------------------*/
+
 error_reporting(E_ALL);
-ini_set('display_errors', 0);
-ini_set('log_errors', 1);
+ini_set('display_errors', 0);  // <-- change to 1 only while debugging
 
-require_once __DIR__ . '/config/database.php';
-require_once __DIR__ . '/tr069/core/SessionManager.php';
-require_once __DIR__ . '/tr069/core/MessageHandler.php';
-require_once __DIR__ . '/tr069/core/XMLGenerator.php';
-require_once __DIR__ . '/tr069/tasks/TaskHandler.php';
-
-class Logger {
-    private $logFile;
-
-    public function __construct() {
-        $this->logFile = $_SERVER['DOCUMENT_ROOT'] . '/device.log';
-        if (!file_exists(dirname($this->logFile))) {
-            mkdir(dirname($this->logFile), 0755, true);
-        }
-    }
-
-    public function logToFile($message) {
-        $timestamp = date('Y-m-d H:i:s');
-        $logMessage = "[{$timestamp}] [TR-069] {$message}" . PHP_EOL;
-        error_log("[TR-069] {$message}", 0);
-        file_put_contents($this->logFile, $logMessage, FILE_APPEND);
-    }
+/* ---------- helper: build empty envelope ----------------------- */
+function empty_rpc($id = null)
+{
+    $id = $id ?: uniqid();
+    return '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+   xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+   xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+ <soapenv:Header>
+   <cwmp:ID soapenv:mustUnderstand="1">'.$id.'</cwmp:ID>
+ </soapenv:Header>
+ <soapenv:Body/>
+</soapenv:Envelope>';
 }
 
-// Initialize components
-$database = new Database();
-$db = $database->getConnection();
-$logger = new Logger();
-$sessionManager = new SessionManager($db, $logger);
-$taskHandler = new TaskHandler();
-$messageHandler = new MessageHandler($db, $logger, $sessionManager, $taskHandler);
-
-try {
-    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        $raw_post = file_get_contents('php://input');
-        $logger->logToFile("==== NEW REQUEST ====");
-        $logger->logToFile("Received request length: " . strlen($raw_post));
-        $logger->logToFile("Request first 100 chars: " . substr($raw_post, 0, 100) . "...");
-        
-        if (!empty($raw_post)) {
-            // Handle Inform messages
-            if (stripos($raw_post, '<cwmp:Inform>') !== false) {
-                $logger->logToFile("Detected Inform message");
-                $response = $messageHandler->handleInform($raw_post);
-                header('Content-Type: text/xml');
-                $logger->logToFile("Sending response length: " . strlen($response));
-                echo $response;
-                exit;
-            }
-            
-            // Handle GetParameterValuesResponse messages
-            if (stripos($raw_post, '<cwmp:GetParameterValuesResponse>') !== false) {
-                $logger->logToFile("Detected GetParameterValuesResponse message");
-                $response = $messageHandler->handleGetParameterValuesResponse($raw_post);
-                header('Content-Type: text/xml');
-                $logger->logToFile("Sending response length: " . strlen($response));
-                echo $response;
-                exit;
-            }
-            
-            // Handle empty POST or the next step in the session after Inform response
-            if (empty(trim($raw_post)) || stripos($raw_post, '<cwmp:SetParameterValuesResponse>') !== false) {
-                $logger->logToFile("Detected empty POST or SetParameterValuesResponse");
-                $response = $messageHandler->handleEmptyPost();
-                header('Content-Type: text/xml');
-                $logger->logToFile("Sending response length: " . strlen($response));
-                echo $response;
-                exit;
-            }
-        } else {
-            // Handle completely empty POST
-            $logger->logToFile("Detected completely empty POST");
-            $response = $messageHandler->handleEmptyPost();
-            header('Content-Type: text/xml');
-            $logger->logToFile("Sending response length: " . strlen($response));
-            echo $response;
-            exit;
-        }
-        
-        // Default response for unhandled cases
-        $logger->logToFile("Unhandled message type, sending empty response");
-        header('Content-Type: text/xml');
-        $emptyResponse = XMLGenerator::generateEmptyResponse(uniqid());
-        $logger->logToFile("Sending response length: " . strlen($emptyResponse));
-        echo $emptyResponse;
-        exit;
+/* ---------- helper: inner GetParameterValues block ------------- */
+function gpv_block(array $names, $id = null)
+{
+    $id = $id ?: uniqid();
+    $list = '';
+    foreach ($names as $n) {
+        $list .= "\n      <string>".htmlspecialchars($n)."</string>";
     }
-} catch (Exception $e) {
-    $logger->logToFile("Exception: " . $e->getMessage());
-    $logger->logToFile("Stack trace: " . $e->getTraceAsString());
-    header('Content-Type: text/xml');
-    echo XMLGenerator::generateEmptyResponse(uniqid());
+
+    return '<cwmp:GetParameterValues>
+      <ParameterNames soap-enc:arrayType="xsd:string['.count($names).']" xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">'.
+        $list.'
+      </ParameterNames>
+    </cwmp:GetParameterValues>';
 }
+
+/* ---------- helper: InformResponse envelope -------------------- */
+function inform_response($soapId)
+{
+    return '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+                  xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">'.$soapId.'</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:InformResponse>
+      <MaxEnvelopes>1</MaxEnvelopes>
+    </cwmp:InformResponse>
+  </soapenv:Body>
+</soapenv:Envelope>';
+}
+
+/* ---------- main entry ----------------------------------------- */
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    exit;    // CPEs always POST
+}
+
+$raw = file_get_contents('php://input');
+error_log("TR‑069 raw LEN=".strlen($raw)."  head=".substr($raw,0,120));
+
+/* ---- INFORM ----------------------------------------------------*/
+if (stripos($raw, '<cwmp:Inform>') !== false) {
+    // extract the cwmp:ID
+    preg_match('~<cwmp:ID [^>]*>(.*?)</cwmp:ID>~', $raw, $m);
+    $soapId = $m[1] ?? '1';
+
+    // pick parameters we always want
+    $need = [
+        'InternetGatewayDevice.DeviceInfo.UpTime',
+        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
+        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress',
+        'InternetGatewayDevice.DeviceInfo.SoftwareVersion',
+        'InternetGatewayDevice.DeviceInfo.HardwareVersion'
+    ];
+
+    // build InformResponse
+    $resp = inform_response($soapId);
+
+    // normalise closing tag (no whitespace)
+    $resp = preg_replace('~\s+</([A-Za-z0-9_-]+):Body>~', '</$1:Body>', $resp, 1);
+
+    // inject GPV before </*:Body>
+    $compound = preg_replace(
+        '~</([A-Za-z0-9_-]+):Body>~',
+        gpv_block($need)."\n  </$1:Body>",
+        $resp,
+        1
+    );
+
+    error_log("TR‑069 sending compound (first 200): ".substr($compound,0,200));
+    header('Content-Type: text/xml'); echo $compound; exit;
+}
+
+/* ---- GetParameterValuesResponse --------------------------------*/
+if (stripos($raw, '<cwmp:GetParameterValuesResponse') !== false) {
+    error_log("TR‑069 GPV‑RESPONSE head=".substr($raw,0,200));
+    // TODO: parse and store values here
+    header('Content-Type: text/xml'); echo empty_rpc(); exit;
+}
+
+/* ---- any other SOAP (SetParameterValuesResponse etc.) ----------*/
+header('Content-Type: text/xml'); echo empty_rpc(); exit;
