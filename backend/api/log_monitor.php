@@ -14,48 +14,77 @@ $logFiles = [
     'tr069_debug' => __DIR__ . '/../tr069_debug.log'
 ];
 
+// Try to locate Apache error log if possible
+$possibleApacheLogLocations = [
+    '/var/log/apache2/error.log',
+    '/var/log/httpd/error_log',
+    '/var/log/apache2/error_log',
+    '/usr/local/apache/logs/error_log',
+    '/usr/local/apache2/logs/error_log',
+    '/opt/apache2/logs/error_log'
+];
+
+// Check if we can access any of the Apache logs
+foreach ($possibleApacheLogLocations as $logPath) {
+    if (file_exists($logPath) && is_readable($logPath)) {
+        $logFiles['apache_error'] = $logPath;
+        break;
+    }
+}
+
 function getLastLines($filePath, $lines = 100) {
-    if (!file_exists($filePath)) {
+    if (!file_exists($filePath) || !is_readable($filePath)) {
         return [
             'exists' => false,
+            'readable' => file_exists($filePath) ? false : null,
             'lines' => []
         ];
     }
     
-    $file = new SplFileObject($filePath, 'r');
-    $file->seek(PHP_INT_MAX); // Seek to end of file
-    $totalLines = $file->key(); // Get total line count
-    
-    $result = [
-        'exists' => true,
-        'total_lines' => $totalLines,
-        'file_size' => filesize($filePath),
-        'last_modified' => date("Y-m-d H:i:s", filemtime($filePath)),
-        'lines' => []
-    ];
-    
-    // Calculate starting line
-    $startLine = max(0, $totalLines - $lines);
-    
-    // Reset pointer to beginning of file
-    $file->rewind();
-    
-    // Skip to starting line
-    $currentLine = 0;
-    while ($currentLine < $startLine && !$file->eof()) {
-        $file->fgets();
-        $currentLine++;
-    }
-    
-    // Read the last specified number of lines
-    while (!$file->eof() && count($result['lines']) < $lines) {
-        $line = $file->fgets();
-        if ($line !== false) {
-            $result['lines'][] = rtrim($line);
+    try {
+        $file = new SplFileObject($filePath, 'r');
+        $file->seek(PHP_INT_MAX); // Seek to end of file
+        $totalLines = $file->key(); // Get total line count
+        
+        $result = [
+            'exists' => true,
+            'readable' => true,
+            'total_lines' => $totalLines,
+            'file_size' => filesize($filePath),
+            'last_modified' => date("Y-m-d H:i:s", filemtime($filePath)),
+            'lines' => []
+        ];
+        
+        // Calculate starting line
+        $startLine = max(0, $totalLines - $lines);
+        
+        // Reset pointer to beginning of file
+        $file->rewind();
+        
+        // Skip to starting line
+        $currentLine = 0;
+        while ($currentLine < $startLine && !$file->eof()) {
+            $file->fgets();
+            $currentLine++;
         }
+        
+        // Read the last specified number of lines
+        while (!$file->eof() && count($result['lines']) < $lines) {
+            $line = $file->fgets();
+            if ($line !== false) {
+                $result['lines'][] = rtrim($line);
+            }
+        }
+        
+        return $result;
+    } catch (Exception $e) {
+        return [
+            'exists' => file_exists($filePath),
+            'readable' => false,
+            'error' => $e->getMessage(),
+            'lines' => []
+        ];
     }
-    
-    return $result;
 }
 
 // Main function to gather log data
@@ -99,9 +128,13 @@ try {
         ];
     }
     
+    // Log this API call to Apache error log for debugging
+    error_log("[LOG_MONITOR] Log monitor accessed, filter: " . ($filter ?? 'all') . ", lines: $lines");
+    
     echo json_encode($result, JSON_PRETTY_PRINT);
     
 } catch (Exception $e) {
+    error_log("[LOG_MONITOR] Error: " . $e->getMessage());
     http_response_code(500);
     echo json_encode([
         'success' => false,
