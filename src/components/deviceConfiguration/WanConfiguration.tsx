@@ -136,84 +136,112 @@ const WanConfiguration: React.FC<WanConfigurationProps> = ({ deviceId }) => {
             )}
           />
           
-          {connectionType === "PPPoE" && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* PPPoE Settings */}
             <div className="space-y-4 bg-gray-50 p-4 rounded-md">
               <h4 className="text-sm font-medium flex items-center gap-2">
                 <Server className="h-4 w-4" />
-                PPPoE Settings
+                PPPoE Settings {connectionType === "PPPoE" && "(Active)"}
               </h4>
               <div className="space-y-3">
                 <div className="space-y-2">
-                  <Label htmlFor="pppoeUsername">Username</Label>
+                  <Label htmlFor="pppoeUsername" className={connectionType !== "PPPoE" ? "text-gray-400" : ""}>
+                    Username
+                  </Label>
                   <Input
                     id="pppoeUsername"
                     {...form.register("pppoeUsername")}
                     placeholder="Enter ISP provided username"
+                    disabled={connectionType !== "PPPoE"}
+                    className={connectionType !== "PPPoE" ? "bg-gray-100 text-gray-500" : ""}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="pppoePassword">Password</Label>
+                  <Label htmlFor="pppoePassword" className={connectionType !== "PPPoE" ? "text-gray-400" : ""}>
+                    Password
+                  </Label>
                   <Input
                     id="pppoePassword"
                     type="password"
                     {...form.register("pppoePassword")}
                     placeholder="Enter ISP provided password"
+                    disabled={connectionType !== "PPPoE"}
+                    className={connectionType !== "PPPoE" ? "bg-gray-100 text-gray-500" : ""}
                   />
                 </div>
               </div>
             </div>
-          )}
-          
-          {connectionType === "Static" && (
+
+            {/* Static IP Settings */}
             <div className="space-y-4 bg-gray-50 p-4 rounded-md">
               <h4 className="text-sm font-medium flex items-center gap-2">
                 <Server className="h-4 w-4" />
-                Static IP Settings
+                Static IP Settings {connectionType === "Static" && "(Active)"}
               </h4>
               <div className="space-y-3">
                 <div className="space-y-2">
-                  <Label htmlFor="ipAddress">IP Address</Label>
+                  <Label htmlFor="ipAddress" className={connectionType !== "Static" ? "text-gray-400" : ""}>
+                    IP Address
+                  </Label>
                   <Input
                     id="ipAddress"
                     {...form.register("ipAddress")}
                     placeholder="e.g., 192.168.1.100"
+                    disabled={connectionType !== "Static"}
+                    className={connectionType !== "Static" ? "bg-gray-100 text-gray-500" : ""}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="subnetMask">Subnet Mask</Label>
+                  <Label htmlFor="subnetMask" className={connectionType !== "Static" ? "text-gray-400" : ""}>
+                    Subnet Mask
+                  </Label>
                   <Input
                     id="subnetMask"
                     {...form.register("subnetMask")}
                     placeholder="e.g., 255.255.255.0"
+                    disabled={connectionType !== "Static"}
+                    className={connectionType !== "Static" ? "bg-gray-100 text-gray-500" : ""}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="gateway">Default Gateway</Label>
+                  <Label htmlFor="gateway" className={connectionType !== "Static" ? "text-gray-400" : ""}>
+                    Default Gateway
+                  </Label>
                   <Input
                     id="gateway"
                     {...form.register("gateway")}
                     placeholder="e.g., 192.168.1.1"
+                    disabled={connectionType !== "Static"}
+                    className={connectionType !== "Static" ? "bg-gray-100 text-gray-500" : ""}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="dnsServer1">Primary DNS Server</Label>
+                  <Label htmlFor="dnsServer1" className={connectionType !== "Static" ? "text-gray-400" : ""}>
+                    Primary DNS Server
+                  </Label>
                   <Input
                     id="dnsServer1"
                     {...form.register("dnsServer1")}
                     placeholder="e.g., 8.8.8.8"
+                    disabled={connectionType !== "Static"}
+                    className={connectionType !== "Static" ? "bg-gray-100 text-gray-500" : ""}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="dnsServer2">Secondary DNS Server (Optional)</Label>
+                  <Label htmlFor="dnsServer2" className={connectionType !== "Static" ? "text-gray-400" : ""}>
+                    Secondary DNS Server (Optional)
+                  </Label>
                   <Input
                     id="dnsServer2"
                     {...form.register("dnsServer2")}
                     placeholder="e.g., 8.8.4.4"
+                    disabled={connectionType !== "Static"}
+                    className={connectionType !== "Static" ? "bg-gray-100 text-gray-500" : ""}
                   />
                 </div>
               </div>
             </div>
-          )}
+          </div>
           
           <Button 
             type="submit"
