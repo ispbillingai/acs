@@ -1,6 +1,5 @@
 
 <?php
-// This file serves as an API endpoint for refreshing optical power readings
 header('Content-Type: application/json');
 
 // Include database configuration
@@ -37,14 +36,7 @@ try {
         exit;
     }
     
-    // Log that we're attempting to refresh optical readings
-    file_put_contents(__DIR__ . "/../../tr069_optical_power.log", 
-        date('Y-m-d H:i:s') . " [DEBUG] Manual refresh of optical readings requested for device ID: $deviceId\n", 
-        FILE_APPEND);
-    
-    // Trigger request to the device via TR-069
-    // In a real implementation, this would communicate with the TR-069 server
-    // to request an update from the device. For now, we'll simulate this.
+    // Removed logging line: file_put_contents()
     
     // Look up in parameters table if we already have optical readings
     $stmt = $db->prepare("SELECT param_name, param_value FROM parameters 
@@ -76,9 +68,7 @@ try {
             ]);
         }
         
-        file_put_contents(__DIR__ . "/../../tr069_optical_power.log", 
-            date('Y-m-d H:i:s') . " [DEBUG] Added placeholder optical readings for device ID: $deviceId\n", 
-            FILE_APPEND);
+        // Removed logging line: file_put_contents()
     }
     
     // Success response
@@ -92,8 +82,5 @@ try {
     $response['message'] = 'Error: ' . $e->getMessage();
     echo json_encode($response);
     
-    // Log error
-    file_put_contents(__DIR__ . "/../../tr069_optical_power.log", 
-        date('Y-m-d H:i:s') . " [ERROR] " . $e->getMessage() . "\n", 
-        FILE_APPEND);
+    // Removed logging line: file_put_contents()
 }

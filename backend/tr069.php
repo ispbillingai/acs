@@ -4,105 +4,21 @@ error_reporting(0);
 ini_set('display_errors', 0);
 ini_set('log_errors', 0);
 
-// Create debug log file specifically for optical power readings
-$debugLogFile = __DIR__ . '/../tr069_optical_power.log';
-file_put_contents($debugLogFile, date('Y-m-d H:i:s') . " [DEBUG] === TR069 Optical Power Readings Log Initialized ===\n", FILE_APPEND);
-
-function writeDebugLog($message) {
-    global $debugLogFile;
-    // Only log messages related to optical power readings
-    if (stripos($message, 'power') !== false || 
-        stripos($message, 'optical') !== false || 
-        stripos($message, 'txpower') !== false || 
-        stripos($message, 'rxpower') !== false ||
-        stripos($message, 'epon') !== false ||
-        stripos($message, 'gpon') !== false) {
-        file_put_contents($debugLogFile, date('Y-m-d H:i:s') . " [DEBUG] " . $message . "\n", FILE_APPEND);
-    }
-}
-
 // Tracking variables
 $GLOBALS['knownDevices'] = [];
 $GLOBALS['discoveredParameters'] = [];
 $GLOBALS['hostCount'] = 0;
 $GLOBALS['currentHostIndex'] = 1;
 
-// Function to log router data without logging - just store in file
-function logRouterData($paramName, $paramValue) {
-    // Only log optical power readings
-    if (stripos($paramName, 'power') !== false) {
-        writeDebugLog("Logging parameter: {$paramName} = {$paramValue}");
-    }
-    
-    if (in_array("{$paramName}={$paramValue}", $GLOBALS['discoveredParameters'])) {
-        if (stripos($paramName, 'power') !== false) {
-            writeDebugLog("Skipping duplicate parameter");
-        }
-        return;
-    }
-    
-    if (stripos($paramName, 'HostNumberOfEntries') !== false) {
-        $GLOBALS['hostCount'] = intval($paramValue);
-        if (stripos($paramName, 'power') !== false) {
-            writeDebugLog("Found host count: {$paramValue}");
-        }
-    }
-    
-    $GLOBALS['discoveredParameters'][] = "{$paramName}={$paramValue}";
-    
-    file_put_contents($_SERVER['DOCUMENT_ROOT'] . '/router_ssids.txt', "{$paramName} = {$paramValue}\n", FILE_APPEND);
+// Remove debug log file and logging function
+function writeDebugLog($message) {
+    // Intentionally left empty to remove logging
+    return;
 }
 
-// Function to store data in database
-function storeParametersInDatabase() {
-    if (stripos(implode(',', $GLOBALS['discoveredParameters']), 'power') !== false) {
-        writeDebugLog("Attempting to store TR069 data in database");
-    }
-    
-    if (empty($GLOBALS['discoveredParameters'])) {
-        writeDebugLog("No discovered parameters to store");
-        return false;
-    }
-    
-    // Direct API call to store data
-    $scriptPath = __DIR__ . '/api/store_tr069_data.php';
-    
-    if (!file_exists($scriptPath)) {
-        writeDebugLog("API script not found: {$scriptPath}");
-        return false;
-    }
-    
-    try {
-        if (stripos(implode(',', $GLOBALS['discoveredParameters']), 'power') !== false) {
-            writeDebugLog("Including API script directly");
-        }
-        include_once $scriptPath;
-        return true;
-    } catch (Exception $e) {
-        writeDebugLog("Error including API script: " . $e->getMessage());
-        // Fallback to HTTP request if direct include fails
-        $ch = curl_init();
-        $apiUrl = 'http://' . $_SERVER['HTTP_HOST'] . '/backend/api/store_tr069_data.php';
-        
-        if (stripos(implode(',', $GLOBALS['discoveredParameters']), 'power') !== false) {
-            writeDebugLog("Making HTTP request to API: {$apiUrl}");
-        }
-        
-        curl_setopt($ch, CURLOPT_URL, $apiUrl);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
-        
-        $result = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        
-        if (stripos(implode(',', $GLOBALS['discoveredParameters']), 'power') !== false) {
-            writeDebugLog("API response: HTTP {$httpCode}, Response: {$result}");
-        }
-        
-        return ($result !== false);
-    }
+function logRouterData($paramName, $paramValue) {
+    // Intentionally left empty to remove logging
+    return;
 }
 
 // Set unlimited execution time for long-running sessions
@@ -112,10 +28,6 @@ set_time_limit(0);
 $clientIP = $_SERVER['REMOTE_ADDR'];
 $isNewSession = !isset($GLOBALS['knownDevices'][$clientIP]);
 
-if ($isNewSession) {
-    writeDebugLog("New connection from IP: {$clientIP} - Checking for optical power readings");
-}
-
 // Enhanced Huawei device detection based on User-Agent
 $isHuawei = false;
 $isMikroTik = false;
@@ -124,13 +36,9 @@ $modelDetected = '';
 if (isset($_SERVER['HTTP_USER_AGENT'])) {
     $userAgent = $_SERVER['HTTP_USER_AGENT'];
     
-    // Only log this if we're looking for optical powers
-    writeDebugLog("User-Agent: {$userAgent}");
-    
     // Detect MikroTik devices
     if (stripos($userAgent, 'mikrotik') !== false) {
         $isMikroTik = true;
-        writeDebugLog("Detected MikroTik device");
     }
     
     // Detect Huawei devices
@@ -138,11 +46,9 @@ if (isset($_SERVER['HTTP_USER_AGENT'])) {
         stripos($userAgent, 'hw_') !== false ||
         stripos($userAgent, 'hg8') !== false) {
         $isHuawei = true;
-        writeDebugLog("Detected Huawei device");
         
         if (stripos($userAgent, 'hg8546') !== false) {
             $modelDetected = 'HG8546M';
-            writeDebugLog("Detected model: HG8546M - Will check for optical power readings");
         }
     }
 }
@@ -151,18 +57,12 @@ if (isset($_SERVER['HTTP_USER_AGENT'])) {
 if (!$isHuawei && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $raw_post = file_get_contents('php://input');
     if (!empty($raw_post)) {
-        if (stripos(implode(',', $GLOBALS['discoveredParameters']), 'power') !== false) {
-            writeDebugLog("Checking POST data for device identification");
-        }
-        
         if (stripos($raw_post, 'huawei') !== false || 
             stripos($raw_post, 'hg8') !== false) {
             $isHuawei = true;
-            writeDebugLog("Detected Huawei device from POST data");
             
             if (stripos($raw_post, 'HG8546M') !== false) {
                 $modelDetected = 'HG8546M';
-                writeDebugLog("Detected model from POST data: HG8546M");
             }
         }
     }
@@ -244,11 +144,6 @@ function generateParameterRequestXML($soapId, $parameters) {
         $parameterStrings .= "        <string>" . htmlspecialchars($param) . "</string>\n";
     }
     
-    // Only log if it's optical power related
-    if (stripos(implode(',', $parameters), 'power') !== false) {
-        writeDebugLog("Generating XML request for optical power parameters: " . implode(", ", $parameters));
-    }
-    
     $response = '<?xml version="1.0" encoding="UTF-8"?>
 <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
   <SOAP-ENV:Header>
@@ -267,7 +162,6 @@ function generateParameterRequestXML($soapId, $parameters) {
 
 // Skip processing for MikroTik devices entirely - they consistently fail
 if ($isMikroTik) {
-    writeDebugLog("Skipping processing for MikroTik device");
     header('Content-Length: 0');
     exit;
 }
@@ -277,9 +171,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     // Start with a clean router_ssids.txt file for new connections
     if (stripos($raw_post, '<cwmp:Inform>') !== false && $isHuawei) {
-        writeDebugLog("Processing Inform message from Huawei device");
         if (file_exists($_SERVER['DOCUMENT_ROOT'] . '/router_ssids.txt')) {
-            writeDebugLog("Resetting router_ssids.txt file");
             unlink($_SERVER['DOCUMENT_ROOT'] . '/router_ssids.txt');
             file_put_contents($_SERVER['DOCUMENT_ROOT'] . '/router_ssids.txt', "# TR-069 WiFi Parameters Discovered " . date('Y-m-d H:i:s') . "\n", FILE_APPEND);
         }
@@ -296,17 +188,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!empty($raw_post)) {
         // Check if this is an Inform message
         if (stripos($raw_post, '<cwmp:Inform>') !== false) {
-            writeDebugLog("Processing Inform message");
             // Extract the SOAP ID
             preg_match('/<cwmp:ID SOAP-ENV:mustUnderstand="1">(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
             $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
-            writeDebugLog("Extracted SOAP ID: {$soapId}");
             
             // Extract model information
             preg_match('/<ProductClass>(.*?)<\/ProductClass>/s', $raw_post, $modelMatches);
             if (isset($modelMatches[1])) {
                 $model = trim($modelMatches[1]);
-                writeDebugLog("Extracted model: {$model}");
                 
                 if (stripos($model, 'HG8546M') !== false) {
                     $modelDetected = 'HG8546M';
@@ -317,10 +206,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             preg_match('/<Manufacturer>(.*?)<\/Manufacturer>/s', $raw_post, $mfrMatches);
             if (isset($mfrMatches[1])) {
                 $manufacturer = trim($mfrMatches[1]);
-                writeDebugLog("Extracted manufacturer: {$manufacturer}");
                 file_put_contents($_SERVER['DOCUMENT_ROOT'] . '/router_ssids.txt', "InternetGatewayDevice.DeviceInfo.Manufacturer = {$manufacturer}\n", FILE_APPEND);
-            } else {
-                writeDebugLog("Manufacturer not found in Inform message");
             }
             
             // Log device model if possible
@@ -328,7 +214,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (isset($deviceMatches[1]) && isset($deviceMatches[2])) {
                 $model = $deviceMatches[1];
                 $serial = $deviceMatches[2];
-                writeDebugLog("Extracted product class: {$model}, serial: {$serial}");
                 // Save to the router_ssids.txt file
                 file_put_contents($_SERVER['DOCUMENT_ROOT'] . '/router_ssids.txt', "InternetGatewayDevice.DeviceInfo.ProductClass = {$model}\n", FILE_APPEND);
                 file_put_contents($_SERVER['DOCUMENT_ROOT'] . '/router_ssids.txt', "InternetGatewayDevice.DeviceInfo.SerialNumber = {$serial}\n", FILE_APPEND);
@@ -346,7 +231,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         // Check if this is a GetParameterValuesResponse (contains network data)
         if (stripos($raw_post, 'GetParameterValuesResponse') !== false) {
-            writeDebugLog("Processing GetParameterValuesResponse");
             // Extract information using regex
             preg_match_all('/<Name>(.*?)<\/Name>\s*<Value[^>]*>(.*?)<\/Value>/si', $raw_post, $matches, PREG_SET_ORDER);
             
@@ -354,16 +238,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $foundDeviceInfoParams = false;
             
             if (!empty($matches)) {
-                writeDebugLog("Found " . count($matches) . " parameter values in response");
                 foreach ($matches as $match) {
                     $paramName = $match[1];
                     $paramValue = $match[2];
                     
-                    writeDebugLog("Extracted parameter: {$paramName} = {$paramValue}");
-                    
                     // Skip empty values
                     if (empty($paramValue) || $paramValue === '(null)') {
-                        writeDebugLog("Skipping empty value for {$paramName}");
                         continue;
                     }
                     
@@ -378,7 +258,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         stripos($paramName, 'DeviceInfo.HardwareVersion') !== false ||
                         stripos($paramName, 'DeviceInfo.Manufacturer') !== false) {
                         $foundDeviceInfoParams = true;
-                        writeDebugLog("Found requested device info parameter: {$paramName}");
                     }
                     
                     // Check if this is the host count parameter
@@ -386,27 +265,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $foundHostNumberOfEntries = true;
                         $_SESSION['host_count'] = intval($paramValue);
                         $GLOBALS['hostCount'] = intval($paramValue);
-                        writeDebugLog("Found host count: {$paramValue}");
                     }
                     
                     // Log the parameter
                     logRouterData($paramName, $paramValue);
                 }
-            } else {
-                writeDebugLog("No parameter values found in response");
             }
             
             // Extract the SOAP ID for the next request
             preg_match('/<cwmp:ID SOAP-ENV:mustUnderstand="1">(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
             $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
-            writeDebugLog("Extracted SOAP ID for next request: {$soapId}");
             
             // Decide which parameter set to try next based on discovery progress
             $nextParam = null;
             
             // If we just got the host count, prioritize getting all host details
             if ($foundHostNumberOfEntries && $_SESSION['host_count'] > 0) {
-                writeDebugLog("Prioritizing host details based on host count");
                 // Generate all host parameters
                 $dynamicHostParameters = generateHostParameters($_SESSION['host_count']);
                 
@@ -414,13 +288,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($_SESSION['current_host_index'] <= $_SESSION['host_count']) {
                     $nextParam = ["InternetGatewayDevice.LANDevice.1.Hosts.Host.{$_SESSION['current_host_index']}.IPAddress"];
                     $_SESSION['current_host_index']++;
-                    writeDebugLog("Next parameter will be for host index: " . ($_SESSION['current_host_index'] - 1));
                 }
             }
             
             // If we haven't found the requested device info parameters, prioritize them
             if ($nextParam === null && !$foundDeviceInfoParams) {
-                writeDebugLog("Checking for device info parameters to try");
                 foreach ($coreParameters as $param) {
                     if (
                         (stripos($param[0], 'DeviceInfo.UpTime') !== false || 
@@ -430,7 +302,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         !in_array(implode(',', $param), $_SESSION['attempted_parameters'])
                     ) {
                         $nextParam = $param;
-                        writeDebugLog("Next parameter will be device info: {$param[0]}");
                         break;
                     }
                 }
@@ -438,12 +309,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             // If no host parameters to fetch, try core parameters
             if ($nextParam === null) {
-                writeDebugLog("Checking for core parameters to try");
                 foreach ($coreParameters as $param) {
                     $paramKey = implode(',', $param);
                     if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
                         $nextParam = $param;
-                        writeDebugLog("Next parameter will be core parameter: {$param[0]}");
                         break;
                     }
                 }
@@ -451,12 +320,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             // If all core parameters have been tried, move to extended parameters
             if ($nextParam === null) {
-                writeDebugLog("Checking for extended parameters to try");
                 foreach ($extendedParameters as $param) {
                     $paramKey = implode(',', $param);
                     if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
                         $nextParam = $param;
-                        writeDebugLog("Next parameter will be extended parameter: {$param[0]}");
                         break;
                     }
                 }
@@ -464,7 +331,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             // Check if we need to try host parameters after finding host count
             if ($nextParam === null && $_SESSION['host_count'] > 0) {
-                writeDebugLog("Checking for host parameters to try");
                 // Generate host parameters if not already done
                 if (empty($dynamicHostParameters)) {
                     $dynamicHostParameters = generateHostParameters($_SESSION['host_count']);
@@ -475,7 +341,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $paramKey = implode(',', $param);
                     if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
                         $nextParam = $param;
-                        writeDebugLog("Next parameter will be host parameter: {$param[0]}");
                         break;
                     }
                 }
@@ -483,12 +348,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             // If all extended parameters have been tried, try optional ones
             if ($nextParam === null) {
-                writeDebugLog("Checking for optional parameters to try");
                 foreach ($optionalParameters as $param) {
                     $paramKey = implode(',', $param);
                     if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
                         $nextParam = $param;
-                        writeDebugLog("Next parameter will be optional parameter: {$param[0]}");
                         break;
                     }
                 }
@@ -496,7 +359,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             // If we've tried everything, just complete the session
             if ($nextParam === null) {
-                writeDebugLog("All parameters have been tried, completing session");
                 // Store parameters in database before completing the session
                 storeParametersInDatabase();
                 
@@ -518,7 +380,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             // Mark this parameter set as attempted
             $_SESSION['attempted_parameters'][] = implode(',', $nextParam);
-            writeDebugLog("Marked parameter as attempted: " . implode(',', $nextParam));
             
             $nextRequest = generateParameterRequestXML($soapId, $nextParam);
             
@@ -529,23 +390,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         // Check for fault messages
         if (stripos($raw_post, '<SOAP-ENV:Fault>') !== false || stripos($raw_post, '<cwmp:Fault>') !== false) {
-            writeDebugLog("Processing fault message");
             preg_match('/<FaultCode>(.*?)<\/FaultCode>.*?<FaultString>(.*?)<\/FaultString>/s', $raw_post, $faultMatches);
             
             if (!empty($faultMatches)) {
                 $faultCode = $faultMatches[1];
                 $faultString = $faultMatches[2];
-                writeDebugLog("Fault detected: Code {$faultCode}, String: {$faultString}");
                 
                 // Extract SOAP ID
                 preg_match('/<cwmp:ID SOAP-ENV:mustUnderstand="1">(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
                 $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
-                writeDebugLog("Extracted SOAP ID: {$soapId}");
                 
                 // Extract what parameter caused the fault - for future reference
                 if (preg_match('/<cwmp:GetParameterValues>.*?<string>(.*?)<\/string>/s', $raw_post, $paramMatch)) {
                     $faultParam = $paramMatch[1];
-                    writeDebugLog("Parameter that caused fault: {$faultParam}");
                     
                     // Add to a session list of parameters that cause faults - to avoid in future
                     if (!isset($_SESSION['fault_parameters'])) {
@@ -557,7 +414,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 // Check if we need to continue with host parameters
                 if ($_SESSION['host_count'] > 0 && $_SESSION['current_host_index'] <= $_SESSION['host_count']) {
-                    writeDebugLog("Continuing with next host after fault");
                     // Continue with the next host
                     $nextParam = ["InternetGatewayDevice.LANDevice.1.Hosts.Host.{$_SESSION['current_host_index']}.IPAddress"];
                     $_SESSION['attempted_parameters'][] = implode(',', $nextParam);
@@ -583,7 +439,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         !in_array(implode(',', $param), $_SESSION['attempted_parameters'])
                     ) {
                         $nextParam = $param;
-                        writeDebugLog("Trying device info parameter after fault: {$param[0]}");
                         break;
                     }
                 }
@@ -594,7 +449,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $paramKey = implode(',', $param);
                         if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
                             $nextParam = $param;
-                            writeDebugLog("Next parameter after fault will be core parameter: {$param[0]}");
                             break;
                         }
                     }
@@ -606,7 +460,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $paramKey = implode(',', $param);
                         if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
                             $nextParam = $param;
-                            writeDebugLog("Next parameter after fault will be extended parameter: {$param[0]}");
                             break;
                         }
                     }
@@ -618,7 +471,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $paramKey = implode(',', $param);
                         if (!in_array($paramKey, $_SESSION['attempted_parameters'])) {
                             $nextParam = $param;
-                            writeDebugLog("Next parameter after fault will be optional parameter: {$param[0]}");
                             break;
                         }
                     }
@@ -626,7 +478,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 // If we've tried everything, just complete the session
                 if ($nextParam === null) {
-                    writeDebugLog("All parameters have been tried after fault, completing session");
                     // Store parameters in database before completing
                     storeParametersInDatabase();
                     
@@ -673,7 +524,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
     } else {
-        writeDebugLog("Empty POST data, starting parameter discovery");
         // Empty POST - start parameter discovery
         // Generate a session ID
         $sessionId = md5(uniqid(rand(), true));
@@ -706,7 +556,6 @@ try {
     // Handle the request
     $server->handleRequest();
 } catch (Exception $e) {
-    writeDebugLog("ERROR: " . $e->getMessage());
     header('HTTP/1.1 500 Internal Server Error');
     echo "Internal Server Error";
 }
@@ -714,7 +563,6 @@ try {
 // Enhance the SOAP request generation for optical power readings
 if (stripos($raw_post, '<cwmp:Inform>') !== false) {
     // After regular Inform response, prioritize optical power readings
-    writeDebugLog("Prioritizing optical power readings for device");
     
     // Create a custom SOAP envelope for optical power readings
     $opticalRequest = '<?xml version="1.0" encoding="UTF-8"?>
