@@ -15,7 +15,6 @@ class InformResponseGenerator {
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
         
-        file_put_contents(__DIR__ . '/../../../acs.log', date('Y-m-d H:i:s') . " [INFO] Created InformResponse for session ID: " . $soapId . "\n", FILE_APPEND);
         return $response;
     }
     
@@ -100,7 +99,6 @@ class InformResponseGenerator {
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
 
-        file_put_contents(__DIR__ . '/../../../tr069_optical_power.log', date('Y-m-d H:i:s') . " [INFO] Created optical power request with ID: " . $soapId . "\n", FILE_APPEND);
         return $response;
     }
     

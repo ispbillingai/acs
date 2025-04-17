@@ -36,8 +36,6 @@ try {
         exit;
     }
     
-    // Removed logging line: file_put_contents()
-    
     // Look up in parameters table if we already have optical readings
     $stmt = $db->prepare("SELECT param_name, param_value FROM parameters 
                          WHERE device_id = :deviceId 
@@ -67,8 +65,6 @@ try {
                 ':paramValue' => $paramValue
             ]);
         }
-        
-        // Removed logging line: file_put_contents()
     }
     
     // Success response
@@ -81,6 +77,4 @@ try {
 } catch (Exception $e) {
     $response['message'] = 'Error: ' . $e->getMessage();
     echo json_encode($response);
-    
-    // Removed logging line: file_put_contents()
 }
