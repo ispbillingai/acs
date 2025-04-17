@@ -1,3 +1,4 @@
+
 <?php
 class InformResponseGenerator {
     public function createResponse($id = null) {
@@ -307,7 +308,96 @@ class InformResponseGenerator {
     <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
   </soapenv:Header>
   <soapenv:Body>
-    <cwmp:Commit/>
+    <cwmp:Commit>
+      <CommandKey>commit-' . date('Ymd') . '</CommandKey>
+    </cwmp:Commit>
+  </soapenv:Body>
+</soapenv:Envelope>';
+
+        return $response;
+    }
+    
+    // New function for correct HG8145V5 WiFi configuration workflow
+    public function createHG8145V5WifiRequest($ssid, $password) {
+        $soapId = 'set-wlan-hg8145v5';
+        $parameterKey = 'WifiUpdate-' . date('Ymd');
+        
+        $response = '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+                  xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+                  xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:SetParameterValues>
+      <ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[2]">
+        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID</Name>
+          <Value xsi:type="xsd:string">' . htmlspecialchars($ssid) . '</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.PreSharedKey</Name>
+          <Value xsi:type="xsd:string">' . htmlspecialchars($password) . '</Value>
+        </ParameterValueStruct>
+      </ParameterList>
+      <ParameterKey>' . $parameterKey . '</ParameterKey>
+    </cwmp:SetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>';
+
+        return $response;
+    }
+    
+    // New function to verify WiFi settings after change
+    public function createVerifyWiFiRequest() {
+        $soapId = 'verify-wifi-' . substr(md5(time()), 0, 8);
+        
+        $response = '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+                  xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+                  xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:GetParameterValues>
+      <ParameterNames SOAP-ENC:arrayType="xsd:string[2]">
+        <string>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID</string>
+        <string>InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.PreSharedKey</string>
+      </ParameterNames>
+    </cwmp:GetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>';
+
+        return $response;
+    }
+    
+    // Function to check for correct connection request port
+    public function createConnectionRequestPortDiscovery() {
+        $soapId = 'conn-req-port-' . substr(md5(time()), 0, 8);
+        
+        $response = '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+                  xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+                  xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:GetParameterValues>
+      <ParameterNames SOAP-ENC:arrayType="xsd:string[3]">
+        <string>InternetGatewayDevice.ManagementServer.ConnectionRequestURL</string>
+        <string>InternetGatewayDevice.ManagementServer.ConnectionRequestUsername</string>
+        <string>InternetGatewayDevice.ManagementServer.ConnectionRequestPassword</string>
+      </ParameterNames>
+    </cwmp:GetParameterValues>
   </soapenv:Body>
 </soapenv:Envelope>';
 

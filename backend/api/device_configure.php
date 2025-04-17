@@ -1,3 +1,4 @@
+
 <?php
 header('Content-Type: application/json');
 
@@ -49,8 +50,8 @@ try {
                     'password' => $device['ssid_password'] ?? '',
                     'ip_address' => $device['ip_address'] ?? '',
                     'gateway' => '',  // Get from database if available
-                    'connection_request_username' => $device['connection_request_username'] ?? '',
-                    'connection_request_password' => $device['connection_request_password'] ?? ''
+                    'connection_request_username' => $device['connection_request_username'] ?? 'admin',
+                    'connection_request_password' => $device['connection_request_password'] ?? 'admin'
                 ]
             ];
             break;
@@ -89,16 +90,27 @@ try {
             file_put_contents($wifiLogFile, "$timestamp - 7. ACS may send GetParameterValues to verify\n", FILE_APPEND);
             file_put_contents($wifiLogFile, "$timestamp - 8. Device may need explicit Commit command\n\n", FILE_APPEND);
             
-            // Generate the correct TR-098 request for Huawei HG8145V5 devices
-            $tr098Request = $responseGenerator->createCompleteWiFiConfigRequest($ssid, $password);
+            // For Huawei HG8145V5, we need to use the correct PreSharedKey parameter path
+            $tr098Request = $responseGenerator->createHG8145V5WifiRequest($ssid, $password);
             file_put_contents($wifiLogFile, "$timestamp - Using Huawei HG8145V5 TR-098 request:\n", FILE_APPEND);
             file_put_contents($wifiLogFile, $tr098Request . "\n", FILE_APPEND);
             
-            // For connection request simulation
+            // For connection request simulation - use the correct ports for Huawei devices
+            // For Huawei ONTs, common connection request ports are 30005 or 37215, not 4567
             $connectionRequestUsername = $device['connection_request_username'] ?? 'admin';
             $connectionRequestPassword = $device['connection_request_password'] ?? 'admin';
-            $connectionRequestPort = 4567; // Standard TR-069 connection request port
-            $connectionRequestUrl = "http://{$device['ip_address']}:$connectionRequestPort/";
+            
+            // Common connection request ports for Huawei devices
+            $possiblePorts = [30005, 37215, 7547, 4567];
+            $connectionRequestPort = 30005; // Default to the most common port
+            
+            // Generate all possible connection request URLs for testing
+            $connectionRequestUrls = [];
+            foreach ($possiblePorts as $port) {
+                $connectionRequestUrls[] = "http://{$device['ip_address']}:$port/";
+            }
+            
+            $connectionRequestUrl = $connectionRequestUrls[0]; // Default to first one
             
             $connectionRequest = $responseGenerator->createConnectionRequestTrigger(
                 $connectionRequestUsername,
@@ -106,8 +118,26 @@ try {
                 $connectionRequestUrl
             );
             
-            file_put_contents($wifiLogFile, "$timestamp - CONNECTION REQUEST CURL COMMAND:\n", FILE_APPEND);
-            file_put_contents($wifiLogFile, "$timestamp - " . $connectionRequest['command'] . "\n\n", FILE_APPEND);
+            // Provide all possible connection request commands for the user to try
+            $allCommands = [];
+            foreach ($connectionRequestUrls as $url) {
+                $allCommands[] = "curl -i -u \"$connectionRequestUsername:$connectionRequestPassword\" \"$url\"";
+            }
+            
+            file_put_contents($wifiLogFile, "$timestamp - CONNECTION REQUEST CURL COMMANDS TO TRY:\n", FILE_APPEND);
+            foreach ($allCommands as $index => $cmd) {
+                file_put_contents($wifiLogFile, "$timestamp - Option " . ($index + 1) . ": $cmd\n", FILE_APPEND);
+            }
+            
+            // Include commit command which may be needed after setting values
+            $commitRequest = $responseGenerator->createCommitRequest();
+            file_put_contents($wifiLogFile, "$timestamp - COMMIT REQUEST (send after SetParameterValues):\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, $commitRequest . "\n\n", FILE_APPEND);
+            
+            // Verification request
+            $verifyRequest = $responseGenerator->createVerifyWiFiRequest();
+            file_put_contents($wifiLogFile, "$timestamp - VERIFICATION REQUEST (send after SetParameterValues):\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, $verifyRequest . "\n\n", FILE_APPEND);
             
             // Update device record in database
             $updateStmt = $db->prepare("UPDATE devices SET ssid = :ssid, ssid_password = :password WHERE id = :id");
@@ -118,14 +148,23 @@ try {
             
             $response = [
                 'success' => true, 
-                'message' => 'WiFi settings update queued for next device connection',
-                'connection_request' => $connectionRequest,
+                'message' => 'WiFi settings update prepared for next TR-069 session',
+                'connection_request' => [
+                    'username' => $connectionRequestUsername,
+                    'password' => $connectionRequestPassword,
+                    'url' => $connectionRequestUrl,
+                    'command' => "curl -i -u \"$connectionRequestUsername:$connectionRequestPassword\" \"$connectionRequestUrl\"",
+                    'alternative_commands' => $allCommands,
+                    'note' => 'Try all commands if the first one fails. Common ports are 30005, 37215, 7547, 4567'
+                ],
                 'tr069_workflow' => [
-                    'step1' => 'Connection Request to device',
-                    'step2' => 'Device responds with 204 No Content',
-                    'step3' => 'Device sends Inform to ACS',
+                    'step1' => 'Connection Request to device on correct port',
+                    'step2' => 'Device initiates session with ACS via Inform',
+                    'step3' => 'ACS responds with InformResponse',
                     'step4' => 'ACS sends SetParameterValues during session',
-                    'note' => 'Configuration changes are applied when the device connects to the ACS'
+                    'step5' => 'ACS may need to send explicit Commit command',
+                    'step6' => 'ACS may verify with GetParameterValues',
+                    'note' => 'For HG8145V5, use PreSharedKey.1.PreSharedKey instead of KeyPassphrase for password'
                 ]
             ];
             break;
