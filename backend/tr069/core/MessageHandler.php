@@ -1,4 +1,3 @@
-
 <?php
 require_once __DIR__ . '/../responses/InformResponseGenerator.php';
 require_once __DIR__ . '/../device_manager.php';
@@ -18,12 +17,9 @@ class MessageHandler {
     }
 
     public function handleInform($raw_post) {
-        $this->logger->logToFile("======= START HANDLING INFORM =======");
-        
         // Extract the SOAP ID
         preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
         $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
-        $this->logger->logToFile("Extracted SOAP ID: $soapId");
         
         // Extract device serial number
         preg_match('/<SerialNumber>(.*?)<\/SerialNumber>/s', $raw_post, $serialMatches);
@@ -45,12 +41,9 @@ class MessageHandler {
             $pendingTasks = $this->taskHandler->getPendingTasks($serialNumber);
             if (!empty($pendingTasks)) {
                 $this->sessionManager->setCurrentTask($pendingTasks[0]);
-                $this->logger->logToFile("Found pending task: " . $pendingTasks[0]['id'] . " - " . $pendingTasks[0]['task_type']);
-            } else {
-                $this->logger->logToFile("No pending tasks found for device");
             }
 
-            // Define critical parameters to request - THIS IS THE KEY PART FOR THE FIX
+            // Define critical parameters to request
             $parametersToRequest = [
                 'InternetGatewayDevice.DeviceInfo.UpTime',
                 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
@@ -58,8 +51,6 @@ class MessageHandler {
                 'InternetGatewayDevice.DeviceInfo.SoftwareVersion',
                 'InternetGatewayDevice.DeviceInfo.HardwareVersion'
             ];
-            
-            $this->logger->logToFile("Will request these parameters in the same response: " . implode(", ", $parametersToRequest));
             
             // Get the device ID for logging
             try {
@@ -86,7 +77,6 @@ class MessageHandler {
                 $parametersToRequest
             );
             
-            $this->logger->logToFile("GetParameterValues XML generated: " . substr($getParamXml, 0, 100) . "...");
             $this->logger->logToFile("Sending GetParameterValues request with InformResponse");
             
             // Build a compound SOAP body: InformResponse + GetParameterValues
@@ -97,23 +87,16 @@ class MessageHandler {
                 $informResponse
             );
             
-            $this->logger->logToFile("Combined response length: " . strlen($compound));
-            $this->logger->logToFile("======= END HANDLING INFORM =======");
-            
             return $compound;
         }
         
         // Generate and return InformResponse if no serial number
         $responseGenerator = new InformResponseGenerator();
-        $response = $responseGenerator->createResponse($soapId);
-        $this->logger->logToFile("No serial number found, sending simple InformResponse");
-        $this->logger->logToFile("======= END HANDLING INFORM =======");
-        return $response;
+        return $responseGenerator->createResponse($soapId);
     }
 
     public function handleGetParameterValuesResponse($raw_post) {
-        $this->logger->logToFile("======= START HANDLING GetParameterValuesResponse =======");
-        $this->logger->logToFile("Raw response first 300 chars: " . substr($raw_post, 0, 300));
+        $this->logger->logToFile("=== Processing GetParameterValuesResponse ===");
         
         // Extract the SOAP ID
         preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
@@ -135,7 +118,6 @@ class MessageHandler {
                 $deviceId = $stmt->fetchColumn();
                 
                 if ($deviceId) {
-                    $this->logger->logToFile("Found device ID: " . $deviceId);
                     $updateValues = [];
                     
                     foreach ($params as $param) {
@@ -202,17 +184,9 @@ class MessageHandler {
                             $this->logger->logToFile("Error updating device record: " . $e->getMessage());
                         }
                     }
-                } else {
-                    $this->logger->logToFile("Error: Could not find device ID for serial: $serialNumber");
                 }
-            } else {
-                $this->logger->logToFile("Error: No device serial in current session");
             }
-        } else {
-            $this->logger->logToFile("Warning: No parameters found in GetParameterValuesResponse");
         }
-        
-        $this->logger->logToFile("======= END HANDLING GetParameterValuesResponse =======");
         
         // Return an empty response to complete this transaction
         return XMLGenerator::generateEmptyResponse($soapId);
