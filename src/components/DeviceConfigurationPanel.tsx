@@ -1,8 +1,9 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import { Wifi, Globe, PowerOff } from "lucide-react";
 
 interface DeviceConfigurationPanelProps {
   deviceId: string;
@@ -14,8 +15,14 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
   const [wanIPAddress, setWanIPAddress] = useState('');
   const [wanGateway, setWanGateway] = useState('');
 
+  useEffect(() => {
+    console.log("DeviceConfigurationPanel mounted with deviceId:", deviceId);
+  }, [deviceId]);
+
   const makeConfigRequest = async (action: string, data: Record<string, string>) => {
     try {
+      console.log(`Making ${action} config request with data:`, data);
+      
       const formData = new FormData();
       formData.append('device_id', deviceId);
       formData.append('action', action);
@@ -30,6 +37,7 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
       });
 
       const result = await response.json();
+      console.log(`${action} config response:`, result);
 
       if (result.success) {
         toast.success(result.message);
@@ -37,30 +45,36 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
         toast.error(result.message);
       }
     } catch (error) {
+      console.error(`Error in ${action} config:`, error);
       toast.error('Configuration failed');
-      console.error(error);
     }
   };
 
   const handleWiFiUpdate = () => {
+    console.log("WiFi update button clicked");
     makeConfigRequest('wifi', { ssid: wifiSSID, password: wifiPassword });
   };
 
   const handleWANUpdate = () => {
+    console.log("WAN update button clicked");
     makeConfigRequest('wan', { ip_address: wanIPAddress, gateway: wanGateway });
   };
 
   const handleReboot = () => {
+    console.log("Reboot button clicked");
     if (window.confirm('Are you sure you want to reboot this device?')) {
       makeConfigRequest('reboot', {});
     }
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6 p-4 border rounded-lg bg-white shadow-sm">
       <div>
-        <h3 className="text-lg font-bold mb-2">WiFi Configuration</h3>
-        <div className="space-y-2">
+        <h3 className="text-lg font-bold mb-3 flex items-center gap-2">
+          <Wifi className="h-5 w-5" />
+          WiFi Configuration
+        </h3>
+        <div className="space-y-3">
           <Input
             placeholder="WiFi Network Name"
             value={wifiSSID}
@@ -72,13 +86,21 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
             value={wifiPassword}
             onChange={(e) => setWifiPassword(e.target.value)}
           />
-          <Button onClick={handleWiFiUpdate}>Update WiFi</Button>
+          <Button 
+            onClick={handleWiFiUpdate}
+            className="w-full md:w-auto"
+          >
+            Update WiFi
+          </Button>
         </div>
       </div>
 
       <div>
-        <h3 className="text-lg font-bold mb-2">WAN Configuration</h3>
-        <div className="space-y-2">
+        <h3 className="text-lg font-bold mb-3 flex items-center gap-2">
+          <Globe className="h-5 w-5" />
+          WAN Configuration
+        </h3>
+        <div className="space-y-3">
           <Input
             placeholder="IP Address"
             value={wanIPAddress}
@@ -89,13 +111,27 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
             value={wanGateway}
             onChange={(e) => setWanGateway(e.target.value)}
           />
-          <Button onClick={handleWANUpdate}>Update WAN</Button>
+          <Button 
+            onClick={handleWANUpdate}
+            className="w-full md:w-auto"
+          >
+            Update WAN
+          </Button>
         </div>
       </div>
 
       <div>
-        <h3 className="text-lg font-bold mb-2">Device Control</h3>
-        <Button variant="destructive" onClick={handleReboot}>Reboot Device</Button>
+        <h3 className="text-lg font-bold mb-3 flex items-center gap-2">
+          <PowerOff className="h-5 w-5" />
+          Device Control
+        </h3>
+        <Button 
+          variant="destructive" 
+          onClick={handleReboot}
+          className="w-full md:w-auto"
+        >
+          Reboot Device
+        </Button>
       </div>
     </div>
   );
