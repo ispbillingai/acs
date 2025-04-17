@@ -214,7 +214,9 @@ try {
             
         case 'reboot':
             // Create empty task data
-            $taskData = json_encode([]);
+            $taskData = json_encode([
+                'reboot_reason' => isset($_POST['reason']) ? $_POST['reason'] : 'User initiated reboot'
+            ]);
             
             writeToDeviceLog("[Reboot] Creating reboot task for device: {$device['serial_number']}");
             
@@ -232,12 +234,50 @@ try {
             $taskId = $db->lastInsertId();
             writeToDeviceLog("[Task Created] ID: {$taskId}, Type: reboot");
             
-            header('Content-Type: application/json');
-            echo json_encode([
-                'success' => true,
-                'message' => 'Reboot task created successfully',
-                'task_id' => $taskId
-            ]);
+            // Prepare connection request data for frontend display
+            $ipAddress = $device['ip_address'] ?? '';
+            $serialNumber = $device['serial_number'] ?? '';
+            
+            // Build connection request URLs
+            if (!empty($ipAddress)) {
+                $ports = ['30005', '37215', '7547', '4567'];
+                $username = 'admin';
+                $password = 'admin';
+                
+                $connectionUrl = "http://{$ipAddress}:30005/acs";
+                $command = "curl -v -u \"{$username}:{$password}\" -d \"<cwmp:ID>API_".$taskId."</cwmp:ID>\" \"{$connectionUrl}\"";
+                
+                $altCommands = [];
+                foreach ($ports as $port) {
+                    if ($port === '30005') continue; // Skip default
+                    $altUrl = "http://{$ipAddress}:{$port}/acs";
+                    $altCommands[] = "curl -v -u \"{$username}:{$password}\" -d \"<cwmp:ID>API_".$taskId."</cwmp:ID>\" \"{$altUrl}\"";
+                }
+                
+                $connectionRequest = [
+                    'url' => $connectionUrl,
+                    'username' => $username,
+                    'password' => $password,
+                    'command' => $command,
+                    'alternative_commands' => $altCommands
+                ];
+                
+                header('Content-Type: application/json');
+                echo json_encode([
+                    'success' => true,
+                    'message' => 'Reboot task created successfully',
+                    'task_id' => $taskId,
+                    'connection_request' => $connectionRequest,
+                    'tr069_session_id' => $GLOBALS['session_id'] ?? null
+                ]);
+            } else {
+                header('Content-Type: application/json');
+                echo json_encode([
+                    'success' => true,
+                    'message' => 'Reboot task created successfully',
+                    'task_id' => $taskId
+                ]);
+            }
             break;
             
         default:

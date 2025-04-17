@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,11 +48,13 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
   const [connectionRequest, setConnectionRequest] = useState<any>(null);
   const [expandedCommands, setExpandedCommands] = useState(false);
   const [tr069SessionId, setTr069SessionId] = useState<string | null>(null);
-  const [selectedPort, setSelectedPort] = useState('30005'); // Default port for Huawei devices
+  const [selectedPort, setSelectedPort] = useState('30005');
   const [connectionTestStatus, setConnectionTestStatus] = useState<'idle' | 'testing' | 'success' | 'failure'>('idle');
   const [testResults, setTestResults] = useState<string[]>([]);
   const [parameterPath, setParameterPath] = useState('InternetGatewayDevice.LANDevice.1.WLANConfiguration.');
   const [discoveryInProgress, setDiscoveryInProgress] = useState(false);
+  const [rebootReason, setRebootReason] = useState('User initiated reboot');
+  const [rebootConfirmationOpen, setRebootConfirmationOpen] = useState(false);
 
   useEffect(() => {
     console.log("DeviceConfigurationPanel mounted with deviceId:", deviceId);
@@ -196,8 +197,16 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
 
   const handleReboot = () => {
     console.log("Reboot button clicked");
-    if (window.confirm('Are you sure you want to reboot this device?')) {
-      makeConfigRequest('reboot', {});
+    if (window.confirm(`Are you sure you want to reboot this device? Reason: ${rebootReason}`)) {
+      makeConfigRequest('reboot', { reason: rebootReason });
+      toast.info(
+        <div className="space-y-2">
+          <p className="font-medium">Reboot Command Sent</p>
+          <p className="text-sm">The device will reboot after the next TR-069 session.</p>
+          <p className="text-sm">Devices typically take 1-2 minutes to reboot completely.</p>
+        </div>,
+        { duration: 10000 }
+      );
     }
   };
 
@@ -516,7 +525,6 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
           </div>
         </TabsContent>
         
-        {/* New TR-069 Tab */}
         <TabsContent value="tr069" className="pt-4">
           <div>
             <h3 className="text-lg font-bold mb-3 flex items-center gap-2">
@@ -534,7 +542,6 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
             </Alert>
             
             <div className="space-y-6">
-              {/* Connection Request Test */}
               <div className="border rounded-md p-4 space-y-3">
                 <h4 className="font-medium flex items-center gap-2">
                   <Terminal className="h-4 w-4" /> 
@@ -594,7 +601,6 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
                 )}
               </div>
               
-              {/* Parameter Discovery */}
               <div className="border rounded-md p-4 space-y-3">
                 <h4 className="font-medium flex items-center gap-2">
                   <RefreshCw className="h-4 w-4" /> 
@@ -652,7 +658,6 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
                 </div>
               </div>
               
-              {/* TR-069 Session Information */}
               {tr069SessionId && (
                 <div className="border rounded-md p-4 space-y-2">
                   <h4 className="font-medium flex items-center gap-2">
@@ -709,19 +714,41 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
                 <PowerOff className="h-5 w-5" />
                 Device Control
               </h3>
-              <Button 
-                variant="destructive" 
-                onClick={handleReboot}
-                className="w-full md:w-auto"
-                disabled={configuring}
-              >
-                {configuring ? (
-                  <>
-                    <span className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full mr-2"></span>
-                    Processing...
-                  </>
-                ) : "Reboot Device"}
-              </Button>
+              
+              <div className="space-y-4">
+                <Alert className="bg-red-50 border-red-200">
+                  <AlertTriangle className="h-4 w-4 text-red-500" />
+                  <AlertTitle className="text-red-800">Device Reboot Warning</AlertTitle>
+                  <AlertDescription className="text-red-700 text-sm">
+                    Rebooting the device will disconnect all users and services. This operation typically takes 1-2 minutes to complete.
+                  </AlertDescription>
+                </Alert>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="reboot-reason">Reboot Reason (optional)</Label>
+                  <Input
+                    id="reboot-reason"
+                    placeholder="User initiated reboot"
+                    value={rebootReason}
+                    onChange={(e) => setRebootReason(e.target.value)}
+                  />
+                  <p className="text-xs text-gray-500">This will be logged in the device's reboot history.</p>
+                </div>
+                
+                <Button 
+                  variant="destructive" 
+                  onClick={handleReboot}
+                  className="w-full md:w-auto"
+                  disabled={configuring}
+                >
+                  {configuring ? (
+                    <>
+                      <span className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full mr-2"></span>
+                      Processing...
+                    </>
+                  ) : "Reboot Device"}
+                </Button>
+              </div>
             </div>
           </div>
         </TabsContent>

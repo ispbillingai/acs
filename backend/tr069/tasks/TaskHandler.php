@@ -1,4 +1,3 @@
-
 <?php
 require_once __DIR__ . '/../../config/database.php';
 
@@ -108,7 +107,7 @@ class TaskHandler {
             case 'wan':
                 return $this->generateWanParameters($data);
             case 'reboot':
-                return $this->generateRebootCommand();
+                return $this->generateRebootCommand($data);
             default:
                 $this->logToFile("Unsupported task type: $taskType");
                 return null;
@@ -191,12 +190,15 @@ class TaskHandler {
         ];
     }
     
-    private function generateRebootCommand() {
-        $this->logToFile("Generated Reboot command");
+    private function generateRebootCommand($data) {
+        $reason = $data['reboot_reason'] ?? 'User initiated reboot';
+        $commandKey = 'Reboot-' . substr(md5(time()), 0, 8);
+        
+        $this->logToFile("Generated Reboot command with reason: $reason, CommandKey: $commandKey");
         
         return [
             'method' => 'Reboot',
-            'commandKey' => 'Reboot-' . substr(md5(time()), 0, 8)
+            'commandKey' => $commandKey
         ];
     }
 }
