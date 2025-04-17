@@ -1,4 +1,3 @@
-
 <?php
 // Enable error logging to Apache error log
 error_reporting(E_ALL);
@@ -257,11 +256,54 @@ try {
 
                     tr069_log("Sending reboot command with key: " . $parameterRequest['commandKey'], "INFO");
                     
+                    // Close the connection properly to allow the device to reboot
                     header('Content-Type: text/xml');
+                    header('Connection: close');
+                    header('Content-Length: ' . strlen($rebootRequest));
                     echo $rebootRequest;
+                    flush();
+                    if (function_exists('fastcgi_finish_request')) {
+                        fastcgi_finish_request();
+                    }
                     
                     // Mark task as in progress
                     $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 'Sent reboot command to device');
+                    tr069_log("Task marked as in_progress: {$current_task['id']}", "INFO");
+                    
+                    exit;
+                } elseif ($parameterRequest['method'] === 'X_HW_DelayReboot') {
+                    // Handle vendor-specific reboot command for Huawei devices
+                    $rebootRequest = '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:X_HW_DelayReboot>
+      <CommandKey>' . $parameterRequest['commandKey'] . '</CommandKey>
+      <DelaySeconds>0</DelaySeconds>
+    </cwmp:X_HW_DelayReboot>
+  </soapenv:Body>
+</soapenv:Envelope>';
+
+                    tr069_log("Sending Huawei vendor reboot command with key: " . $parameterRequest['commandKey'], "INFO");
+                    
+                    // Close the connection properly to allow the device to reboot
+                    header('Content-Type: text/xml');
+                    header('Connection: close');
+                    header('Content-Length: ' . strlen($rebootRequest));
+                    echo $rebootRequest;
+                    flush();
+                    if (function_exists('fastcgi_finish_request')) {
+                        fastcgi_finish_request();
+                    }
+                    
+                    // Mark task as in progress
+                    $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 'Sent vendor reboot command to device');
                     tr069_log("Task marked as in_progress: {$current_task['id']}", "INFO");
                     
                     exit;

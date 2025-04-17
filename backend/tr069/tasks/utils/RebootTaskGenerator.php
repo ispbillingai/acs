@@ -4,6 +4,7 @@
 class RebootTaskGenerator {
     
     private $logger;
+    private $useHuaweiVendorRpc = false;
     
     public function __construct($logger) {
         $this->logger = $logger;
@@ -13,12 +14,21 @@ class RebootTaskGenerator {
         // Get the reboot reason from the task data or use a default
         $reason = $data['reboot_reason'] ?? 'User initiated reboot';
         
-        // Generate a unique command key with timestamp and current date
-        $timestamp = time();
-        $date = date('Ymd', $timestamp);
-        $commandKey = "manual-reboot-{$date}-" . substr(md5($timestamp), 0, 8);
+        // Generate a shorter CommandKey (≤ 30 ASCII characters)
+        $commandKey = 'reboot-' . bin2hex(random_bytes(4));
         
-        $this->logger->logToFile("Generated Reboot command with reason: $reason, CommandKey: $commandKey");
+        // Detect if we should use the Huawei vendor-specific reboot RPC based on data
+        $this->useHuaweiVendorRpc = isset($data['use_vendor_rpc']) && $data['use_vendor_rpc'] === true;
+        
+        $this->logger->logToFile("Generated Reboot command with reason: $reason, CommandKey: $commandKey, Vendor RPC: " . ($this->useHuaweiVendorRpc ? 'Yes' : 'No'));
+        
+        if ($this->useHuaweiVendorRpc) {
+            return [
+                'method' => 'X_HW_DelayReboot',
+                'commandKey' => $commandKey,
+                'delay' => 0
+            ];
+        }
         
         return [
             'method' => 'Reboot',
