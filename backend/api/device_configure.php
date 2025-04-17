@@ -1,4 +1,3 @@
-
 <?php
 // Enable error reporting for development
 error_reporting(E_ALL);
@@ -11,11 +10,11 @@ header('Content-Type: application/json');
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../functions/device_functions.php';
 
-// Function to log actions with enhanced detail
-function logAction($message, $level = 'INFO') {
+// Function to log actions
+function logAction($message) {
     $logFile = __DIR__ . '/../../device.log';
     $timestamp = date('Y-m-d H:i:s');
-    $logEntry = "$timestamp - [$level] $message\n";
+    $logEntry = "$timestamp - $message\n";
     file_put_contents($logFile, $logEntry, FILE_APPEND);
 }
 
@@ -36,81 +35,9 @@ function storeDeviceTask($db, $deviceId, $taskType, $taskData) {
             return $taskId;
         }
         
-        logAction("Failed to create task: Type=$taskType, Device=$deviceId", 'ERROR');
         return false;
     } catch (PDOException $e) {
-        logAction("DATABASE ERROR: " . $e->getMessage(), 'ERROR');
-        return false;
-    }
-}
-
-// Function to set device parameters via TR-069
-function setDeviceParameters($serialNumber, $parameterList) {
-    logAction("Attempting to set parameters for device: $serialNumber");
-    
-    try {
-        // For each parameter in the list, log the change attempt
-        foreach ($parameterList as $param) {
-            if (isset($param['name']) && isset($param['value'])) {
-                logAction("Setting parameter: {$param['name']} = {$param['value']}");
-            }
-        }
-        
-        // In a production environment, this would make an actual TR-069 API call
-        // For now, simulate a successful operation
-        
-        // Mark the device as online since we're interacting with it
-        updateDeviceStatus($serialNumber, 'online');
-        
-        logAction("Parameters successfully set for device: $serialNumber");
-        return true;
-    } catch (Exception $e) {
-        logAction("Error setting parameters for device $serialNumber: " . $e->getMessage(), 'ERROR');
-        return false;
-    }
-}
-
-// Function to reboot a device via TR-069
-function rebootDevice($serialNumber) {
-    logAction("Attempting to reboot device: $serialNumber");
-    
-    try {
-        // In a production environment, this would make an actual TR-069 API call
-        // For now, simulate a successful operation
-        
-        // Mark the device as online since we're interacting with it
-        updateDeviceStatus($serialNumber, 'online');
-        
-        logAction("Reboot command successfully sent to device: $serialNumber");
-        return true;
-    } catch (Exception $e) {
-        logAction("Error rebooting device $serialNumber: " . $e->getMessage(), 'ERROR');
-        return false;
-    }
-}
-
-// Function to update device status in the database
-function updateDeviceStatus($serialNumber, $status) {
-    try {
-        $database = new Database();
-        $db = $database->getConnection();
-        
-        $sql = "UPDATE devices SET status = :status, last_contact = NOW() WHERE serial_number = :serial_number";
-        $stmt = $db->prepare($sql);
-        $result = $stmt->execute([
-            ':status' => $status,
-            ':serial_number' => $serialNumber
-        ]);
-        
-        if ($result) {
-            logAction("Updated device status: $serialNumber is now $status");
-            return true;
-        }
-        
-        logAction("Failed to update device status for $serialNumber", 'ERROR');
-        return false;
-    } catch (PDOException $e) {
-        logAction("DATABASE ERROR updating device status: " . $e->getMessage(), 'ERROR');
+        logAction("DATABASE ERROR: " . $e->getMessage());
         return false;
     }
 }
@@ -121,7 +48,6 @@ try {
     $db = $database->getConnection();
 } catch (Exception $e) {
     echo json_encode(['success' => false, 'message' => 'Database connection failed']);
-    logAction("Database connection failed: " . $e->getMessage(), 'ERROR');
     exit;
 }
 
@@ -150,19 +76,14 @@ try {
     
     if (!$device) {
         echo json_encode(['success' => false, 'message' => 'Device not found']);
-        logAction("Device not found: ID=$deviceId", 'ERROR');
         exit;
     }
-    
-    // Log actual device details for troubleshooting
-    logAction("DEVICE DETAILS: ID=$deviceId, Serial={$device['serial_number']}, Status={$device['status']}, LastContact={$device['last_contact']}");
     
     // Log action
     logAction("USER ACTION: " . ucfirst($action) . " Configuration Change - Device: " . $device['serial_number']);
     
 } catch (PDOException $e) {
     echo json_encode(['success' => false, 'message' => 'Database error']);
-    logAction("DATABASE ERROR: " . $e->getMessage(), 'ERROR');
     exit;
 }
 
@@ -186,24 +107,70 @@ try {
             }
             
             // Detect device model for special handling
-            $isHuaweiModel = false;
             if (stripos($device['model_name'], 'HG8546M') !== false) {
-                $isHuaweiModel = true;
                 logAction("Using Huawei HG8546M specific parameter path for password");
             }
             
-            // Always force the task into the queue for better reliability
-            // This ensures the config is applied when device connects via TR-069
-            $taskData = [
-                'ssid' => $ssid,
-                'password' => $password,
-                'is_huawei' => $isHuaweiModel
+            // Store configuration as a task if device is offline or explicitly requested
+            if ($storeForLater) {
+                $taskData = [
+                    'ssid' => $ssid,
+                    'password' => $password
+                ];
+                
+                $taskId = storeDeviceTask($db, $deviceId, 'wifi', $taskData);
+                
+                if ($taskId) {
+                    // Update the device record in database to maintain consistency
+                    $updateSql = "UPDATE devices SET ssid = :ssid, ssid_password = :password WHERE id = :id";
+                    $updateStmt = $db->prepare($updateSql);
+                    $updateStmt->execute([
+                        ':ssid' => $ssid,
+                        ':password' => $password,
+                        ':id' => $deviceId
+                    ]);
+                    
+                    echo json_encode([
+                        'success' => true, 
+                        'message' => 'WiFi configuration task created',
+                        'task_id' => $taskId
+                    ]);
+                    exit;
+                } else {
+                    echo json_encode(['success' => false, 'message' => 'Failed to create configuration task']);
+                    exit;
+                }
+            }
+            
+            // Proceed with direct configuration
+            $serialNumber = $device['serial_number'];
+            $parameterList = [
+                [
+                    'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
+                    'value' => $ssid,
+                    'type' => 'xsd:string'
+                ],
+                [
+                    'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
+                    'value' => $password,
+                    'type' => 'xsd:string'
+                ],
+                [
+                    'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
+                    'value' => 'WPAand11i',
+                    'type' => 'xsd:string'
+                ],
+                [
+                    'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.WPAEncryptionModes',
+                    'value' => 'AESEncryption',
+                    'type' => 'xsd:string'
+                ]
             ];
             
-            $taskId = storeDeviceTask($db, $deviceId, 'wifi', $taskData);
+            $result = setDeviceParameters($serialNumber, $parameterList);
             
-            if ($taskId) {
-                // Update the device record in database to maintain consistency
+            if ($result) {
+                // Update the device record in database
                 $updateSql = "UPDATE devices SET ssid = :ssid, ssid_password = :password WHERE id = :id";
                 $updateStmt = $db->prepare($updateSql);
                 $updateStmt->execute([
@@ -212,60 +179,9 @@ try {
                     ':id' => $deviceId
                 ]);
                 
-                // If the device is online and not just storing for later, try to apply immediately as well
-                if (!$storeForLater && $device['status'] === 'online') {
-                    $serialNumber = $device['serial_number'];
-                    
-                    // Set up parameter list based on device model
-                    $parameterList = [
-                        [
-                            'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
-                            'value' => $ssid,
-                            'type' => 'xsd:string'
-                        ]
-                    ];
-                    
-                    // Add password with proper path based on device model
-                    if (!empty($password)) {
-                        if ($isHuaweiModel) {
-                            $parameterList[] = [
-                                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Security.KeyPassphrase',
-                                'value' => $password,
-                                'type' => 'xsd:string'
-                            ];
-                        } else {
-                            $parameterList[] = [
-                                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
-                                'value' => $password,
-                                'type' => 'xsd:string'
-                            ];
-                        }
-                        
-                        $parameterList[] = [
-                            'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
-                            'value' => 'WPAand11i',
-                            'type' => 'xsd:string'
-                        ];
-                        $parameterList[] = [
-                            'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.WPAEncryptionModes',
-                            'value' => 'AESEncryption',
-                            'type' => 'xsd:string'
-                        ];
-                    }
-                    
-                    $result = setDeviceParameters($serialNumber, $parameterList);
-                    logAction("Immediate WiFi configuration result: " . ($result ? "Success" : "Failed"));
-                }
-                
-                echo json_encode([
-                    'success' => true, 
-                    'message' => 'WiFi configuration updated successfully',
-                    'task_id' => $taskId
-                ]);
-                exit;
+                echo json_encode(['success' => true, 'message' => 'WiFi configuration updated successfully']);
             } else {
-                echo json_encode(['success' => false, 'message' => 'Failed to create configuration task']);
-                exit;
+                echo json_encode(['success' => false, 'message' => 'Failed to update WiFi configuration']);
             }
             
             break;
@@ -286,15 +202,57 @@ try {
                 logAction("PARAMETER SET: Gateway changed to '" . $gateway . "'");
             }
             
-            // Create a task for better reliability
-            $taskData = [
-                'ip_address' => $ipAddress,
-                'gateway' => $gateway
+            // Store configuration as a task if device is offline or explicitly requested
+            if ($storeForLater) {
+                $taskData = [
+                    'ip_address' => $ipAddress,
+                    'gateway' => $gateway
+                ];
+                
+                $taskId = storeDeviceTask($db, $deviceId, 'wan', $taskData);
+                
+                if ($taskId) {
+                    // Update the device record in database
+                    $updateSql = "UPDATE devices SET ip_address = :ip_address WHERE id = :id";
+                    $updateStmt = $db->prepare($updateSql);
+                    $updateStmt->execute([
+                        ':ip_address' => $ipAddress,
+                        ':id' => $deviceId
+                    ]);
+                    
+                    echo json_encode([
+                        'success' => true, 
+                        'message' => 'WAN configuration task created',
+                        'task_id' => $taskId
+                    ]);
+                    exit;
+                } else {
+                    echo json_encode(['success' => false, 'message' => 'Failed to create configuration task']);
+                    exit;
+                }
+            }
+            
+            // Proceed with direct configuration
+            $serialNumber = $device['serial_number'];
+            $parameterList = [
+                [
+                    'name' => 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress',
+                    'value' => $ipAddress,
+                    'type' => 'xsd:string'
+                ]
             ];
             
-            $taskId = storeDeviceTask($db, $deviceId, 'wan', $taskData);
+            if (!empty($gateway)) {
+                $parameterList[] = [
+                    'name' => 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DefaultGateway',
+                    'value' => $gateway,
+                    'type' => 'xsd:string'
+                ];
+            }
             
-            if ($taskId) {
+            $result = setDeviceParameters($serialNumber, $parameterList);
+            
+            if ($result) {
                 // Update the device record in database
                 $updateSql = "UPDATE devices SET ip_address = :ip_address WHERE id = :id";
                 $updateStmt = $db->prepare($updateSql);
@@ -303,38 +261,9 @@ try {
                     ':id' => $deviceId
                 ]);
                 
-                // If the device is online and not just storing for later, try to apply immediately as well
-                if (!$storeForLater && $device['status'] === 'online') {
-                    $serialNumber = $device['serial_number'];
-                    $parameterList = [
-                        [
-                            'name' => 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress',
-                            'value' => $ipAddress,
-                            'type' => 'xsd:string'
-                        ]
-                    ];
-                    
-                    if (!empty($gateway)) {
-                        $parameterList[] = [
-                            'name' => 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DefaultGateway',
-                            'value' => $gateway,
-                            'type' => 'xsd:string'
-                        ];
-                    }
-                    
-                    $result = setDeviceParameters($serialNumber, $parameterList);
-                    logAction("Immediate WAN configuration result: " . ($result ? "Success" : "Failed"));
-                }
-                
-                echo json_encode([
-                    'success' => true, 
-                    'message' => 'WAN configuration updated successfully',
-                    'task_id' => $taskId
-                ]);
-                exit;
+                echo json_encode(['success' => true, 'message' => 'WAN configuration updated successfully']);
             } else {
-                echo json_encode(['success' => false, 'message' => 'Failed to create configuration task']);
-                exit;
+                echo json_encode(['success' => false, 'message' => 'Failed to update WAN configuration']);
             }
             
             break;
@@ -343,110 +272,45 @@ try {
             // Log reboot request
             logAction("DEVICE REBOOT: Requested for device " . $device['serial_number']);
             
-            // Create a task for better reliability
-            $taskId = storeDeviceTask($db, $deviceId, 'reboot', []);
-            
-            if ($taskId) {
-                // If the device is online and not just storing for later, try to apply immediately as well
-                if (!$storeForLater && $device['status'] === 'online') {
-                    $serialNumber = $device['serial_number'];
-                    $result = rebootDevice($serialNumber);
-                    logAction("Immediate reboot result: " . ($result ? "Success" : "Failed"));
+            // Store as a task if device is offline or explicitly requested
+            if ($storeForLater) {
+                $taskId = storeDeviceTask($db, $deviceId, 'reboot', []);
+                
+                if ($taskId) {
+                    echo json_encode([
+                        'success' => true, 
+                        'message' => 'Device reboot task created',
+                        'task_id' => $taskId
+                    ]);
+                    exit;
+                } else {
+                    echo json_encode(['success' => false, 'message' => 'Failed to create reboot task']);
+                    exit;
                 }
-                
-                echo json_encode([
-                    'success' => true, 
-                    'message' => 'Reboot command sent successfully',
-                    'task_id' => $taskId
-                ]);
-                exit;
+            }
+            
+            // Proceed with direct reboot
+            $serialNumber = $device['serial_number'];
+            $result = rebootDevice($serialNumber);
+            
+            if ($result) {
+                echo json_encode(['success' => true, 'message' => 'Reboot command sent successfully']);
             } else {
-                echo json_encode(['success' => false, 'message' => 'Failed to create reboot task']);
-                exit;
+                echo json_encode(['success' => false, 'message' => 'Failed to send reboot command']);
             }
             
-            break;
-            
-        case 'get_settings':
-            // Request to get the current device settings
-            try {
-                $deviceInfo = [
-                    'id' => $device['id'],
-                    'serial_number' => $device['serial_number'],
-                    'status' => $device['status'],
-                    'model' => $device['model_name'],
-                    'manufacturer' => $device['manufacturer'],
-                    'ssid' => $device['ssid'],
-                    'ip_address' => $device['ip_address'],
-                    'last_contact' => $device['last_contact']
-                ];
-                
-                // Get pending tasks for this device
-                $taskSql = "SELECT * FROM device_tasks WHERE device_id = :device_id AND status = 'pending' ORDER BY created_at DESC";
-                $taskStmt = $db->prepare($taskSql);
-                $taskStmt->execute([':device_id' => $deviceId]);
-                $pendingTasks = $taskStmt->fetchAll(PDO::FETCH_ASSOC);
-                
-                echo json_encode([
-                    'success' => true,
-                    'settings' => $deviceInfo,
-                    'pending_tasks' => $pendingTasks,
-                    'connection_status' => [
-                        'success' => $device['status'] === 'online',
-                        'message' => $device['status'] === 'online' ? 'Device is online' : 'Device appears to be offline',
-                        'last_contact' => $device['last_contact']
-                    ]
-                ]);
-                exit;
-            } catch (Exception $e) {
-                logAction("Error getting device settings: " . $e->getMessage(), 'ERROR');
-                echo json_encode(['success' => false, 'message' => 'Failed to retrieve device settings']);
-                exit;
-            }
-            break;
-            
-        case 'check_connection':
-            // Request to check device connection status
-            try {
-                // Check device status based on last_contact
-                $tenMinutesAgo = date('Y-m-d H:i:s', strtotime('-10 minutes'));
-                $isOnline = strtotime($device['last_contact']) >= strtotime($tenMinutesAgo);
-                
-                // Force status update in the database
-                $updateSql = "UPDATE devices SET status = :status WHERE id = :id";
-                $updateStmt = $db->prepare($updateSql);
-                $updateStmt->execute([
-                    ':status' => $isOnline ? 'online' : 'offline',
-                    ':id' => $deviceId
-                ]);
-                
-                logAction("Connection check for device {$device['serial_number']}: " . ($isOnline ? 'Online' : 'Offline'));
-                
-                echo json_encode([
-                    'success' => true,
-                    'connection_status' => [
-                        'success' => $isOnline,
-                        'message' => $isOnline ? 'Device is online' : 'Device appears to be offline',
-                        'last_contact' => $device['last_contact']
-                    ]
-                ]);
-                exit;
-            } catch (Exception $e) {
-                logAction("Error checking device connection: " . $e->getMessage(), 'ERROR');
-                echo json_encode(['success' => false, 'message' => 'Failed to check device connection']);
-                exit;
-            }
             break;
             
         default:
             // Unknown action
             echo json_encode(['success' => false, 'message' => 'Invalid action']);
-            logAction("Invalid action requested: $action", 'WARNING');
             exit;
     }
     
+    // Default success response for direct configuration (should be overridden by action handlers)
+    echo json_encode(['success' => false, 'message' => 'Action not implemented or invalid']);
+    
 } catch (Exception $e) {
-    logAction("Server error: " . $e->getMessage(), 'ERROR');
     echo json_encode(['success' => false, 'message' => 'Server error: ' . $e->getMessage()]);
 }
 ?>
