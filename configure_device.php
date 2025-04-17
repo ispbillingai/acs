@@ -64,6 +64,20 @@ try {
     $isOnline = strtotime($device['lastContact']) >= strtotime($tenMinutesAgo);
     $device['status'] = $isOnline ? 'online' : 'offline';
 
+    // Check if there are any pending configuration tasks for this device
+    function getPendingTasks($db, $deviceId) {
+        try {
+            $sql = "SELECT * FROM device_tasks WHERE device_id = :device_id AND status = 'pending' ORDER BY created_at ASC";
+            $stmt = $db->prepare($sql);
+            $stmt->execute([':device_id' => $deviceId]);
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            return [];
+        }
+    }
+    
+    $pendingTasks = getPendingTasks($db, $deviceId);
+
 } catch (Exception $e) {
     die("An error occurred");
 }
@@ -259,7 +273,26 @@ try {
                         <?php if ($device['status'] === 'offline'): ?>
                         <div class="alert alert-warning" role="alert">
                             <i class='bx bx-error-circle me-2'></i>
-                            This device is currently offline. Configuration changes may not take effect until the device is back online.
+                            This device is currently offline. Configuration changes will be stored and applied automatically when the device reconnects.
+                        </div>
+                        <?php endif; ?>
+                        
+                        <!-- Pending Tasks Section -->
+                        <?php if (!empty($pendingTasks)): ?>
+                        <div class="alert alert-info mb-4" role="alert">
+                            <h5 class="alert-heading"><i class='bx bx-time-five me-2'></i>Pending Configuration Tasks</h5>
+                            <p>The following configuration tasks are pending and will be applied when the device next connects:</p>
+                            <ul class="mb-0 ps-3">
+                                <?php foreach ($pendingTasks as $task): ?>
+                                <li>
+                                    <?php 
+                                    $taskType = ucfirst($task['task_type']); 
+                                    $createdAt = date('M d, Y H:i:s', strtotime($task['created_at']));
+                                    echo "<strong>{$taskType}</strong> (Created: {$createdAt})";
+                                    ?>
+                                </li>
+                                <?php endforeach; ?>
+                            </ul>
                         </div>
                         <?php endif; ?>
                         
@@ -333,6 +366,7 @@ try {
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const deviceId = '<?php echo $deviceId; ?>';
+            const isOffline = <?php echo $device['status'] === 'offline' ? 'true' : 'false'; ?>;
             
             // Update WiFi configuration
             document.getElementById('update-wifi-btn').addEventListener('click', function() {
@@ -373,6 +407,7 @@ try {
                 const formData = new FormData();
                 formData.append('device_id', deviceId);
                 formData.append('action', action);
+                formData.append('store_for_later', isOffline ? '1' : '0');
                 
                 // Add all data properties to form data
                 Object.entries(data).forEach(([key, value]) => {
@@ -394,7 +429,15 @@ try {
                 .then(result => {
                     // Show success or error message
                     if (result.success) {
-                        alert(result.message);
+                        if (isOffline) {
+                            alert(result.message + ' The configuration will be applied when the device reconnects.');
+                            // Reload the page to show the new pending task
+                            setTimeout(() => {
+                                location.reload();
+                            }, 1500);
+                        } else {
+                            alert(result.message);
+                        }
                     } else {
                         alert('Error: ' + (result.message || 'Configuration failed'));
                     }
