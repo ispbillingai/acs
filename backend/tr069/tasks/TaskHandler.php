@@ -1,9 +1,16 @@
+
 <?php
 require_once __DIR__ . '/../../config/database.php';
+require_once __DIR__ . '/utils/WifiTaskGenerator.php';
+require_once __DIR__ . '/utils/WanTaskGenerator.php';
+require_once __DIR__ . '/utils/RebootTaskGenerator.php';
 
 class TaskHandler {
     private $db;
     private $logFile;
+    private $wifiTaskGenerator;
+    private $wanTaskGenerator;
+    private $rebootTaskGenerator;
     
     public function __construct() {
         $database = new Database();
@@ -14,10 +21,15 @@ class TaskHandler {
         if (!file_exists(dirname($this->logFile))) {
             mkdir(dirname($this->logFile), 0755, true);
         }
+        
+        // Initialize task generators
+        $this->wifiTaskGenerator = new WifiTaskGenerator($this);
+        $this->wanTaskGenerator = new WanTaskGenerator($this);
+        $this->rebootTaskGenerator = new RebootTaskGenerator($this);
     }
     
     // Log to device.log file
-    private function logToFile($message) {
+    public function logToFile($message) {
         $timestamp = date('Y-m-d H:i:s');
         $logMessage = "[{$timestamp}] [TR-069] {$message}" . PHP_EOL;
         
@@ -103,102 +115,14 @@ class TaskHandler {
         
         switch ($taskType) {
             case 'wifi':
-                return $this->generateWifiParameters($data);
+                return $this->wifiTaskGenerator->generateParameters($data);
             case 'wan':
-                return $this->generateWanParameters($data);
+                return $this->wanTaskGenerator->generateParameters($data);
             case 'reboot':
-                return $this->generateRebootCommand($data);
+                return $this->rebootTaskGenerator->generateParameters($data);
             default:
                 $this->logToFile("Unsupported task type: $taskType");
                 return null;
         }
-    }
-    
-    private function generateWifiParameters($data) {
-        $ssid = $data['ssid'] ?? null;
-        $password = $data['password'] ?? null;
-        
-        if (!$ssid) {
-            $this->logToFile("SSID is required for WiFi configuration");
-            return null;
-        }
-        
-        $parameters = [
-            [
-                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
-                'value' => $ssid,
-                'type' => 'xsd:string'
-            ]
-        ];
-        
-        // Only add password parameter if provided
-        if ($password) {
-            // Try both common password parameter paths
-            $parameters[] = [
-                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
-                'value' => $password,
-                'type' => 'xsd:string'
-            ];
-            
-            // Some devices use PreSharedKey instead of KeyPassphrase
-            $parameters[] = [
-                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.PreSharedKey',
-                'value' => $password,
-                'type' => 'xsd:string'
-            ];
-        }
-        
-        $this->logToFile("Generated WiFi parameters - SSID: $ssid, Password length: " . 
-                 ($password ? strlen($password) : 0) . " chars");
-        
-        return [
-            'method' => 'SetParameterValues',
-            'parameters' => $parameters
-        ];
-    }
-    
-    private function generateWanParameters($data) {
-        $ipAddress = $data['ip_address'] ?? null;
-        $gateway = $data['gateway'] ?? null;
-        
-        if (!$ipAddress) {
-            $this->logToFile("IP Address is required for WAN configuration");
-            return null;
-        }
-        
-        $parameters = [
-            [
-                'name' => 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress',
-                'value' => $ipAddress,
-                'type' => 'xsd:string'
-            ]
-        ];
-        
-        if ($gateway) {
-            $parameters[] = [
-                'name' => 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DefaultGateway',
-                'value' => $gateway,
-                'type' => 'xsd:string'
-            ];
-        }
-        
-        $this->logToFile("Generated WAN parameters - IP: $ipAddress, Gateway: $gateway");
-        
-        return [
-            'method' => 'SetParameterValues',
-            'parameters' => $parameters
-        ];
-    }
-    
-    private function generateRebootCommand($data) {
-        $reason = $data['reboot_reason'] ?? 'User initiated reboot';
-        $commandKey = 'Reboot-' . substr(md5(time()), 0, 8);
-        
-        $this->logToFile("Generated Reboot command with reason: $reason, CommandKey: $commandKey");
-        
-        return [
-            'method' => 'Reboot',
-            'commandKey' => $commandKey
-        ];
     }
 }
