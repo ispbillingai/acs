@@ -1,3 +1,4 @@
+
 <?php
 require_once __DIR__ . '/../responses/InformResponseGenerator.php';
 require_once __DIR__ . '/../device_manager.php';
@@ -60,7 +61,9 @@ class MessageHandler {
                     $parametersToRequest = [
                         'InternetGatewayDevice.DeviceInfo.UpTime',
                         'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
-                        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress'
+                        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress',
+                        'InternetGatewayDevice.DeviceInfo.SoftwareVersion',
+                        'InternetGatewayDevice.DeviceInfo.HardwareVersion'
                     ];
                     
                     // Check and delete any existing parameter request tasks to avoid duplication
@@ -92,7 +95,7 @@ class MessageHandler {
                     $taskId = $this->db->lastInsertId();
                     $this->logger->logToFile("Created parameter request task with ID: $taskId");
                     
-                    // Critical: To ensure the task is picked up immediately, we need to set it as the current task
+                    // CRITICAL: To ensure the task is picked up immediately, we need to set it as the current task
                     $task = [
                         'id' => $taskId,
                         'device_id' => $deviceId,
@@ -374,11 +377,13 @@ class MessageHandler {
         // Extract software version
         if (preg_match('/<Name>InternetGatewayDevice\.DeviceInfo\.SoftwareVersion<\/Name>\s*<Value[^>]*>(.*?)<\/Value>/s', $raw_post, $matches)) {
             $params['softwareVersion'] = trim($matches[1]);
+            $this->logger->logToFile("Found Software Version in Inform: " . $params['softwareVersion']);
         }
         
         // Extract hardware version
         if (preg_match('/<Name>InternetGatewayDevice\.DeviceInfo\.HardwareVersion<\/Name>\s*<Value[^>]*>(.*?)<\/Value>/s', $raw_post, $matches)) {
             $params['hardwareVersion'] = trim($matches[1]);
+            $this->logger->logToFile("Found Hardware Version in Inform: " . $params['hardwareVersion']);
         }
         
         // Additional logging for debugging all parameters
