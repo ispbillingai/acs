@@ -34,14 +34,7 @@ class WifiTaskGenerator {
         
         // Only add password parameter if provided
         if ($password) {
-            // Add Huawei-specific security mode parameter
-            $parameters[] = [
-                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_SecurityMode',
-                'value' => 'WPA2-PSK',  // Using WPA2-PSK as the default security mode
-                'type' => 'xsd:string'
-            ];
-            
-            // For Huawei devices, use KeyPassphrase
+            // For Huawei devices, only use KeyPassphrase (not both)
             $parameters[] = [
                 'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
                 'value' => $password,
