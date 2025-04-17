@@ -4,7 +4,6 @@ header('Content-Type: application/json');
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../functions/device_functions.php';
 require_once __DIR__ . '/../tr069/responses/InformResponseGenerator.php';
-require_once __DIR__ . '/../tr069/auth/AuthenticationHandler.php';
 
 $response = ['success' => false, 'message' => 'Invalid request'];
 
@@ -76,9 +75,6 @@ try {
     // Create ResponseGenerator for TR-069 SOAP messages
     $responseGenerator = new InformResponseGenerator();
     
-    // Create AuthenticationHandler for device authentication
-    $authHandler = new AuthenticationHandler();
-    
     switch ($action) {
         case 'get_settings':
             // Return current device settings
@@ -116,10 +112,6 @@ try {
             // Generate session ID for this transaction
             $sessionId = 'wifi-' . substr(md5(time() . $deviceId), 0, 12);
             
-            // Determine if we're dealing with a Huawei HG8546M specifically
-            $isHuaweiHg8546 = (stripos($device['manufacturer'], 'huawei') !== false && 
-                                stripos($device['model_name'], 'hg8546') !== false);
-            
             // Create TR-069 parameters with correct paths
             $parameterStructs = [
                 [
@@ -129,25 +121,21 @@ try {
                 ]
             ];
             
-            // Add password parameter if provided, using the correct parameter path based on device model
+            // Add password parameter if provided, trying both parameter paths
             if (!empty($password)) {
-                if ($isHuaweiHg8546) {
-                    // Use the Huawei HG8546M specific path for password
-                    $parameterStructs[] = [
-                        'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
-                        'value' => $password,
-                        'type' => 'xsd:string'
-                    ];
-                    
-                    writeToDeviceLog("Using Huawei HG8546M specific parameter path for password");
-                } else {
-                    // Try the standard KeyPassphrase parameter
-                    $parameterStructs[] = [
-                        'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
-                        'value' => $password,
-                        'type' => 'xsd:string'
-                    ];
-                }
+                // Try the standard KeyPassphrase parameter
+                $parameterStructs[] = [
+                    'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
+                    'value' => $password,
+                    'type' => 'xsd:string'
+                ];
+                
+                // Also try the alternative path with PreSharedKey
+                $parameterStructs[] = [
+                    'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
+                    'value' => $password,
+                    'type' => 'xsd:string'
+                ];
                 
                 // Ensure WPA security is enabled
                 $parameterStructs[] = [
@@ -172,92 +160,37 @@ try {
             
             // Log the workflow session
             writeToDeviceLog("TR-069 SESSION STARTED: ID=$sessionId for WiFi configuration");
-            foreach ($parameterStructs as $param) {
-                $paramValue = $param['name'] === 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase' || 
-                              $param['name'] === 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase' ?
-                              '[password]' : $param['value'];
-                writeToDeviceLog("TR-069 PARAMETER SET: {$param['name']}=$paramValue");
+            writeToDeviceLog("TR-069 PARAMETER SET: InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID=$ssid");
+            if (!empty($password)) {
+                writeToDeviceLog("TR-069 PARAMETER SET: InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase=[password]");
+                writeToDeviceLog("TR-069 PARAMETER SET: InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase=[password]");
             }
             
-            // Now actually try to connect to the router using the appropriate port
-            // Common TR-069 ports to try
-            $portsToTry = [7547, 30005, 37215, 4567, 8080];
-            $connectionSuccess = false;
-            $connectionAttempted = false;
-            $finalPort = 0;
+            // Common connection request ports for Huawei devices
+            $possiblePorts = [30005, 37215, 7547, 4567];
             
-            // Get the device IP
-            $deviceIp = $device['ip_address'];
-            
-            // For Huawei HG8546M, add more specific information for debugging
-            if ($isHuaweiHg8546) {
-                writeToDeviceLog("DEVICE MODEL: Huawei HG8546M detected - Using specific TR-069 paths");
-            }
-
-            // Authentication credentials - try device-specific if available, otherwise use defaults
-            $username = $device['connection_request_username'] ?? 'admin';
-            $password = $device['connection_request_password'] ?? 'admin';
-            
-            writeToDeviceLog("TR-069 DIRECT ATTEMPT: Trying to connect directly to device at $deviceIp");
-            
-            foreach ($portsToTry as $port) {
-                $connectionAttempted = true;
-                $deviceUrl = "http://{$deviceIp}:{$port}/";
-                
-                writeToDeviceLog("TR-069 CONNECTION ATTEMPT: Trying port $port at $deviceIp");
-                logTR069Communication("Attempting connection to $deviceUrl with credentials $username:***", "OUT");
-                
-                try {
-                    // Using the improved function from device_functions.php to attempt TR-069 request
-                    if (makeTR069Request($deviceIp, $port, $soapRequest, $username, $password)) {
-                        $connectionSuccess = true;
-                        $finalPort = $port;
-                        writeToDeviceLog("TR-069 CONNECTION SUCCESS: Successfully connected to device on port $port");
-                        break;
-                    } else {
-                        writeToDeviceLog("TR-069 CONNECTION FAILED: Could not connect to device on port $port");
-                    }
-                } catch (Exception $e) {
-                    writeToDeviceLog("TR-069 CONNECTION ERROR on port $port: " . $e->getMessage());
-                }
+            // Generate all possible connection request URLs for testing
+            $connectionRequestUrls = [];
+            foreach ($possiblePorts as $port) {
+                $connectionRequestUrls[] = "http://{$device['ip_address']}:$port/";
             }
             
-            // If no connection could be established on common ports, try raw HTTP connection
-            if (!$connectionSuccess && $connectionAttempted) {
-                writeToDeviceLog("TR-069 FALLBACK: Trying raw HTTP connection to various ports");
-                
-                // Try using cURL directly for more control
-                foreach ($portsToTry as $port) {
-                    $deviceUrl = "http://{$deviceIp}:{$port}/";
-                    
-                    // Create a cURL request
-                    $ch = curl_init($deviceUrl);
-                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-                    curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                        'Content-Type: text/xml; charset=utf-8',
-                        'Authorization: Basic ' . base64_encode("$username:$password")
-                    ]);
-                    curl_setopt($ch, CURLOPT_POST, true);
-                    curl_setopt($ch, CURLOPT_POSTFIELDS, $soapRequest);
-                    
-                    writeToDeviceLog("TR-069 CURL ATTEMPT: Trying port $port with cURL");
-                    
-                    $result = curl_exec($ch);
-                    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                    curl_close($ch);
-                    
-                    if ($result !== false && $httpCode >= 200 && $httpCode < 300) {
-                        $connectionSuccess = true;
-                        $finalPort = $port;
-                        writeToDeviceLog("TR-069 CURL SUCCESS: Connected to device on port $port (HTTP $httpCode)");
-                        logTR069Communication("CURL Response from $deviceUrl", "IN", $result);
-                        break;
-                    } else {
-                        writeToDeviceLog("TR-069 CURL FAILED: Could not connect to device on port $port (HTTP $httpCode)");
-                    }
-                }
-            }
+            // Default ConnectionRequestURL (will be updated if known)
+            $connectionRequestUrl = $connectionRequestUrls[0];
+            
+            // Get connection request credentials from device or use defaults
+            $connectionRequestUsername = $device['connection_request_username'] ?? 'admin';
+            $connectionRequestPassword = $device['connection_request_password'] ?? 'admin';
+            
+            // Generate connection request details with all possible ports
+            $connectionRequest = $responseGenerator->createConnectionRequestTrigger(
+                $connectionRequestUsername,
+                $connectionRequestPassword,
+                $connectionRequestUrl
+            );
+            
+            // Log the connection request
+            logTR069Communication("Connection Request to initiate session (URL: $connectionRequestUrl)", "OUT", $connectionRequest);
             
             // Update device in database with new WiFi settings (pending)
             try {
@@ -289,7 +222,7 @@ try {
                 
                 $updateStmt = $db->prepare($sql);
                 $updateStmt->bindParam(':ssid', $ssid);
-                $updateStmt->bindParam(':password', $_POST['password'] ?? '');
+                $updateStmt->bindParam(':password', $password);
                 if ($columnsExist) {
                     $updateStmt->bindParam(':transaction', $sessionId);
                 }
@@ -303,39 +236,19 @@ try {
             }
             
             // Success response
-            if ($connectionSuccess) {
-                $response = [
-                    'success' => true,
-                    'message' => "WiFi configuration successfully sent to device on port $finalPort.",
-                    'connection_status' => 'success',
-                    'tr069_session_id' => $sessionId,
-                    'connection_details' => [
-                        'device_ip' => $deviceIp,
-                        'port_used' => $finalPort,
-                        'parameters_sent' => count($parameterStructs)
-                    ]
-                ];
-                writeToDeviceLog("TR-069 SUCCESS: WiFi configuration sent to device {$device['serial_number']} on port $finalPort");
-            } else {
-                $response = [
-                    'success' => true, // Still return success since we updated the database
-                    'message' => 'WiFi configuration has been saved but could not connect to the device directly.',
-                    'connection_status' => 'failed',
-                    'tr069_session_id' => $sessionId,
-                    'debug_info' => [
-                        'attempted_parameters' => array_map(function($p) {
-                            return $p['name'] . '=' . ($p['name'] === 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase' || 
-                                                      $p['name'] === 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase' ? 
-                                                     '[HIDDEN]' : $p['value']);
-                        }, $parameterStructs),
-                        'ports_tried' => $portsToTry,
-                        'device_ip' => $deviceIp
-                    ]
-                ];
-                writeToDeviceLog("TR-069 WARNING: WiFi configuration prepared but could not connect to device {$device['serial_number']}");
-            }
+            $response = [
+                'success' => true,
+                'message' => 'WiFi configuration has been prepared. Use the connection request to initiate a TR-069 session.',
+                'connection_request' => $connectionRequest,
+                'tr069_session_id' => $sessionId,
+                'debug_info' => [
+                    'attempted_parameters' => array_map(function($p) {
+                        return $p['name'] . '=' . ($p['name'] === 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase' ? '[HIDDEN]' : $p['value']);
+                    }, $parameterStructs)
+                ]
+            ];
             
-            writeToDeviceLog("FRONTEND RESPONSE: WiFi configuration process completed for device {$device['serial_number']}");
+            writeToDeviceLog("FRONTEND RESPONSE: WiFi configuration prepared successfully for device {$device['serial_number']}");
             break;
             
         case 'wan':
