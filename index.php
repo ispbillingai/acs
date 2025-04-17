@@ -1,4 +1,3 @@
-
 <?php
 // Enable error reporting
 error_reporting(E_ALL);
@@ -36,12 +35,7 @@ try {
     $db = $database->getConnection();
     error_log("Database connection successful");
 
-    // Fetch devices - ensure device_functions.php has the getDevices() function
-    if (!function_exists('getDevices')) {
-        error_log("ERROR: getDevices() function not defined. Check device_functions.php");
-        die("Function getDevices() not found. Contact administrator.");
-    }
-    
+    // Fetch devices
     $devices = getDevices($db);
     $tenMinutesAgo = date('Y-m-d H:i:s', strtotime('-10 minutes'));
     $totalDevices = count($devices);

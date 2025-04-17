@@ -1,3 +1,4 @@
+
 <?php
 // Enable error reporting for development
 error_reporting(E_ALL);
@@ -23,14 +24,11 @@ function storeDeviceTask($db, $deviceId, $taskType, $taskData) {
     try {
         $sql = "INSERT INTO device_tasks (device_id, task_type, task_data) VALUES (:device_id, :task_type, :task_data)";
         $stmt = $db->prepare($sql);
-        $paramData = json_encode($taskData);
-        
-        // Bind parameters directly without using references for PDO
-        $stmt->bindParam(':device_id', $deviceId, PDO::PARAM_INT);
-        $stmt->bindParam(':task_type', $taskType, PDO::PARAM_STR);
-        $stmt->bindParam(':task_data', $paramData, PDO::PARAM_STR);
-        
-        $result = $stmt->execute();
+        $result = $stmt->execute([
+            ':device_id' => $deviceId,
+            ':task_type' => $taskType,
+            ':task_data' => json_encode($taskData)
+        ]);
         
         if ($result) {
             $taskId = $db->lastInsertId();
@@ -49,13 +47,12 @@ function storeDeviceTask($db, $deviceId, $taskType, $taskData) {
 function setDeviceParameters($serialNumber, $parameterList) {
     logAction("Attempting to set parameters for device: $serialNumber");
     
-    // For devices behind NAT, we should store the request and wait for the next Inform
-    // This is just a simulation for now - in real implementation we would:
-    // 1. Check if the device is online through a direct connection
-    // 2. If not reachable, store the request for when the device next connects
-    
-    // Simulating success - in real world, we'd verify
+    // Check if device is online and parameters can be set directly
+    // For now, we'll just simulate success
     $isSuccess = true;
+    
+    // If we're in a real environment, you would implement actual TR-069 parameter setting here
+    // For example, using a SOAP request to the TR-069 server
     
     if ($isSuccess) {
         logAction("Parameters successfully set for device: $serialNumber");
@@ -70,8 +67,8 @@ function setDeviceParameters($serialNumber, $parameterList) {
 function rebootDevice($serialNumber) {
     logAction("Attempting to reboot device: $serialNumber");
     
-    // For devices behind NAT, we should store the reboot request and wait for next Inform
-    // Simulating success - in real world, we'd verify
+    // In a real environment, you would implement actual TR-069 reboot command here
+    // For now, we'll just simulate success
     $isSuccess = true;
     
     if ($isSuccess) {
@@ -106,10 +103,7 @@ if (!isset($_POST['device_id']) || !isset($_POST['action'])) {
 
 $deviceId = $_POST['device_id'];
 $action = $_POST['action'];
-
-// Always store for later by default for devices that may be behind NAT
-// Can be overridden with explicit parameter
-$storeForLater = isset($_POST['store_for_later']) ? ($_POST['store_for_later'] === '1') : true;
+$storeForLater = isset($_POST['store_for_later']) && $_POST['store_for_later'] === '1';
 
 // Validate device ID
 try {
@@ -134,56 +128,6 @@ try {
 // Process based on action type
 try {
     switch ($action) {
-        case 'get_settings':
-            // Handle retrieving current device settings
-            $settings = [
-                'ssid' => $device['ssid'] ?? '',
-                'ip_address' => $device['ip_address'] ?? '',
-                'gateway' => $device['gateway'] ?? '',
-                'model' => $device['model_name'] ?? '',
-                'serial' => $device['serial_number'] ?? '',
-                'manufacturer' => $device['manufacturer'] ?? ''
-            ];
-            
-            // Check if there are any pending tasks for this device
-            $tasksSql = "SELECT * FROM device_tasks WHERE device_id = :device_id AND status = 'pending' ORDER BY created_at DESC";
-            $tasksStmt = $db->prepare($tasksSql);
-            $tasksStmt->execute([':device_id' => $deviceId]);
-            $pendingTasks = $tasksStmt->fetchAll(PDO::FETCH_ASSOC);
-            
-            echo json_encode([
-                'success' => true, 
-                'settings' => $settings,
-                'pending_tasks' => count($pendingTasks),
-                'connection_status' => [
-                    'success' => true,
-                    'message' => 'Device settings retrieved successfully'
-                ]
-            ]);
-            exit;
-            
-        case 'check_connection':
-            // Simulate checking TR-069 connection for devices behind NAT
-            // In a real implementation, you'd check for recent Inform messages
-            
-            $tenMinutesAgo = date('Y-m-d H:i:s', strtotime('-10 minutes'));
-            $isRecentlyActive = strtotime($device['lastContact']) >= strtotime($tenMinutesAgo);
-            
-            if ($isRecentlyActive) {
-                echo json_encode([
-                    'success' => true,
-                    'message' => 'Device has connected recently through TR-069',
-                    'details' => 'Last connection: ' . $device['lastContact']
-                ]);
-            } else {
-                echo json_encode([
-                    'success' => false,
-                    'message' => 'Device has not connected recently',
-                    'details' => 'Last connection: ' . $device['lastContact'] . '. Device may be offline or behind NAT.'
-                ]);
-            }
-            exit;
-            
         case 'wifi':
             // Validate WiFi parameters
             if (!isset($_POST['ssid'])) {
@@ -205,33 +149,77 @@ try {
                 logAction("Using Huawei HG8546M specific parameter path for password");
             }
             
-            // Always store configuration as a task for devices that might be behind NAT
-            $taskData = [
-                'ssid' => $ssid,
-                'password' => $password,
-                'security' => $_POST['security'] ?? 'WPA2-PSK'
+            // Store configuration as a task if device is offline or explicitly requested
+            if ($storeForLater) {
+                $taskData = [
+                    'ssid' => $ssid,
+                    'password' => $password
+                ];
+                
+                $taskId = storeDeviceTask($db, $deviceId, 'wifi', $taskData);
+                
+                if ($taskId) {
+                    // Update the device record in database to maintain consistency
+                    $updateSql = "UPDATE devices SET ssid = :ssid, ssid_password = :password WHERE id = :id";
+                    $updateStmt = $db->prepare($updateSql);
+                    $updateStmt->execute([
+                        ':ssid' => $ssid,
+                        ':password' => $password,
+                        ':id' => $deviceId
+                    ]);
+                    
+                    echo json_encode([
+                        'success' => true, 
+                        'message' => 'WiFi configuration task created',
+                        'task_id' => $taskId
+                    ]);
+                    exit;
+                } else {
+                    echo json_encode(['success' => false, 'message' => 'Failed to create configuration task']);
+                    exit;
+                }
+            }
+            
+            // Proceed with direct configuration
+            $serialNumber = $device['serial_number'];
+            $parameterList = [
+                [
+                    'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
+                    'value' => $ssid,
+                    'type' => 'xsd:string'
+                ],
+                [
+                    'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
+                    'value' => $password,
+                    'type' => 'xsd:string'
+                ],
+                [
+                    'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
+                    'value' => 'WPAand11i',
+                    'type' => 'xsd:string'
+                ],
+                [
+                    'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.WPAEncryptionModes',
+                    'value' => 'AESEncryption',
+                    'type' => 'xsd:string'
+                ]
             ];
             
-            $taskId = storeDeviceTask($db, $deviceId, 'wifi', $taskData);
+            $result = setDeviceParameters($serialNumber, $parameterList);
             
-            if ($taskId) {
-                // Update the device record in database to maintain consistency
-                $updateSql = "UPDATE devices SET ssid = :ssid WHERE id = :id";
+            if ($result) {
+                // Update the device record in database
+                $updateSql = "UPDATE devices SET ssid = :ssid, ssid_password = :password WHERE id = :id";
                 $updateStmt = $db->prepare($updateSql);
                 $updateStmt->execute([
                     ':ssid' => $ssid,
+                    ':password' => $password,
                     ':id' => $deviceId
                 ]);
                 
-                echo json_encode([
-                    'success' => true, 
-                    'message' => 'WiFi configuration task created. Changes will be applied when device next connects.',
-                    'task_id' => $taskId
-                ]);
-                exit;
+                echo json_encode(['success' => true, 'message' => 'WiFi configuration updated successfully']);
             } else {
-                echo json_encode(['success' => false, 'message' => 'Failed to create configuration task']);
-                exit;
+                echo json_encode(['success' => false, 'message' => 'Failed to update WiFi configuration']);
             }
             
             break;
@@ -252,33 +240,57 @@ try {
                 logAction("PARAMETER SET: Gateway changed to '" . $gateway . "'");
             }
             
-            // Always store configuration as a task for devices that might be behind NAT
-            $taskData = [
-                'ip_address' => $ipAddress,
-                'gateway' => $gateway,
-                'connection_type' => $_POST['connection_type'] ?? 'DHCP'
+            // Store configuration as a task if device is offline or explicitly requested
+            if ($storeForLater) {
+                $taskData = [
+                    'ip_address' => $ipAddress,
+                    'gateway' => $gateway
+                ];
+                
+                $taskId = storeDeviceTask($db, $deviceId, 'wan', $taskData);
+                
+                if ($taskId) {
+                    // Update the device record in database
+                    $updateSql = "UPDATE devices SET ip_address = :ip_address WHERE id = :id";
+                    $updateStmt = $db->prepare($updateSql);
+                    $updateStmt->execute([
+                        ':ip_address' => $ipAddress,
+                        ':id' => $deviceId
+                    ]);
+                    
+                    echo json_encode([
+                        'success' => true, 
+                        'message' => 'WAN configuration task created',
+                        'task_id' => $taskId
+                    ]);
+                    exit;
+                } else {
+                    echo json_encode(['success' => false, 'message' => 'Failed to create configuration task']);
+                    exit;
+                }
+            }
+            
+            // Proceed with direct configuration
+            $serialNumber = $device['serial_number'];
+            $parameterList = [
+                [
+                    'name' => 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress',
+                    'value' => $ipAddress,
+                    'type' => 'xsd:string'
+                ]
             ];
             
-            // Add PPPoE or Static IP specific fields if provided
-            if (isset($_POST['subnet_mask'])) {
-                $taskData['subnet_mask'] = $_POST['subnet_mask'];
+            if (!empty($gateway)) {
+                $parameterList[] = [
+                    'name' => 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DefaultGateway',
+                    'value' => $gateway,
+                    'type' => 'xsd:string'
+                ];
             }
             
-            if (isset($_POST['dns_servers'])) {
-                $taskData['dns_servers'] = $_POST['dns_servers'];
-            }
+            $result = setDeviceParameters($serialNumber, $parameterList);
             
-            if (isset($_POST['pppoe_username'])) {
-                $taskData['pppoe_username'] = $_POST['pppoe_username'];
-            }
-            
-            if (isset($_POST['pppoe_password'])) {
-                $taskData['pppoe_password'] = $_POST['pppoe_password'];
-            }
-            
-            $taskId = storeDeviceTask($db, $deviceId, 'wan', $taskData);
-            
-            if ($taskId) {
+            if ($result) {
                 // Update the device record in database
                 $updateSql = "UPDATE devices SET ip_address = :ip_address WHERE id = :id";
                 $updateStmt = $db->prepare($updateSql);
@@ -287,15 +299,9 @@ try {
                     ':id' => $deviceId
                 ]);
                 
-                echo json_encode([
-                    'success' => true, 
-                    'message' => 'WAN configuration task created. Changes will be applied when device next connects.',
-                    'task_id' => $taskId
-                ]);
-                exit;
+                echo json_encode(['success' => true, 'message' => 'WAN configuration updated successfully']);
             } else {
-                echo json_encode(['success' => false, 'message' => 'Failed to create configuration task']);
-                exit;
+                echo json_encode(['success' => false, 'message' => 'Failed to update WAN configuration']);
             }
             
             break;
@@ -304,19 +310,31 @@ try {
             // Log reboot request
             logAction("DEVICE REBOOT: Requested for device " . $device['serial_number']);
             
-            // Always store as a task for devices that might be behind NAT
-            $taskId = storeDeviceTask($db, $deviceId, 'reboot', []);
+            // Store as a task if device is offline or explicitly requested
+            if ($storeForLater) {
+                $taskId = storeDeviceTask($db, $deviceId, 'reboot', []);
+                
+                if ($taskId) {
+                    echo json_encode([
+                        'success' => true, 
+                        'message' => 'Device reboot task created',
+                        'task_id' => $taskId
+                    ]);
+                    exit;
+                } else {
+                    echo json_encode(['success' => false, 'message' => 'Failed to create reboot task']);
+                    exit;
+                }
+            }
             
-            if ($taskId) {
-                echo json_encode([
-                    'success' => true, 
-                    'message' => 'Device reboot task created. Reboot will be initiated when device next connects.',
-                    'task_id' => $taskId
-                ]);
-                exit;
+            // Proceed with direct reboot
+            $serialNumber = $device['serial_number'];
+            $result = rebootDevice($serialNumber);
+            
+            if ($result) {
+                echo json_encode(['success' => true, 'message' => 'Reboot command sent successfully']);
             } else {
-                echo json_encode(['success' => false, 'message' => 'Failed to create reboot task']);
-                exit;
+                echo json_encode(['success' => false, 'message' => 'Failed to send reboot command']);
             }
             
             break;
@@ -326,6 +344,7 @@ try {
             echo json_encode(['success' => false, 'message' => 'Invalid action']);
             exit;
     }
+    
 } catch (Exception $e) {
     echo json_encode(['success' => false, 'message' => 'Server error: ' . $e->getMessage()]);
 }
