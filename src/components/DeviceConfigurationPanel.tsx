@@ -3,7 +3,11 @@ import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Wifi, Globe, PowerOff, AlertTriangle, Lock, HelpCircle, RefreshCw, ChevronDown, ChevronUp, Copy } from "lucide-react";
+import { 
+  Wifi, Globe, PowerOff, AlertTriangle, Lock, HelpCircle, 
+  RefreshCw, ChevronDown, ChevronUp, Copy, Terminal, 
+  CheckCircle, XCircle, PlayCircle, Server
+} from "lucide-react";
 import {
   Accordion,
   AccordionContent,
@@ -16,6 +20,18 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 
 interface DeviceConfigurationPanelProps {
   deviceId: string;
@@ -32,6 +48,12 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
   const [configuring, setConfiguring] = useState(false);
   const [connectionRequest, setConnectionRequest] = useState<any>(null);
   const [expandedCommands, setExpandedCommands] = useState(false);
+  const [tr069SessionId, setTr069SessionId] = useState<string | null>(null);
+  const [selectedPort, setSelectedPort] = useState('30005'); // Default port for Huawei devices
+  const [connectionTestStatus, setConnectionTestStatus] = useState<'idle' | 'testing' | 'success' | 'failure'>('idle');
+  const [testResults, setTestResults] = useState<string[]>([]);
+  const [parameterPath, setParameterPath] = useState('InternetGatewayDevice.LANDevice.1.WLANConfiguration.');
+  const [discoveryInProgress, setDiscoveryInProgress] = useState(false);
 
   useEffect(() => {
     console.log("DeviceConfigurationPanel mounted with deviceId:", deviceId);
@@ -104,6 +126,10 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
           setConnectionRequest(result.connection_request);
         }
         
+        if (result.tr069_session_id) {
+          setTr069SessionId(result.tr069_session_id);
+        }
+        
         if (action === 'wifi') {
           toast.info(
             <div className="flex items-start gap-2">
@@ -112,13 +138,12 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
                 <p className="font-medium">TR-069 Configuration Workflow</p>
                 <p className="text-sm">Complete TR-069 session requires these steps:</p>
                 <ol className="text-sm list-decimal pl-5 mt-1">
-                  <li>Send a connection request to the device using the correct port (try all options if needed)</li>
+                  <li>Send a connection request (test multiple ports if needed)</li>
                   <li>Wait for device to open a session with ACS (Inform)</li>
                   <li>ACS responds with InformResponse and sends SetParameterValues</li>
-                  <li>For Huawei HG8145V5, use PreSharedKey instead of KeyPassphrase for passwords</li>
-                  <li>Send Commit command after SetParameterValues</li>
+                  <li>For Huawei HG8145V5, use PreSharedKey.1.PreSharedKey (not KeyPassphrase)</li>
+                  <li>Send Commit command with matching CommandKey</li>
                 </ol>
-                <p className="text-sm mt-1 italic">Try several connection request URLs if the first fails.</p>
               </div>
             </div>,
             { duration: 15000 }
@@ -176,6 +201,95 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
     }
   };
 
+  const testConnectionRequest = async () => {
+    setConnectionTestStatus('testing');
+    setTestResults([]);
+    
+    try {
+      const formData = new FormData();
+      formData.append('device_id', deviceId);
+      formData.append('action', 'test_connection_request');
+      formData.append('port', selectedPort);
+      
+      const response = await fetch('/backend/api/device_configure.php', {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      console.log('Connection test result:', result);
+      
+      if (result.success) {
+        setConnectionRequest(result.connection_request);
+        setConnectionTestStatus('success');
+        setTestResults([
+          `Testing connection request on port ${selectedPort}`,
+          `URL: ${result.connection_request.url}`,
+          `Command: ${result.connection_request.command}`
+        ]);
+        
+        toast.success(`Connection request test prepared for port ${selectedPort}`);
+      } else {
+        setConnectionTestStatus('failure');
+        setTestResults([`Error: ${result.message}`]);
+        toast.error(result.message || 'Connection test failed');
+      }
+    } catch (error) {
+      console.error('Error testing connection:', error);
+      setConnectionTestStatus('failure');
+      setTestResults([`Error: ${error instanceof Error ? error.message : 'Unknown error'}`]);
+      toast.error('Connection test failed due to server error');
+    }
+  };
+
+  const discoverParameters = async () => {
+    setDiscoveryInProgress(true);
+    
+    try {
+      const formData = new FormData();
+      formData.append('device_id', deviceId);
+      formData.append('action', 'discover_parameters');
+      formData.append('parameter_path', parameterPath);
+      
+      const response = await fetch('/backend/api/device_configure.php', {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      console.log('Parameter discovery result:', result);
+      
+      if (result.success) {
+        toast.success('Parameter discovery request generated');
+        
+        toast.info(
+          <div className="space-y-2">
+            <p className="font-medium">Parameter Discovery Request</p>
+            <p className="text-sm">The request to discover parameters at path:</p>
+            <code className="bg-slate-100 px-2 py-1 rounded block text-xs overflow-x-auto whitespace-pre-wrap">{result.parameter_path}</code>
+            <p className="text-sm mt-2">This request will be sent during the next TR-069 session. Check the logs for results.</p>
+          </div>,
+          { duration: 10000 }
+        );
+      } else {
+        toast.error(result.message || 'Parameter discovery failed');
+      }
+    } catch (error) {
+      console.error('Error discovering parameters:', error);
+      toast.error('Parameter discovery failed due to server error');
+    } finally {
+      setDiscoveryInProgress(false);
+    }
+  };
+
   const showTR069Info = () => {
     toast.info(
       <div className="space-y-2">
@@ -216,6 +330,7 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
         <TabsList className="w-full">
           <TabsTrigger value="wifi" className="flex-1"><Wifi className="h-4 w-4 mr-2" /> WiFi</TabsTrigger>
           <TabsTrigger value="wan" className="flex-1"><Globe className="h-4 w-4 mr-2" /> WAN</TabsTrigger>
+          <TabsTrigger value="tr069" className="flex-1"><Server className="h-4 w-4 mr-2" /> TR-069</TabsTrigger>
           <TabsTrigger value="control" className="flex-1"><PowerOff className="h-4 w-4 mr-2" /> Control</TabsTrigger>
         </TabsList>
         
@@ -234,8 +349,71 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
               </Button>
             </h3>
             
+            <Alert className="mb-4 bg-amber-50 border-amber-200">
+              <AlertTriangle className="h-4 w-4 text-amber-500" />
+              <AlertTitle className="text-amber-800">TR-069 Configuration Notice</AlertTitle>
+              <AlertDescription className="text-amber-700 text-sm">
+                For Huawei HG8145V5 devices, WiFi settings must be updated using the TR-069 protocol with the correct parameter paths.
+                After setting values here, use the Connection Request in the TR-069 tab to trigger a session.
+              </AlertDescription>
+            </Alert>
+            
+            <div className="space-y-3">
+              <Input
+                placeholder="WiFi Network Name"
+                value={wifiSSID}
+                onChange={(e) => setWifiSSID(e.target.value)}
+              />
+              <Input
+                type="password"
+                placeholder="WiFi Password"
+                value={wifiPassword}
+                onChange={(e) => setWifiPassword(e.target.value)}
+              />
+              <Button 
+                onClick={handleWiFiUpdate}
+                className="w-full md:w-auto"
+                disabled={configuring}
+              >
+                {configuring ? (
+                  <>
+                    <span className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full mr-2"></span>
+                    Preparing TR-069 Request...
+                  </>
+                ) : "Update WiFi"}
+              </Button>
+              
+              <Accordion type="single" collapsible className="w-full">
+                <AccordionItem value="tr069-info">
+                  <AccordionTrigger className="text-xs text-gray-500">
+                    TR-069 Implementation Details for Huawei HG8145V5
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="text-xs text-gray-600 space-y-2">
+                      <p>For Huawei HG8145V5 devices, use these TR-098 parameters:</p>
+                      <ul className="list-disc pl-5 space-y-1">
+                        <li><code className="bg-slate-100 px-1 rounded">InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID</code> (2.4GHz WiFi name)</li>
+                        <li><code className="bg-slate-100 px-1 rounded">InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.PreSharedKey</code> (WiFi password)</li>
+                        <li><code className="bg-slate-100 px-1 rounded">InternetGatewayDevice.ManagementServer.ConnectionRequestURL</code> (Contains the correct connection request port)</li>
+                      </ul>
+                      <p className="font-medium pt-2">Correct TR-069 workflow:</p>
+                      <ol className="list-decimal pl-5 space-y-1">
+                        <li>Send connection request to device's ConnectionRequestURL (ports: 30005, 37215, 7547, 4567)</li>
+                        <li>Device opens session with ACS by sending Inform</li>
+                        <li>ACS responds with InformResponse</li>
+                        <li>ACS sends SetParameterValues with correct TR-098 paths</li>
+                        <li>Device responds with SetParameterValuesResponse (status 0 = success)</li>
+                        <li>ACS sends Commit command with matching CommandKey</li>
+                        <li>ACS verifies with GetParameterValues (optional)</li>
+                      </ol>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+            </div>
+            
             {connectionRequest && (
-              <div className="mb-4 p-3 border rounded-md bg-slate-50">
+              <div className="mt-4 p-3 border rounded-md bg-slate-50">
                 <h4 className="text-sm font-semibold mb-2 flex items-center">
                   <RefreshCw className="h-4 w-4 mr-1" /> TR-069 Connection Request Details
                 </h4>
@@ -293,7 +471,7 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
                             </div>
                           ))}
                           <div className="text-xs text-yellow-600 italic">
-                            Try these commands if the default one fails. Huawei ONTs use different connection request ports.
+                            Try these commands if the default one fails. Huawei ONTs typically use connection request ports 30005 or 37215.
                           </div>
                         </div>
                       )}
@@ -302,66 +480,6 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
                 </div>
               </div>
             )}
-            
-            <div className="space-y-3">
-              <Input
-                placeholder="WiFi Network Name"
-                value={wifiSSID}
-                onChange={(e) => setWifiSSID(e.target.value)}
-              />
-              <Input
-                type="password"
-                placeholder="WiFi Password"
-                value={wifiPassword}
-                onChange={(e) => setWifiPassword(e.target.value)}
-              />
-              <Button 
-                onClick={handleWiFiUpdate}
-                className="w-full md:w-auto"
-                disabled={configuring}
-              >
-                {configuring ? (
-                  <>
-                    <span className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full mr-2"></span>
-                    Updating...
-                  </>
-                ) : "Update WiFi"}
-              </Button>
-              
-              <Accordion type="single" collapsible className="w-full">
-                <AccordionItem value="tr069-info">
-                  <AccordionTrigger className="text-xs text-gray-500">
-                    TR-069 Implementation Details
-                  </AccordionTrigger>
-                  <AccordionContent>
-                    <div className="text-xs text-gray-600 space-y-2">
-                      <p>For Huawei HG8145V5 devices, use these TR-098 parameters:</p>
-                      <ul className="list-disc pl-5 space-y-1">
-                        <li><code className="bg-slate-100 px-1 rounded">InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID</code> (2.4GHz WiFi name)</li>
-                        <li><code className="bg-slate-100 px-1 rounded">InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.PreSharedKey</code> (WiFi password)</li>
-                        <li><code className="bg-slate-100 px-1 rounded">InternetGatewayDevice.ManagementServer.ConnectionRequestURL</code> (Contains the correct connection request port)</li>
-                      </ul>
-                      <p>The correct TR-069 workflow requires:</p>
-                      <ol className="list-decimal pl-5 space-y-1">
-                        <li>Send connection request to device's ConnectionRequestURL (try ports 30005, 37215, 7547, 4567)</li>
-                        <li>Device opens session with ACS by sending Inform</li>
-                        <li>ACS responds with InformResponse</li>
-                        <li>ACS sends SetParameterValues with correct TR-098 paths</li>
-                        <li>ACS sends Commit command</li>
-                        <li>Optionally, ACS verifies with GetParameterValues</li>
-                      </ol>
-                      <p className="text-amber-600 font-semibold">Common Issues:</p>
-                      <ul className="list-disc pl-5 space-y-1">
-                        <li>Wrong data model: Use TR-098 paths starting with InternetGatewayDevice, not TR-181 paths</li>
-                        <li>Wrong password parameter: Use PreSharedKey.1.PreSharedKey, not KeyPassphrase</li>
-                        <li>Wrong port: Try multiple connection request ports if the default doesn't work</li>
-                        <li>Missing Commit: Some devices require an explicit Commit command</li>
-                      </ul>
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-              </Accordion>
-            </div>
           </div>
         </TabsContent>
         
@@ -394,6 +512,159 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
                   </>
                 ) : "Update WAN"}
               </Button>
+            </div>
+          </div>
+        </TabsContent>
+        
+        {/* New TR-069 Tab */}
+        <TabsContent value="tr069" className="pt-4">
+          <div>
+            <h3 className="text-lg font-bold mb-3 flex items-center gap-2">
+              <Server className="h-5 w-5" />
+              TR-069 Management
+            </h3>
+            
+            <Alert className="mb-4">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle>TR-069 Troubleshooting</AlertTitle>
+              <AlertDescription className="text-sm">
+                This section helps troubleshoot TR-069 connections for Huawei HG8145V5 devices.
+                Use these tools to test different connection ports and discover device parameters.
+              </AlertDescription>
+            </Alert>
+            
+            <div className="space-y-6">
+              {/* Connection Request Test */}
+              <div className="border rounded-md p-4 space-y-3">
+                <h4 className="font-medium flex items-center gap-2">
+                  <Terminal className="h-4 w-4" /> 
+                  Connection Request Test
+                </h4>
+                <p className="text-sm text-gray-600">
+                  Test connection requests on different ports. Huawei ONTs typically use ports 30005 or 37215.
+                </p>
+                
+                <div className="flex gap-3 flex-wrap">
+                  <Select value={selectedPort} onValueChange={setSelectedPort}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Select port" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="30005">Port 30005 (Huawei)</SelectItem>
+                      <SelectItem value="37215">Port 37215 (Huawei)</SelectItem>
+                      <SelectItem value="7547">Port 7547 (Standard)</SelectItem>
+                      <SelectItem value="4567">Port 4567 (Alternative)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  
+                  <Button 
+                    onClick={testConnectionRequest}
+                    disabled={connectionTestStatus === 'testing'}
+                    variant="outline"
+                    className="flex gap-2 items-center"
+                  >
+                    {connectionTestStatus === 'testing' ? (
+                      <>
+                        <span className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full" />
+                        Testing...
+                      </>
+                    ) : (
+                      <>
+                        <PlayCircle className="h-4 w-4" />
+                        Test Connection
+                      </>
+                    )}
+                  </Button>
+                </div>
+                
+                {connectionTestStatus !== 'idle' && (
+                  <div className="mt-2 p-2 bg-slate-50 rounded-md border text-sm">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-medium">Test Result:</span>
+                      {connectionTestStatus === 'success' && <CheckCircle className="h-4 w-4 text-green-500" />}
+                      {connectionTestStatus === 'failure' && <XCircle className="h-4 w-4 text-red-500" />}
+                      {connectionTestStatus === 'testing' && <RefreshCw className="h-4 w-4 animate-spin" />}
+                    </div>
+                    <div className="pl-2 space-y-1 text-xs">
+                      {testResults.map((result, index) => (
+                        <div key={index} className="font-mono">{result}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              {/* Parameter Discovery */}
+              <div className="border rounded-md p-4 space-y-3">
+                <h4 className="font-medium flex items-center gap-2">
+                  <RefreshCw className="h-4 w-4" /> 
+                  Parameter Discovery
+                </h4>
+                <p className="text-sm text-gray-600">
+                  Discover TR-069 parameters on the device. Use this to verify the correct parameter paths.
+                </p>
+                
+                <div className="space-y-3">
+                  <Input
+                    placeholder="Parameter Path"
+                    value={parameterPath}
+                    onChange={(e) => setParameterPath(e.target.value)}
+                  />
+                  
+                  <div className="space-x-2">
+                    <Button 
+                      onClick={discoverParameters}
+                      disabled={discoveryInProgress}
+                      variant="outline"
+                      className="flex gap-2 items-center"
+                    >
+                      {discoveryInProgress ? (
+                        <>
+                          <span className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full" />
+                          Discovering...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-4 w-4" />
+                          Discover Parameters
+                        </>
+                      )}
+                    </Button>
+                    
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setParameterPath('InternetGatewayDevice.LANDevice.1.WLANConfiguration.')}
+                      title="Reset to WiFi parameters"
+                      size="icon"
+                    >
+                      <Wifi className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  
+                  <div className="text-xs space-y-1">
+                    <p className="font-medium">Common parameter paths:</p>
+                    <ul className="list-disc pl-5 space-y-1">
+                      <li><code className="bg-slate-100 px-1 rounded">InternetGatewayDevice.LANDevice.1.WLANConfiguration.</code></li>
+                      <li><code className="bg-slate-100 px-1 rounded">InternetGatewayDevice.ManagementServer.</code></li>
+                      <li><code className="bg-slate-100 px-1 rounded">InternetGatewayDevice.DeviceInfo.</code></li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+              
+              {/* TR-069 Session Information */}
+              {tr069SessionId && (
+                <div className="border rounded-md p-4 space-y-2">
+                  <h4 className="font-medium flex items-center gap-2">
+                    <Server className="h-4 w-4" /> 
+                    TR-069 Session Information
+                  </h4>
+                  <div className="text-sm">
+                    <div><span className="font-medium">Session ID:</span> {tr069SessionId}</div>
+                    <div><span className="font-medium">Status:</span> Pending connection request</div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </TabsContent>

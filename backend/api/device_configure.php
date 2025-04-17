@@ -1,4 +1,3 @@
-
 <?php
 header('Content-Type: application/json');
 
@@ -20,7 +19,8 @@ try {
     }
 
     $logFile = __DIR__ . '/../../logs/configure.log';
-    $wifiLogFile = __DIR__ . '/../../wifi.logs';
+    $wifiLogFile = __DIR__ . '/../../logs/wifi_detailed.log';
+    $tr069LogFile = __DIR__ . '/../../logs/tr069_transaction.log';
     
     // Create logs directory if it doesn't exist
     if (!file_exists(dirname($logFile))) {
@@ -29,6 +29,15 @@ try {
     if (!file_exists(dirname($wifiLogFile))) {
         mkdir(dirname($wifiLogFile), 0755, true);
     }
+    if (!file_exists(dirname($tr069LogFile))) {
+        mkdir(dirname($tr069LogFile), 0755, true);
+    }
+    
+    // Log the incoming request with detailed information
+    $timestamp = date('Y-m-d H:i:s');
+    $requestInfo = "$timestamp - API REQUEST: $action for device $deviceId\n";
+    $requestInfo .= "  POST parameters: " . json_encode($_POST) . "\n";
+    file_put_contents($tr069LogFile, $requestInfo, FILE_APPEND);
     
     // Get device information from database
     $stmt = $db->prepare("SELECT * FROM devices WHERE id = :id");
@@ -37,9 +46,23 @@ try {
     $device = $stmt->fetch(PDO::FETCH_ASSOC);
     
     if (!$device) {
+        $errorMsg = "$timestamp - ERROR: Device not found with ID $deviceId\n";
+        file_put_contents($tr069LogFile, $errorMsg, FILE_APPEND);
         throw new Exception("Device not found");
     }
 
+    // Log device information
+    $deviceInfo = "$timestamp - DEVICE INFO:\n";
+    $deviceInfo .= "  Serial: {$device['serial_number']}\n";
+    $deviceInfo .= "  Model: {$device['model_name']}\n";
+    $deviceInfo .= "  IP: {$device['ip_address']}\n";
+    $deviceInfo .= "  Status: {$device['status']}\n";
+    $deviceInfo .= "  Last Contact: {$device['last_contact']}\n";
+    file_put_contents($tr069LogFile, $deviceInfo, FILE_APPEND);
+    
+    // Create ResponseGenerator for TR-069 SOAP messages
+    $responseGenerator = new InformResponseGenerator();
+    
     switch ($action) {
         case 'get_settings':
             // Return current device settings
@@ -54,6 +77,14 @@ try {
                     'connection_request_password' => $device['connection_request_password'] ?? 'admin'
                 ]
             ];
+            
+            // Log the settings retrieval
+            $settingsLog = "$timestamp - Retrieved current settings for device $deviceId\n";
+            $settingsLog .= "  SSID: {$device['ssid']}\n";
+            $settingsLog .= "  Password length: " . strlen($device['ssid_password'] ?? '') . " chars\n";
+            $settingsLog .= "  IP: {$device['ip_address']}\n";
+            file_put_contents($tr069LogFile, $settingsLog, FILE_APPEND);
+            
             break;
             
         case 'wifi':
@@ -61,48 +92,51 @@ try {
             $password = $_POST['password'] ?? '';
             
             if (empty($ssid)) {
+                $errorMsg = "$timestamp - ERROR: Empty SSID provided\n";
+                file_put_contents($tr069LogFile, $errorMsg, FILE_APPEND);
                 throw new Exception("SSID cannot be empty");
             }
             
-            // Generate current timestamp for logging
-            $timestamp = date('Y-m-d H:i:s');
-            
-            // Log WiFi configuration change attempt with more details
-            $logEntry = "$timestamp - Device $deviceId: WiFi configuration change\n";
+            // Log detailed WiFi configuration change attempt
+            $logEntry = "$timestamp - WiFi CONFIGURATION CHANGE ATTEMPT:\n";
+            $logEntry .= "  Device ID: $deviceId\n";
             $logEntry .= "  New SSID: $ssid\n";
             $logEntry .= "  Password Length: " . strlen($password) . " characters\n";
+            $logEntry .= "  IP Address: {$device['ip_address']}\n";
             
-            // Write to both the general log and the specific WiFi log
-            file_put_contents($logFile, $logEntry, FILE_APPEND);
             file_put_contents($wifiLogFile, $logEntry, FILE_APPEND);
+            file_put_contents($logFile, $logEntry, FILE_APPEND);
             
-            // Create InformResponseGenerator to use our updated request
-            $responseGenerator = new InformResponseGenerator();
+            // Log TR-069 workflow explanation with detailed steps
+            file_put_contents($wifiLogFile, "\n$timestamp - TR-069 WORKFLOW EXPLANATION:\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "  1. ACS sends Connection Request to device's ConnectionRequestURL\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "     curl -i -u \"username:password\" \"http://{$device['ip_address']}:PORT/\"\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "     PORT can be: 30005, 37215, 7547, or 4567 (try all if needed)\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "  2. Device responds with 204 No Content to the Connection Request\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "  3. Device opens a CWMP session with ACS and sends an Inform message\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "  4. ACS responds to the Inform with InformResponse\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "  5. ACS sends SetParameterValues with the new WiFi settings\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "     - CRITICAL: Using InternetGatewayDevice paths for TR-098 compatibility\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "     - Using PreSharedKey.1.PreSharedKey, NOT KeyPassphrase for HG8145V5\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "  6. Device responds with SetParameterValuesResponse (status 0 on success)\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "  7. ACS sends Commit command with matching CommandKey\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "  8. Device applies changes and may need to reboot\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "  9. ACS verifies with GetParameterValues (optional)\n\n", FILE_APPEND);
             
-            // Explain TR-069 workflow in detail
-            file_put_contents($wifiLogFile, "$timestamp - TR-069 CORRECT WORKFLOW EXPLANATION:\n", FILE_APPEND);
-            file_put_contents($wifiLogFile, "$timestamp - 1. ACS initiates a Connection Request to device via ConnectionRequestURL\n", FILE_APPEND);
-            file_put_contents($wifiLogFile, "$timestamp - 2. Device responds with 204 No Content\n", FILE_APPEND);
-            file_put_contents($wifiLogFile, "$timestamp - 3. Device initiates a session by sending an Inform to ACS\n", FILE_APPEND);
-            file_put_contents($wifiLogFile, "$timestamp - 4. ACS responds with InformResponse\n", FILE_APPEND);
-            file_put_contents($wifiLogFile, "$timestamp - 5. ACS then sends SetParameterValues in same session\n", FILE_APPEND);
-            file_put_contents($wifiLogFile, "$timestamp - 6. Device confirms with SetParameterValuesResponse\n", FILE_APPEND);
-            file_put_contents($wifiLogFile, "$timestamp - 7. ACS may send GetParameterValues to verify\n", FILE_APPEND);
-            file_put_contents($wifiLogFile, "$timestamp - 8. Device may need explicit Commit command\n\n", FILE_APPEND);
+            // Generate session ID for this transaction
+            $sessionId = 'wifi-' . substr(md5(time() . $deviceId), 0, 12);
             
-            // For Huawei HG8145V5, we need to use the correct PreSharedKey parameter path
-            $tr098Request = $responseGenerator->createHG8145V5WifiRequest($ssid, $password);
-            file_put_contents($wifiLogFile, "$timestamp - Using Huawei HG8145V5 TR-098 request:\n", FILE_APPEND);
-            file_put_contents($wifiLogFile, $tr098Request . "\n", FILE_APPEND);
+            // Create complete TR-069 debug workflow
+            $workflowData = $responseGenerator->createDebugWorkflow($sessionId, $ssid, $password);
             
-            // For connection request simulation - use the correct ports for Huawei devices
-            // For Huawei ONTs, common connection request ports are 30005 or 37215, not 4567
-            $connectionRequestUsername = $device['connection_request_username'] ?? 'admin';
-            $connectionRequestPassword = $device['connection_request_password'] ?? 'admin';
+            // Log the workflow
+            file_put_contents($wifiLogFile, "$timestamp - CREATED COMPLETE TR-098 DEBUG WORKFLOW:\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "  Session ID: $sessionId\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "  Parameter Key: {$workflowData['parameter_key']}\n", FILE_APPEND);
+            file_put_contents($wifiLogFile, "  Commit Key: {$workflowData['commit_key']}\n\n", FILE_APPEND);
             
             // Common connection request ports for Huawei devices
             $possiblePorts = [30005, 37215, 7547, 4567];
-            $connectionRequestPort = 30005; // Default to the most common port
             
             // Generate all possible connection request URLs for testing
             $connectionRequestUrls = [];
@@ -110,65 +144,59 @@ try {
                 $connectionRequestUrls[] = "http://{$device['ip_address']}:$port/";
             }
             
-            $connectionRequestUrl = $connectionRequestUrls[0]; // Default to first one
+            // Default ConnectionRequestURL (will be updated if known)
+            $connectionRequestUrl = $connectionRequestUrls[0];
             
+            // Get connection request credentials from device or use defaults
+            $connectionRequestUsername = $device['connection_request_username'] ?? 'admin';
+            $connectionRequestPassword = $device['connection_request_password'] ?? 'admin';
+            
+            // Generate connection request details with all possible ports
             $connectionRequest = $responseGenerator->createConnectionRequestTrigger(
                 $connectionRequestUsername,
                 $connectionRequestPassword,
                 $connectionRequestUrl
             );
             
-            // Provide all possible connection request commands for the user to try
-            $allCommands = [];
-            foreach ($connectionRequestUrls as $url) {
-                $allCommands[] = "curl -i -u \"$connectionRequestUsername:$connectionRequestPassword\" \"$url\"";
+            // Add all possible connection request commands to the log
+            file_put_contents($wifiLogFile, "$timestamp - CONNECTION REQUEST COMMANDS TO TRY:\n", FILE_APPEND);
+            foreach ($connectionRequest['alternative_commands'] as $index => $cmd) {
+                $port = $possiblePorts[$index] ?? 'unknown';
+                file_put_contents($wifiLogFile, "  Port $port: $cmd\n", FILE_APPEND);
             }
             
-            file_put_contents($wifiLogFile, "$timestamp - CONNECTION REQUEST CURL COMMANDS TO TRY:\n", FILE_APPEND);
-            foreach ($allCommands as $index => $cmd) {
-                file_put_contents($wifiLogFile, "$timestamp - Option " . ($index + 1) . ": $cmd\n", FILE_APPEND);
+            // Update device in database with new WiFi settings (pending)
+            try {
+                $updateStmt = $db->prepare("UPDATE devices SET 
+                    ssid = :ssid, 
+                    ssid_password = :password,
+                    tr069_last_transaction = :transaction,
+                    tr069_last_attempt = NOW()
+                    WHERE id = :id");
+                    
+                $updateStmt->bindParam(':ssid', $ssid);
+                $updateStmt->bindParam(':password', $password);
+                $updateStmt->bindParam(':transaction', $sessionId);
+                $updateStmt->bindParam(':id', $deviceId);
+                $updateStmt->execute();
+                
+                file_put_contents($wifiLogFile, "$timestamp - Updated device database record with new WiFi settings (pending)\n", FILE_APPEND);
+            } catch (PDOException $e) {
+                $errorMsg = "$timestamp - DATABASE ERROR: Failed to update device record: " . $e->getMessage() . "\n";
+                file_put_contents($wifiLogFile, $errorMsg, FILE_APPEND);
             }
             
-            // Include commit command which may be needed after setting values
-            $commitRequest = $responseGenerator->createCommitRequest();
-            file_put_contents($wifiLogFile, "$timestamp - COMMIT REQUEST (send after SetParameterValues):\n", FILE_APPEND);
-            file_put_contents($wifiLogFile, $commitRequest . "\n\n", FILE_APPEND);
-            
-            // Verification request
-            $verifyRequest = $responseGenerator->createVerifyWiFiRequest();
-            file_put_contents($wifiLogFile, "$timestamp - VERIFICATION REQUEST (send after SetParameterValues):\n", FILE_APPEND);
-            file_put_contents($wifiLogFile, $verifyRequest . "\n\n", FILE_APPEND);
-            
-            // Update device record in database
-            $updateStmt = $db->prepare("UPDATE devices SET ssid = :ssid, ssid_password = :password WHERE id = :id");
-            $updateStmt->bindParam(':ssid', $ssid);
-            $updateStmt->bindParam(':password', $password);
-            $updateStmt->bindParam(':id', $deviceId);
-            $updateStmt->execute();
-            
+            // Success response
             $response = [
-                'success' => true, 
-                'message' => 'WiFi settings update prepared for next TR-069 session',
-                'connection_request' => [
-                    'username' => $connectionRequestUsername,
-                    'password' => $connectionRequestPassword,
-                    'url' => $connectionRequestUrl,
-                    'command' => "curl -i -u \"$connectionRequestUsername:$connectionRequestPassword\" \"$connectionRequestUrl\"",
-                    'alternative_commands' => $allCommands,
-                    'note' => 'Try all commands if the first one fails. Common ports are 30005, 37215, 7547, 4567'
-                ],
-                'tr069_workflow' => [
-                    'step1' => 'Connection Request to device on correct port',
-                    'step2' => 'Device initiates session with ACS via Inform',
-                    'step3' => 'ACS responds with InformResponse',
-                    'step4' => 'ACS sends SetParameterValues during session',
-                    'step5' => 'ACS may need to send explicit Commit command',
-                    'step6' => 'ACS may verify with GetParameterValues',
-                    'note' => 'For HG8145V5, use PreSharedKey.1.PreSharedKey instead of KeyPassphrase for password'
-                ]
+                'success' => true,
+                'message' => 'WiFi configuration has been prepared. Use the connection request to initiate a TR-069 session.',
+                'connection_request' => $connectionRequest,
+                'tr069_session_id' => $sessionId
             ];
+            
+            file_put_contents($wifiLogFile, "$timestamp - API response prepared: " . json_encode($response, JSON_PRETTY_PRINT) . "\n\n", FILE_APPEND);
             break;
-
+            
         case 'wan':
             $ipAddress = $_POST['ip_address'] ?? '';
             $gateway = $_POST['gateway'] ?? '';
@@ -253,17 +281,73 @@ try {
             $response = ['success' => true, 'message' => 'Reboot command sent to device'];
             break;
 
+        case 'discover_parameters':
+            // New action to discover device parameters
+            $path = $_POST['parameter_path'] ?? 'InternetGatewayDevice.';
+            
+            // Generate parameter discovery request
+            $discoveryRequest = $responseGenerator->createDetailedParameterDiscovery($path);
+            
+            // Log the discovery attempt
+            $discoveryLog = "$timestamp - Parameter discovery request for path: $path\n";
+            file_put_contents($tr069LogFile, $discoveryLog, FILE_APPEND);
+            
+            // Return the discovery request
+            $response = [
+                'success' => true,
+                'message' => 'Parameter discovery request generated',
+                'discovery_request' => $discoveryRequest,
+                'parameter_path' => $path
+            ];
+            break;
+            
+        case 'test_connection_request':
+            // New action to test connection request on different ports
+            $port = $_POST['port'] ?? 7547;
+            
+            $connectionRequestUsername = $device['connection_request_username'] ?? 'admin';
+            $connectionRequestPassword = $device['connection_request_password'] ?? 'admin';
+            $connectionRequestUrl = "http://{$device['ip_address']}:$port/";
+            
+            // Log the connection request test
+            $testLog = "$timestamp - Testing connection request on port: $port\n";
+            $testLog .= "  URL: $connectionRequestUrl\n";
+            file_put_contents($tr069LogFile, $testLog, FILE_APPEND);
+            
+            // Generate connection request command
+            $connectionRequest = $responseGenerator->createConnectionRequestTrigger(
+                $connectionRequestUsername,
+                $connectionRequestPassword,
+                $connectionRequestUrl
+            );
+            
+            // Return response with command to execute
+            $response = [
+                'success' => true,
+                'message' => "Connection request test prepared for port $port",
+                'connection_request' => $connectionRequest
+            ];
+            break;
+            
         default:
             throw new Exception("Invalid action: $action");
     }
 } catch (Exception $e) {
-    $response = ['success' => false, 'message' => $e->getMessage()];
+    // Log the exception
+    $timestamp = date('Y-m-d H:i:s');
+    $errorLog = "$timestamp - EXCEPTION: " . $e->getMessage() . "\n";
+    $errorLog .= "  Trace: " . $e->getTraceAsString() . "\n\n";
     
-    // Log the error
-    if (isset($logFile) && isset($deviceId)) {
-        $errorEntry = date('Y-m-d H:i:s') . " - Device $deviceId: ERROR - " . $e->getMessage() . "\n";
-        file_put_contents($logFile, $errorEntry, FILE_APPEND);
+    if (isset($tr069LogFile)) {
+        file_put_contents($tr069LogFile, $errorLog, FILE_APPEND);
     }
+    
+    $response = [
+        'success' => false,
+        'message' => $e->getMessage()
+    ];
+    
+    echo json_encode($response);
 }
 
 // Function to create TR-069 SetParameterValues SOAP request for SSID change (TR-098 model)
