@@ -77,46 +77,17 @@ echo "<hr>Testing XMLGenerator class...<br>";
 require_once __DIR__ . '/core/XMLGenerator.php';
 
 try {
-    echo "Testing pending request storage functionality:<br>";
-    
-    $serialNumber = "TEST-" . rand(1000, 9999);
-    echo "Using test serial number: $serialNumber<br>";
-    
-    // Store a test request
-    $testParams = [
-        ['name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID', 'value' => 'TestSSID', 'type' => 'xsd:string'],
-        ['name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase', 'value' => 'TestPassword', 'type' => 'xsd:string']
-    ];
-    
-    $stored = XMLGenerator::storeRequestAsPending($serialNumber, 'SetParameterValues', $testParams);
-    echo "Stored pending request: " . ($stored ? "SUCCESS" : "FAILED") . "<br>";
-    
-    // Check if it exists
-    $hasPending = XMLGenerator::hasPendingRequest($serialNumber);
-    echo "Has pending request: " . ($hasPending ? "YES" : "NO") . "<br>";
-    
-    // Retrieve it
-    $request = XMLGenerator::retrievePendingRequest($serialNumber);
-    echo "Retrieved pending request: " . ($request ? "SUCCESS" : "FAILED") . "<br>";
-    
-    if ($request) {
-        echo "Request type: " . $request['type'] . "<br>";
-        echo "Request created: " . $request['created'] . "<br>";
-        echo "Request ID: " . $request['id'] . "<br>";
-        echo "Parameter count: " . count($request['params']) . "<br>";
-    }
-    
-    // Verify it was removed
-    $stillHasPending = XMLGenerator::hasPendingRequest($serialNumber);
-    echo "Still has pending request after retrieval: " . ($stillHasPending ? "YES (ERROR)" : "NO (CORRECT)") . "<br>";
-    
     echo "Calling XMLGenerator::directLogToFile...<br>";
     XMLGenerator::directLogToFile("Test message from test_logging.php");
     echo "XMLGenerator::directLogToFile completed.<br>";
     
-    echo "Generating test SetParameterValues XML...<br>";
-    $xml = XMLGenerator::generatePendingSetParameterRequestXML("test-id-123", $testParams);
-    echo "Generated XML length: " . strlen($xml) . "<br>";
+    echo "Calling XMLGenerator::writeLog...<br>";
+    // Use reflection to access the private method
+    $reflectionClass = new ReflectionClass('XMLGenerator');
+    $method = $reflectionClass->getMethod('writeLog');
+    $method->setAccessible(true);
+    $method->invoke(null, "Test message from test_logging.php using reflection");
+    echo "XMLGenerator::writeLog completed.<br>";
     
 } catch (Exception $e) {
     echo "ERROR: Exception in XMLGenerator tests: " . $e->getMessage() . "<br>";

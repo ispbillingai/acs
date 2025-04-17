@@ -58,14 +58,6 @@ class SessionManager {
                 $_SESSION['device_id'] = $deviceId;
                 $this->logger->logToFile("Associated session with device ID: $deviceId");
                 error_log("TR-069: Associated session with device ID: $deviceId");
-                
-                // Check for any pending requests in the XMLGenerator
-                require_once __DIR__ . '/XMLGenerator.php';
-                if (XMLGenerator::hasPendingRequest($serialNumber)) {
-                    error_log("TR-069: Found pending request for device: $serialNumber");
-                    $this->logger->logToFile("Found pending request for device: $serialNumber");
-                    $_SESSION['has_pending_request'] = true;
-                }
             } else {
                 // Device not found in database, create it
                 error_log("TR-069: Device not found in database, will create a new record for: $serialNumber");
@@ -102,18 +94,6 @@ class SessionManager {
         $_SESSION['last_activity'] = time();
         $this->logger->logToFile("Set current task: " . ($task ? $task['task_type'] . ' (ID: ' . $task['id'] . ')' : 'null'));
         error_log("TR-069: Set current task: " . ($task ? $task['task_type'] . ' (ID: ' . $task['id'] . ')' : 'null'));
-    }
-
-    public function hasPendingRequest() {
-        return isset($_SESSION['has_pending_request']) && $_SESSION['has_pending_request'] === true;
-    }
-    
-    public function clearPendingRequestFlag() {
-        if (isset($_SESSION['has_pending_request'])) {
-            unset($_SESSION['has_pending_request']);
-            $this->logger->logToFile("Cleared pending request flag from session");
-            error_log("TR-069: Cleared pending request flag from session");
-        }
     }
 
     public function getCurrentSessionDeviceSerial() {

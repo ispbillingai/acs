@@ -1,20 +1,6 @@
-
 <?php
 
 class XMLGenerator {
-    private static $pendingRequestsFile = '';
-    
-    public static function initialize() {
-        self::$pendingRequestsFile = __DIR__ . '/../../../../pending_requests.json';
-        error_log("TR-069 XMLGenerator: Initialized with pending requests file: " . self::$pendingRequestsFile);
-        
-        // Make sure the file exists
-        if (!file_exists(self::$pendingRequestsFile)) {
-            file_put_contents(self::$pendingRequestsFile, json_encode([]));
-            error_log("TR-069 XMLGenerator: Created pending requests file");
-        }
-    }
-    
     private static function ensureLogDirectoryExists() {
         error_log("TR-069 XMLGenerator: Ensuring log directory exists");
         $logDir = __DIR__ . '/../../../../retrieve_logs';
@@ -66,113 +52,6 @@ class XMLGenerator {
         }
     }
 
-    // Store a request as pending for a specific device
-    public static function storeRequestAsPending($serialNumber, $requestType, $params) {
-        error_log("TR-069 XMLGenerator: Storing request as pending for device: " . $serialNumber);
-        self::writeLog("Storing pending request for device: " . $serialNumber . ", type: " . $requestType);
-        
-        if (empty(self::$pendingRequestsFile)) {
-            self::initialize();
-        }
-        
-        try {
-            // Load existing pending requests
-            $pendingRequests = [];
-            if (file_exists(self::$pendingRequestsFile)) {
-                $content = file_get_contents(self::$pendingRequestsFile);
-                if (!empty($content)) {
-                    $pendingRequests = json_decode($content, true) ?: [];
-                }
-            }
-            
-            // Add this request
-            $pendingRequests[$serialNumber] = [
-                'type' => $requestType,
-                'params' => $params,
-                'created' => date('Y-m-d H:i:s'),
-                'id' => uniqid()
-            ];
-            
-            // Save back to file
-            $result = file_put_contents(self::$pendingRequestsFile, json_encode($pendingRequests));
-            if ($result === false) {
-                error_log("TR-069 XMLGenerator: ERROR - Failed to write pending request to file");
-                return false;
-            } else {
-                error_log("TR-069 XMLGenerator: Successfully stored pending request for " . $serialNumber);
-                return true;
-            }
-        } catch (Exception $e) {
-            error_log("TR-069 XMLGenerator: EXCEPTION in storeRequestAsPending: " . $e->getMessage());
-            return false;
-        }
-    }
-    
-    // Check if there's a pending request for this device
-    public static function hasPendingRequest($serialNumber) {
-        error_log("TR-069 XMLGenerator: Checking for pending requests for device: " . $serialNumber);
-        
-        if (empty(self::$pendingRequestsFile)) {
-            self::initialize();
-        }
-        
-        try {
-            if (file_exists(self::$pendingRequestsFile)) {
-                $content = file_get_contents(self::$pendingRequestsFile);
-                if (!empty($content)) {
-                    $pendingRequests = json_decode($content, true) ?: [];
-                    
-                    if (isset($pendingRequests[$serialNumber])) {
-                        error_log("TR-069 XMLGenerator: Found pending request for " . $serialNumber);
-                        return true;
-                    }
-                }
-            }
-            
-            error_log("TR-069 XMLGenerator: No pending requests found for " . $serialNumber);
-            return false;
-        } catch (Exception $e) {
-            error_log("TR-069 XMLGenerator: EXCEPTION in hasPendingRequest: " . $e->getMessage());
-            return false;
-        }
-    }
-    
-    // Get the pending request for this device and remove it from the queue
-    public static function retrievePendingRequest($serialNumber) {
-        error_log("TR-069 XMLGenerator: Retrieving pending request for device: " . $serialNumber);
-        self::writeLog("Retrieving pending request for device: " . $serialNumber);
-        
-        if (empty(self::$pendingRequestsFile)) {
-            self::initialize();
-        }
-        
-        try {
-            if (file_exists(self::$pendingRequestsFile)) {
-                $content = file_get_contents(self::$pendingRequestsFile);
-                if (!empty($content)) {
-                    $pendingRequests = json_decode($content, true) ?: [];
-                    
-                    if (isset($pendingRequests[$serialNumber])) {
-                        $request = $pendingRequests[$serialNumber];
-                        
-                        // Remove from pending list
-                        unset($pendingRequests[$serialNumber]);
-                        file_put_contents(self::$pendingRequestsFile, json_encode($pendingRequests));
-                        
-                        error_log("TR-069 XMLGenerator: Retrieved pending request for " . $serialNumber . ": " . $request['type']);
-                        return $request;
-                    }
-                }
-            }
-            
-            error_log("TR-069 XMLGenerator: No pending request found to retrieve for " . $serialNumber);
-            return null;
-        } catch (Exception $e) {
-            error_log("TR-069 XMLGenerator: EXCEPTION in retrievePendingRequest: " . $e->getMessage());
-            return null;
-        }
-    }
-
     public static function generateEmptyResponse($id) {
         error_log("TR-069 XMLGenerator: generateEmptyResponse with ID: " . $id);
         self::writeLog("Generating empty response with ID: $id");
@@ -213,40 +92,6 @@ class XMLGenerator {
           <Value xsi:type="' . $type . '">' . htmlspecialchars($value) . '</Value>
         </ParameterValueStruct>
       </ParameterList>
-      <ParameterKey>' . uniqid() . '</ParameterKey>
-    </cwmp:SetParameterValues>
-  </soapenv:Body>
-</soapenv:Envelope>';
-    }
-    
-    public static function generatePendingSetParameterRequestXML($id, $parameterList) {
-        error_log("TR-069 XMLGenerator: generating SetParameter request for " . count($parameterList) . " parameters with ID: $id");
-        self::writeLog("Generating SetParameter request for " . count($parameterList) . " parameters with ID: $id");
-        
-        $paramXml = '';
-        foreach ($parameterList as $param) {
-            $paramXml .= "        <ParameterValueStruct>\n";
-            $paramXml .= "          <Name>" . htmlspecialchars($param['name']) . "</Name>\n";
-            $paramXml .= "          <Value xsi:type=\"" . $param['type'] . "\">" . htmlspecialchars($param['value']) . "</Value>\n";
-            $paramXml .= "        </ParameterValueStruct>\n";
-            
-            error_log("TR-069 XMLGenerator: Parameter: {$param['name']} = {$param['value']}");
-        }
-        
-        return '<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope 
-    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
-    xmlns:cwmp="urn:dslforum-org:cwmp-1-0" 
-    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
-    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-    xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">
-  <soapenv:Header>
-    <cwmp:ID soapenv:mustUnderstand="1">' . $id . '</cwmp:ID>
-  </soapenv:Header>
-  <soapenv:Body>
-    <cwmp:SetParameterValues>
-      <ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[' . count($parameterList) . ']">
-' . $paramXml . '      </ParameterList>
       <ParameterKey>' . uniqid() . '</ParameterKey>
     </cwmp:SetParameterValues>
   </soapenv:Body>
@@ -389,6 +234,3 @@ class XMLGenerator {
         }
     }
 }
-
-// Initialize the class
-XMLGenerator::initialize();
