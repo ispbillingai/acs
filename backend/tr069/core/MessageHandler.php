@@ -1,7 +1,7 @@
-
 <?php
 require_once __DIR__ . '/../responses/InformResponseGenerator.php';
 require_once __DIR__ . '/../device_manager.php';
+require_once __DIR__ . '/XMLGenerator.php';
 
 class MessageHandler {
     private $logger;
@@ -42,66 +42,300 @@ class MessageHandler {
             if (!empty($pendingTasks)) {
                 $this->sessionManager->setCurrentTask($pendingTasks[0]);
             }
+
+            // FLAG: Always request essential parameters after every Inform
+            // This ensures we always get fresh data regardless of what's in the Inform
+            $this->logger->logToFile("Creating mandatory parameter request task");
             
-            // After processing the Inform, we should generate a GetParameterValues request
-            // for additional parameters we want to track
-            $this->logger->logToFile("Checking if we need to request additional parameters");
-            
-            $needsParameterRequest = true; // Flag to determine if we need to request parameters
-            
-            // If we received important parameters already, we might not need to request them again
-            if (isset($deviceParams['ipAddress']) && isset($deviceParams['ssid']) && isset($deviceParams['uptime'])) {
-                $this->logger->logToFile("All important parameters already received in Inform message");
-                $needsParameterRequest = false;
-            }
-            
-            if ($needsParameterRequest) {
-                $this->logger->logToFile("Important parameters missing, creating parameter request task");
+            try {
+                // First, get the device ID
+                $stmt = $this->db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
+                $stmt->execute([':serial' => $serialNumber]);
+                $deviceId = $stmt->fetchColumn();
                 
-                // Create a special task to get these parameters on the next request
-                try {
-                    // First, get the device ID
-                    $stmt = $this->db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
-                    $stmt->execute([':serial' => $serialNumber]);
-                    $deviceId = $stmt->fetchColumn();
+                if ($deviceId) {
+                    $this->logger->logToFile("Creating parameter request task for device ID: $deviceId");
                     
-                    if ($deviceId) {
-                        $this->logger->logToFile("Creating parameter request task for device ID: $deviceId");
-                        
-                        // Define parameters to request
-                        $parametersToRequest = [
-                            'InternetGatewayDevice.DeviceInfo.UpTime',
-                            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
-                            'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress'
-                        ];
-                        
-                        // Insert a parameter request task
-                        $stmt = $this->db->prepare("
-                            INSERT INTO device_tasks 
-                                (device_id, task_type, task_data, status, created_at, updated_at) 
-                            VALUES 
-                                (:deviceId, 'get_parameters', :taskData, 'pending', NOW(), NOW())
-                        ");
-                        
-                        $stmt->execute([
-                            ':deviceId' => $deviceId,
-                            ':taskData' => json_encode(['parameters' => $parametersToRequest])
-                        ]);
-                        
-                        $taskId = $this->db->lastInsertId();
-                        $this->logger->logToFile("Created parameter request task with ID: $taskId");
-                    } else {
-                        $this->logger->logToFile("Warning: Device ID not found for serial: $serialNumber");
+                    // Define critical parameters to request
+                    $parametersToRequest = [
+                        'InternetGatewayDevice.DeviceInfo.UpTime',
+                        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
+                        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress'
+                    ];
+                    
+                    // Check and delete any existing parameter request tasks to avoid duplication
+                    $deleteStmt = $this->db->prepare("
+                        DELETE FROM device_tasks 
+                        WHERE device_id = :deviceId 
+                        AND task_type = 'get_parameters'
+                        AND status IN ('pending', 'in_progress')
+                    ");
+                    $deleteStmt->execute([':deviceId' => $deviceId]);
+                    $deletedCount = $deleteStmt->rowCount();
+                    if ($deletedCount > 0) {
+                        $this->logger->logToFile("Cleaned up $deletedCount old parameter request tasks");
                     }
-                } catch (PDOException $e) {
-                    $this->logger->logToFile("Database error creating parameter request task: " . $e->getMessage());
+                    
+                    // Insert a fresh parameter request task
+                    $stmt = $this->db->prepare("
+                        INSERT INTO device_tasks 
+                            (device_id, task_type, task_data, status, created_at, updated_at) 
+                        VALUES 
+                            (:deviceId, 'get_parameters', :taskData, 'pending', NOW(), NOW())
+                    ");
+                    
+                    $stmt->execute([
+                        ':deviceId' => $deviceId,
+                        ':taskData' => json_encode(['parameters' => $parametersToRequest])
+                    ]);
+                    
+                    $taskId = $this->db->lastInsertId();
+                    $this->logger->logToFile("Created parameter request task with ID: $taskId");
+                    
+                    // Critical: To ensure the task is picked up immediately, we need to set it as the current task
+                    $task = [
+                        'id' => $taskId,
+                        'device_id' => $deviceId,
+                        'task_type' => 'get_parameters',
+                        'task_data' => json_encode(['parameters' => $parametersToRequest]),
+                        'status' => 'pending',
+                        'created_at' => date('Y-m-d H:i:s'),
+                        'updated_at' => date('Y-m-d H:i:s')
+                    ];
+                    $this->sessionManager->setCurrentTask($task);
+                    $this->logger->logToFile("Set parameter request as current session task");
+                    
+                } else {
+                    $this->logger->logToFile("Warning: Device ID not found for serial: $serialNumber");
                 }
+            } catch (PDOException $e) {
+                $this->logger->logToFile("Database error creating parameter request task: " . $e->getMessage());
             }
         }
         
         // Generate and return InformResponse
         $responseGenerator = new InformResponseGenerator();
         return $responseGenerator->createResponse($soapId);
+    }
+
+    public function handleGetParameterValuesResponse($raw_post) {
+        $this->logger->logToFile("Processing GetParameterValuesResponse");
+        
+        // Extract the SOAP ID
+        preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
+        $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
+        
+        // Extract all parameter values
+        preg_match_all('/<ParameterValueStruct>\s*<Name>(.*?)<\/Name>\s*<Value[^>]*>(.*?)<\/Value>\s*<\/ParameterValueStruct>/s', $raw_post, $params, PREG_SET_ORDER);
+        
+        if (!empty($params)) {
+            $this->logger->logToFile("Found " . count($params) . " parameters in response");
+            
+            $serialNumber = $this->sessionManager->getCurrentSessionDeviceSerial();
+            if ($serialNumber) {
+                $this->logger->logToFile("Found session for device: " . $serialNumber);
+                
+                // Get device ID
+                $stmt = $this->db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
+                $stmt->execute([':serial' => $serialNumber]);
+                $deviceId = $stmt->fetchColumn();
+                
+                if ($deviceId) {
+                    $updateValues = [];
+                    
+                    foreach ($params as $param) {
+                        $paramName = trim($param[1]);
+                        $paramValue = trim($param[2]);
+                        
+                        $this->logger->logToFile("Processing parameter: $paramName = $paramValue");
+                        
+                        // Store all parameters in the parameters table
+                        try {
+                            $stmt = $this->db->prepare("
+                                INSERT INTO parameters (device_id, param_name, param_value, created_at, updated_at)
+                                VALUES (:deviceId, :paramName, :paramValue, NOW(), NOW())
+                                ON DUPLICATE KEY UPDATE param_value = :paramValue, updated_at = NOW()
+                            ");
+                            
+                            $stmt->execute([
+                                ':deviceId' => $deviceId,
+                                ':paramName' => $paramName,
+                                ':paramValue' => $paramValue
+                            ]);
+                            
+                            $this->logger->logToFile("Stored parameter in parameters table");
+                        } catch (PDOException $e) {
+                            $this->logger->logToFile("Error storing parameter: " . $e->getMessage());
+                        }
+                        
+                        // Update specific fields in the devices table
+                        if (strpos($paramName, '.UpTime') !== false) {
+                            $updateValues['uptime'] = (int)$paramValue;
+                            $this->logger->logToFile("Will update uptime: $paramValue");
+                        } else if (strpos($paramName, '.SSID') !== false) {
+                            $updateValues['ssid'] = $paramValue;
+                            $this->logger->logToFile("Will update SSID: $paramValue");
+                        } else if (strpos($paramName, '.ExternalIPAddress') !== false) {
+                            $updateValues['ip_address'] = $paramValue;
+                            $this->logger->logToFile("Will update IP: $paramValue");
+                        }
+                    }
+                    
+                    // Update the device record if we have values to update
+                    if (!empty($updateValues)) {
+                        $updateSql = "UPDATE devices SET ";
+                        $updateParams = [':deviceId' => $deviceId];
+                        
+                        foreach ($updateValues as $field => $value) {
+                            $updateSql .= "$field = :$field, ";
+                            $updateParams[":$field"] = $value;
+                        }
+                        
+                        $updateSql .= "updated_at = NOW() WHERE id = :deviceId";
+                        
+                        try {
+                            $stmt = $this->db->prepare($updateSql);
+                            $stmt->execute($updateParams);
+                            $this->logger->logToFile("Updated device record with parameters: " . json_encode($updateValues));
+                        } catch (PDOException $e) {
+                            $this->logger->logToFile("Error updating device record: " . $e->getMessage());
+                        }
+                    }
+                    
+                    // Mark the get_parameters task as completed
+                    try {
+                        $stmt = $this->db->prepare("
+                            UPDATE device_tasks 
+                            SET status = 'completed', updated_at = NOW(), message = 'Parameters retrieved successfully' 
+                            WHERE device_id = :deviceId AND task_type = 'get_parameters' AND status = 'in_progress'
+                        ");
+                        $stmt->execute([':deviceId' => $deviceId]);
+                        $this->logger->logToFile("Marked get_parameters task as completed");
+                    } catch (PDOException $e) {
+                        $this->logger->logToFile("Error updating task status: " . $e->getMessage());
+                    }
+                }
+            }
+        }
+        
+        // Return an empty response to complete this transaction
+        return XMLGenerator::generateEmptyResponse($soapId);
+    }
+
+    public function handleEmptyPost() {
+        $currentTask = $this->sessionManager->getCurrentTask();
+        $this->logger->logToFile("Handling empty POST, current task: " . ($currentTask ? $currentTask['task_type'] : 'none'));
+        
+        // If we have a current task, handle it
+        if ($currentTask) {
+            $this->logger->logToFile("Processing task: " . $currentTask['task_type']);
+            
+            if ($currentTask['task_type'] === 'get_parameters') {
+                // This is our special task to get essential parameters
+                $this->logger->logToFile("Handling get_parameters task");
+                
+                $taskData = json_decode($currentTask['task_data'], true);
+                if (isset($taskData['parameters']) && is_array($taskData['parameters'])) {
+                    $parameterNames = $taskData['parameters'];
+                    $this->logger->logToFile("Requesting parameters: " . implode(', ', $parameterNames));
+                    
+                    // Generate GetParameterValues request
+                    $getParamRequest = XMLGenerator::generateGetParameterValuesXML(
+                        uniqid(),
+                        $parameterNames
+                    );
+                    
+                    // Mark task as in progress
+                    try {
+                        $stmt = $this->db->prepare("
+                            UPDATE device_tasks 
+                            SET status = 'in_progress', updated_at = NOW() 
+                            WHERE id = :taskId
+                        ");
+                        $stmt->execute([':taskId' => $currentTask['id']]);
+                        $this->logger->logToFile("Marked get_parameters task as in_progress");
+                    } catch (PDOException $e) {
+                        $this->logger->logToFile("Error updating task status: " . $e->getMessage());
+                    }
+                    
+                    return $getParamRequest;
+                }
+            } else {
+                // Handle other task types
+                $parameterRequest = $this->taskHandler->generateParameterValues(
+                    $currentTask['task_type'],
+                    $currentTask['task_data']
+                );
+                
+                if ($parameterRequest) {
+                    return XMLGenerator::generateSetParameterRequestXML(
+                        uniqid(),
+                        $parameterRequest['name'],
+                        $parameterRequest['value'],
+                        $parameterRequest['type']
+                    );
+                }
+            }
+        }
+        
+        // If no current task, check for pending get_parameters tasks
+        $serialNumber = $this->sessionManager->getCurrentSessionDeviceSerial();
+        if ($serialNumber) {
+            $this->logger->logToFile("No current task, checking for pending get_parameters tasks for: " . $serialNumber);
+            
+            try {
+                $stmt = $this->db->prepare("
+                    SELECT dt.* FROM device_tasks dt
+                    JOIN devices d ON dt.device_id = d.id
+                    WHERE d.serial_number = :serial
+                    AND dt.task_type = 'get_parameters'
+                    AND dt.status = 'pending'
+                    ORDER BY dt.created_at ASC
+                    LIMIT 1
+                ");
+                $stmt->execute([':serial' => $serialNumber]);
+                $task = $stmt->fetch(PDO::FETCH_ASSOC);
+                
+                if ($task) {
+                    $this->logger->logToFile("Found pending get_parameters task: " . $task['id']);
+                    $this->sessionManager->setCurrentTask($task);
+                    
+                    $taskData = json_decode($task['task_data'], true);
+                    if (isset($taskData['parameters']) && is_array($taskData['parameters'])) {
+                        $parameterNames = $taskData['parameters'];
+                        $this->logger->logToFile("Requesting parameters: " . implode(', ', $parameterNames));
+                        
+                        // Generate GetParameterValues request
+                        $getParamRequest = XMLGenerator::generateGetParameterValuesXML(
+                            uniqid(),
+                            $parameterNames
+                        );
+                        
+                        // Mark task as in progress
+                        try {
+                            $stmt = $this->db->prepare("
+                                UPDATE device_tasks 
+                                SET status = 'in_progress', updated_at = NOW() 
+                                WHERE id = :taskId
+                            ");
+                            $stmt->execute([':taskId' => $task['id']]);
+                            $this->logger->logToFile("Marked get_parameters task as in_progress");
+                        } catch (PDOException $e) {
+                            $this->logger->logToFile("Error updating task status: " . $e->getMessage());
+                        }
+                        
+                        return $getParamRequest;
+                    }
+                } else {
+                    $this->logger->logToFile("No pending get_parameters tasks found");
+                }
+            } catch (PDOException $e) {
+                $this->logger->logToFile("Error checking for pending tasks: " . $e->getMessage());
+            }
+        }
+        
+        // Return empty response if no tasks to process
+        return XMLGenerator::generateEmptyResponse(uniqid());
     }
 
     private function extractDeviceParams($raw_post) {
