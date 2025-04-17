@@ -23,7 +23,20 @@ class WifiTaskGenerator {
                 'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
                 'value' => $ssid,
                 'type' => 'xsd:string'
+            ],
+            // Add the enable parameter to make sure WiFi is active
+            [
+                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Enable',
+                'value' => 'true',
+                'type' => 'xsd:boolean'
             ]
+        ];
+        
+        // Add Huawei-specific enable parameter if present
+        $parameters[] = [
+            'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_Enable',
+            'value' => 'true',
+            'type' => 'xsd:boolean'
         ];
         
         // Only add password parameter if provided
@@ -41,6 +54,13 @@ class WifiTaskGenerator {
                 'value' => $password,
                 'type' => 'xsd:string'
             ];
+            
+            // Make sure security is enabled when password is set
+            $parameters[] = [
+                'name' => 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
+                'value' => 'WPAand11i',
+                'type' => 'xsd:string'
+            ];
         }
         
         $this->logger->logToFile("Generated WiFi parameters - SSID: $ssid, Password length: " . 
@@ -52,3 +72,4 @@ class WifiTaskGenerator {
         ];
     }
 }
+
