@@ -1,35 +1,8 @@
+
 <?php
 
 class XMLGenerator {
-    private static function ensureLogDirectoryExists() {
-        $logDir = __DIR__ . '/../../../../retrieve_logs';
-        if (!is_dir($logDir)) {
-            mkdir($logDir, 0777, true);
-        }
-        return $logDir;
-    }
-
-    private static function writeLog($message) {
-        $logDir = self::ensureLogDirectoryExists();
-        $logFile = $logDir . '/retrieve_' . date('Y-m-d') . '.log';
-        
-        // Ensure the log file is writable
-        if (!file_exists($logFile)) {
-            touch($logFile);
-            chmod($logFile, 0666);
-        }
-        
-        // Write the log message with timestamp
-        $logEntry = date('Y-m-d H:i:s') . " - " . $message . "\n";
-        file_put_contents($logFile, $logEntry, FILE_APPEND);
-        
-        // Also log to error_log as a backup
-        error_log("TR-069 RETRIEVE LOG: " . $message);
-    }
-
     public static function generateEmptyResponse($id) {
-        self::writeLog("Generating empty response with ID: $id");
-        
         error_log("TR-069: Generating empty response with ID: $id");
         return '<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope
@@ -46,8 +19,6 @@ class XMLGenerator {
     }
 
     public static function generateSetParameterRequestXML($id, $name, $value, $type) {
-        self::writeLog("Generating SetParameter request for $name=$value with ID: $id");
-        
         error_log("TR-069: Generating SetParameter request for $name=$value with ID: $id");
         return '<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope 
@@ -112,9 +83,8 @@ class XMLGenerator {
 </soapenv:Envelope>';
     }
 
+    // Generate InformResponse XML
     public static function generateInformResponseXML($id) {
-        self::writeLog("Generating InformResponse XML with ID: $id");
-        
         error_log("TR-069: Generating InformResponse XML with ID: $id");
         return '<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope
@@ -133,10 +103,8 @@ class XMLGenerator {
 </soapenv:Envelope>';
     }
 
+    // Create a proper compound response - THIS IS THE KEY CHANGE
     public static function generateCompoundInformResponseWithGPV($soapId, $parameterNames) {
-        self::writeLog("Generating compound response with InformResponse + GetParameterValues");
-        self::writeLog("Parameters requested: " . implode(', ', $parameterNames));
-        
         error_log("TR-069: CRITICAL - Generating compound response with InformResponse + GetParameterValues");
         
         // We need to modify this to make a properly formatted XML response with both elements
