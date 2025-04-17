@@ -75,6 +75,10 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
         body: formData
       });
 
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+      }
+
       const result = await response.json();
       console.log(`${action} config response:`, result);
 
