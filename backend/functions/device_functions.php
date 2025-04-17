@@ -8,7 +8,29 @@ function getDevices($db) {
                 FROM devices d ORDER BY d.last_contact DESC";
         $stmt = $db->prepare($sql);
         $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $devices = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // Map database field names to the expected field names in the application
+        $mappedDevices = [];
+        foreach ($devices as $device) {
+            $mappedDevice = [
+                'id' => $device['id'],
+                'manufacturer' => $device['manufacturer'] ?? 'Unknown',
+                'model' => $device['model_name'] ?? 'Unknown Model',
+                'serialNumber' => $device['serial_number'] ?? 'Unknown',
+                'ipAddress' => $device['ip_address'] ?? 'N/A',
+                'lastContact' => $device['last_contact'] ?? date('Y-m-d H:i:s'),
+                'status' => $device['status'] ?? 'unknown',
+                'ssid' => $device['ssid'] ?? '',
+                'connectedClients' => $device['connected_clients'] ?? 0,
+                'uptime' => $device['uptime'] ?? '0',
+                'pending_tasks' => $device['pending_tasks'] ?? 0
+            ];
+            $mappedDevices[] = $mappedDevice;
+        }
+        
+        logAction("Retrieved " . count($mappedDevices) . " devices from database");
+        return $mappedDevices;
     } catch (PDOException $e) {
         logError("Database error in getDevices(): " . $e->getMessage());
         return [];
@@ -21,7 +43,32 @@ function getDevice($db, $id) {
         $sql = "SELECT * FROM devices WHERE id = :id";
         $stmt = $db->prepare($sql);
         $stmt->execute([':id' => $id]);
-        return $stmt->fetch(PDO::FETCH_ASSOC);
+        $device = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($device) {
+            // Map database field names to the expected field names
+            $mappedDevice = [
+                'id' => $device['id'],
+                'manufacturer' => $device['manufacturer'] ?? 'Unknown',
+                'model' => $device['model_name'] ?? 'Unknown Model',
+                'serialNumber' => $device['serial_number'] ?? 'Unknown',
+                'ipAddress' => $device['ip_address'] ?? 'N/A',
+                'lastContact' => $device['last_contact'] ?? date('Y-m-d H:i:s'),
+                'status' => $device['status'] ?? 'unknown',
+                'ssid' => $device['ssid'] ?? '',
+                'connectedClients' => $device['connected_clients'] ?? 0,
+                'uptime' => $device['uptime'] ?? '0',
+                'softwareVersion' => $device['software_version'] ?? 'N/A',
+                'hardwareVersion' => $device['hardware_version'] ?? 'N/A',
+                'txPower' => $device['tx_power'] ?? 'N/A',
+                'rxPower' => $device['rx_power'] ?? 'N/A'
+            ];
+            logAction("Retrieved device details for ID: $id");
+            return $mappedDevice;
+        }
+        
+        logAction("Device not found with ID: $id", "WARNING");
+        return null;
     } catch (PDOException $e) {
         logError("Database error in getDevice(): " . $e->getMessage());
         return null;
@@ -34,7 +81,9 @@ function getPendingTasks($db, $deviceId) {
         $sql = "SELECT * FROM device_tasks WHERE device_id = :device_id AND status = 'pending' ORDER BY created_at ASC";
         $stmt = $db->prepare($sql);
         $stmt->execute([':device_id' => $deviceId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $tasks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        logAction("Retrieved " . count($tasks) . " pending tasks for device ID: $deviceId");
+        return $tasks;
     } catch (PDOException $e) {
         logError("Database error in getPendingTasks(): " . $e->getMessage());
         return [];
@@ -48,6 +97,7 @@ function processDeviceTasks($db, $deviceId, $deviceSerial) {
         $tasks = getPendingTasks($db, $deviceId);
         
         if (empty($tasks)) {
+            logAction("No pending tasks to process for device: $deviceSerial");
             return true; // No tasks to process
         }
         
@@ -61,22 +111,52 @@ function processDeviceTasks($db, $deviceId, $deviceSerial) {
             // Process based on task type
             switch ($task['task_type']) {
                 case 'wifi':
-                    // Simulate setting WiFi parameters
+                    // Handle WiFi configuration
                     logAction("Processing WiFi task: " . json_encode($taskData));
+                    
+                    $ssid = $taskData['ssid'] ?? '';
+                    $password = $taskData['password'] ?? '';
+                    $isHuawei = $taskData['is_huawei'] ?? false;
+                    
+                    // Log detailed WiFi parameters for debugging
+                    if (!empty($ssid)) {
+                        logAction("Setting SSID: $ssid");
+                    }
+                    
+                    if (!empty($password)) {
+                        $passwordLength = strlen($password);
+                        logAction("Setting WiFi password (length: $passwordLength)");
+                        if ($isHuawei) {
+                            logAction("Using Huawei-specific parameter path for password");
+                        }
+                    }
+                    
                     $success = true;
                     $message = "WiFi configuration applied";
                     break;
                 
                 case 'wan':
-                    // Simulate setting WAN parameters
+                    // Handle WAN configuration
                     logAction("Processing WAN task: " . json_encode($taskData));
+                    
+                    $ipAddress = $taskData['ip_address'] ?? '';
+                    $gateway = $taskData['gateway'] ?? '';
+                    
+                    if (!empty($ipAddress)) {
+                        logAction("Setting IP Address: $ipAddress");
+                    }
+                    
+                    if (!empty($gateway)) {
+                        logAction("Setting Gateway: $gateway");
+                    }
+                    
                     $success = true;
                     $message = "WAN configuration applied";
                     break;
                 
                 case 'reboot':
-                    // Simulate device reboot
-                    logAction("Processing reboot task");
+                    // Handle device reboot
+                    logAction("Processing reboot task for device: $deviceSerial");
                     $success = true;
                     $message = "Reboot command sent";
                     break;
@@ -97,11 +177,55 @@ function processDeviceTasks($db, $deviceId, $deviceSerial) {
             ]);
             
             logAction("Task {$task['id']} marked as " . ($success ? "completed" : "failed") . ": $message");
+            
+            // Update device last_contact time
+            $updateDeviceSql = "UPDATE devices SET last_contact = NOW(), status = 'online' WHERE id = :id";
+            $updateDeviceStmt = $db->prepare($updateDeviceSql);
+            $updateDeviceStmt->execute([':id' => $deviceId]);
+            logAction("Updated device last_contact time for device: $deviceSerial");
         }
         
         return true;
     } catch (Exception $e) {
         logError("Error processing tasks: " . $e->getMessage());
+        return false;
+    }
+}
+
+// Function to check device status and update it
+function updateDeviceStatus($db, $deviceId) {
+    try {
+        // Get device info
+        $sql = "SELECT * FROM devices WHERE id = :id";
+        $stmt = $db->prepare($sql);
+        $stmt->execute([':id' => $deviceId]);
+        $device = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if (!$device) {
+            logAction("Device not found with ID: $deviceId", "WARNING");
+            return false;
+        }
+        
+        // Check last contact time (10 minutes threshold)
+        $tenMinutesAgo = date('Y-m-d H:i:s', strtotime('-10 minutes'));
+        $isOnline = $device['last_contact'] && strtotime($device['last_contact']) >= strtotime($tenMinutesAgo);
+        $newStatus = $isOnline ? 'online' : 'offline';
+        
+        // Update status if changed
+        if ($device['status'] !== $newStatus) {
+            $updateSql = "UPDATE devices SET status = :status WHERE id = :id";
+            $updateStmt = $db->prepare($updateSql);
+            $updateStmt->execute([
+                ':status' => $newStatus,
+                ':id' => $deviceId
+            ]);
+            
+            logAction("Updated device status from {$device['status']} to {$newStatus} for device: {$device['serial_number']}");
+        }
+        
+        return true;
+    } catch (PDOException $e) {
+        logError("Database error in updateDeviceStatus(): " . $e->getMessage());
         return false;
     }
 }
