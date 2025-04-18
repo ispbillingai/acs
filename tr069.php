@@ -363,6 +363,28 @@ try {
             // Process the parameter values
             saveParameterValues($raw_post, $serialNumber, $db);
             
+            // Check if HostNumberOfEntries is in the response
+            $hostCount = 0;
+            preg_match('/<Name>InternetGatewayDevice\.LANDevice\.1\.Hosts\.HostNumberOfEntries<\/Name>.*?<Value[^>]*>(.*?)<\/Value>/s', $raw_post, $hostMatches);
+            if (isset($hostMatches[1]) && is_numeric($hostMatches[1])) {
+                $hostCount = (int)$hostMatches[1];
+                tr069_log("Found HostNumberOfEntries: $hostCount", "INFO");
+                
+                // If we have hosts and this was an initial info task, create a follow-up task
+                if ($hostCount > 0 && $current_task && $current_task['task_type'] === 'info') {
+                    $taskData = json_decode($current_task['task_data'], true) ?: [];
+                    
+                    // Only create follow-up if this wasn't already a follow-up task
+                    if (!isset($taskData['host_count'])) {
+                        $deviceId = $taskHandler->getDeviceIdFromSerialNumber($serialNumber);
+                        if ($deviceId) {
+                            $followUpTaskId = $taskHandler->createFollowUpInfoTask($deviceId, $hostCount);
+                            tr069_log("Created follow-up info task: $followUpTaskId for hosts details", "INFO");
+                        }
+                    }
+                }
+            }
+            
             // Update task status if available
             if ($current_task) {
                 $taskHandler->updateTaskStatus($current_task['id'], 'completed', 'Successfully retrieved device information');

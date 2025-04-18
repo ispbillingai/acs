@@ -1,4 +1,3 @@
-
 <?php
 require_once __DIR__ . '/../../config/database.php';
 require_once __DIR__ . '/utils/WifiTaskGenerator.php';
@@ -20,13 +19,11 @@ class TaskHandler {
         $database = new Database();
         $this->db = $database->getConnection();
         $this->logFile = $_SERVER['DOCUMENT_ROOT'] . '/device.log';
-        //working now
-        // Make sure log directory exists
+        
         if (!file_exists(dirname($this->logFile))) {
             mkdir(dirname($this->logFile), 0755, true);
         }
         
-        // Initialize task generators
         $this->wifiTaskGenerator = new WifiTaskGenerator($this);
         $this->wanTaskGenerator = new WanTaskGenerator($this);
         $this->rebootTaskGenerator = new RebootTaskGenerator($this);
@@ -34,21 +31,16 @@ class TaskHandler {
         $this->commitHelper = new CommitHelper($this);
     }
     
-    // Log to device.log file
     public function logToFile($message) {
         $timestamp = date('Y-m-d H:i:s');
         $logMessage = "[{$timestamp}] [TR-069] {$message}" . PHP_EOL;
         
-        // Log to Apache error log as backup
         error_log("[TR-069] {$message}", 0);
-        
-        // Log to dedicated device.log file
         file_put_contents($this->logFile, $logMessage, FILE_APPEND);
     }
     
     public function getPendingTasks($deviceSerialNumber) {
         try {
-            // Get device ID from serial number
             $deviceStmt = $this->db->prepare("SELECT id FROM devices WHERE serial_number = :serial_number");
             $deviceStmt->execute([':serial_number' => $deviceSerialNumber]);
             $deviceId = $deviceStmt->fetchColumn();
@@ -58,7 +50,6 @@ class TaskHandler {
                 return [];
             }
             
-            // Get pending tasks for this device
             $stmt = $this->db->prepare("
                 SELECT * FROM device_tasks 
                 WHERE device_id = :device_id 
@@ -71,7 +62,6 @@ class TaskHandler {
             if (!empty($tasks)) {
                 $this->logToFile("Found " . count($tasks) . " pending tasks for device ID: $deviceId");
                 
-                // Log details of each task
                 foreach ($tasks as $task) {
                     $this->logToFile("Task ID: {$task['id']} - Type: {$task['task_type']} - Data: {$task['task_data']}");
                 }
@@ -131,6 +121,44 @@ class TaskHandler {
             default:
                 $this->logToFile("Unsupported task type: $taskType");
                 return null;
+        }
+    }
+    
+    public function createFollowUpInfoTask($deviceId, $hostCount) {
+        try {
+            $taskData = json_encode(['host_count' => $hostCount]);
+            
+            $this->logToFile("Creating follow-up info task for host details with host count: $hostCount");
+            
+            $sql = "INSERT INTO device_tasks 
+                    (device_id, task_type, task_data, status, message, created_at, updated_at) 
+                    VALUES 
+                    (:device_id, 'info', :task_data, 'pending', 'Auto-created follow-up for host details', NOW(), NOW())";
+            
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute([
+                ':device_id' => $deviceId,
+                ':task_data' => $taskData
+            ]);
+            
+            $taskId = $this->db->lastInsertId();
+            $this->logToFile("Created follow-up info task with ID: $taskId");
+            
+            return $taskId;
+        } catch (PDOException $e) {
+            $this->logToFile("Database error creating follow-up info task: " . $e->getMessage());
+            return false;
+        }
+    }
+    
+    public function getDeviceIdFromSerialNumber($serialNumber) {
+        try {
+            $stmt = $this->db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
+            $stmt->execute([':serial' => $serialNumber]);
+            return $stmt->fetchColumn();
+        } catch (PDOException $e) {
+            $this->logToFile("Database error in getDeviceIdFromSerialNumber: " . $e->getMessage());
+            return null;
         }
     }
     
