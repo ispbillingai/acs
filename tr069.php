@@ -134,40 +134,6 @@ try {
                 }
             }
             
-            // Check for in-progress tasks and timeout
-            try {
-                $deviceStmt = $db->prepare("SELECT id, current_task_id FROM devices WHERE serial_number = :serial");
-                $deviceStmt->execute([':serial' => $serialNumber]);
-                $deviceRow = $deviceStmt->fetch(PDO::FETCH_ASSOC);
-                $deviceId = $deviceRow['id'];
-                
-                if ($deviceRow['current_task_id']) {
-                    $taskStmt = $db->prepare("
-                        SELECT * FROM device_tasks 
-                        WHERE id = :task_id 
-                        AND status = 'in_progress'
-                    ");
-                    $taskStmt->execute([':task_id' => $deviceRow['current_task_id']]);
-                    $inProgressTask = $taskStmt->fetch(PDO::FETCH_ASSOC);
-                    
-                    if ($inProgressTask && strtotime($inProgressTask['updated_at']) < (time() - 60)) {
-                        $taskHandler->updateTaskStatus($inProgressTask['id'], 'failed', 'Timed out waiting for response');
-                        tr069_log("Task {$inProgressTask['id']} failed due to 60-second timeout", "ERROR");
-                        
-                        // Clear current task
-                        $stmt = $db->prepare("
-                            UPDATE devices 
-                            SET current_task_id = NULL 
-                            WHERE serial_number = :serial
-                        ");
-                        $stmt->execute([':serial' => $serialNumber]);
-                        tr069_log("Cleared current task for device: $serialNumber", "INFO");
-                    }
-                }
-            } catch (PDOException $e) {
-                tr069_log("Database error checking in-progress tasks: " . $e->getMessage(), "ERROR");
-            }
-            
             // Auto-queue info task only if no pending or in-progress info tasks exist
             try {
                 $deviceStmt = $db->prepare("SELECT id, ssid FROM devices WHERE serial_number = :s");
@@ -192,12 +158,7 @@ try {
                         'names' => [
                             'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
                             'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Enable',
-                            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Channel',
-                            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Standard',
-                            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_HW_SecurityMode',
-                            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
-                            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDeviceNumberOfEntries',
-                            'Device.WiFi.SSID.1.SSID' // TR-181 fallback
+                            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Channel'
                         ]
                     ]);
                     $ins = $db->prepare("
@@ -537,9 +498,9 @@ try {
                 $taskStmt = $db->prepare("SELECT updated_at FROM device_tasks WHERE id = :task_id");
                 $taskStmt->execute([':task_id' => $current_task['id']]);
                 $taskRow = $taskStmt->fetch(PDO::FETCH_ASSOC);
-                if ($taskRow && strtotime($taskRow['updated_at']) < (time() - 60)) {
-                    $taskHandler->updateTaskStatus($current_task['id'], 'failed', 'Task timed out after 60 seconds');
-                    tr069_log("Task {$current_task['id']} failed due to 60-second timeout", "ERROR");
+                if ($taskRow && strtotime($taskRow['updated_at']) < (time() - 300)) {
+                    $taskHandler->updateTaskStatus($current_task['id'], 'failed', 'Task timed out after 5 minutes');
+                    tr069_log("Task {$current_task['id']} failed due to timeout", "ERROR");
                     
                     // Clear current task
                     $stmt = $db->prepare("
@@ -841,7 +802,7 @@ try {
         }
         
         // Unhandled SOAP message
-        tr069_log("Unhandled SOAP message received: " . substr($raw_post, 0, 500) . "...", "WARNING");
+        tr069_log("Unhandled SOAP message received", "WARNING");
         header('Content-Type: text/xml');
         echo '<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope
