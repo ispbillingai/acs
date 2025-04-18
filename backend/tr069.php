@@ -284,11 +284,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (stripos($raw_post, 'GetParameterValuesResponse') !== false) {
             // Extract information using regex
             preg_match_all('/<Name>(.*?)<\/Name>\s*<Value[^>]*>(.*?)<\/Value>/si', $raw_post, $matches, PREG_SET_ORDER);
-            
-            $foundHostNumberOfEntries = false;
-            $foundDeviceInfoParams = false;
-            
+
             if (!empty($matches)) {
+                $hostData = array();
+                $currentHost = null;
+
                 foreach ($matches as $match) {
                     $paramName = $match[1];
                     $paramValue = $match[2];
@@ -297,7 +297,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (empty($paramValue) || $paramValue === '(null)') {
                         continue;
                     }
-                    
+
                     // Track this as a successful parameter retrieval
                     if (!in_array($paramName, $_SESSION['successful_parameters'])) {
                         $_SESSION['successful_parameters'][] = $paramName;
@@ -678,3 +678,4 @@ if (stripos($raw_post, '<cwmp:Inform>') !== false) {
     echo $opticalRequest;
     exit;
 }
+

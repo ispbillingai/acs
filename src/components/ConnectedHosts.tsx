@@ -46,7 +46,14 @@ export const ConnectedHosts = ({ deviceId, refreshTrigger }: ConnectedHostsProps
       const data = await response.json();
       
       if (data.connectedHosts && Array.isArray(data.connectedHosts)) {
-        setHosts(data.connectedHosts);
+        setHosts(data.connectedHosts.map((host: any) => ({
+          id: host.id,
+          ipAddress: host.ipAddress,
+          hostname: host.hostname || 'Unknown Device',
+          macAddress: host.macAddress,
+          lastSeen: host.lastSeen,
+          isActive: host.isActive
+        })));
         setHostCount(data.connectedHosts.length);
       } else {
         setHosts([]);
