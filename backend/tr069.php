@@ -678,3 +678,49 @@ if (stripos($raw_post, '<cwmp:Inform>') !== false) {
     echo $opticalRequest;
     exit;
 }
+
+try {
+    $infoStmt = $db->prepare("
+        SELECT ip_address, software_version, hardware_version, ssid, uptime, ssid_password 
+        FROM devices 
+        WHERE serial_number = :serial
+    ");
+    $infoStmt->execute([':serial' => $serialNumber]);
+    $deviceInfo = $infoStmt->fetch(PDO::FETCH_ASSOC);
+    
+    // Always create a task, using ssid_password as a trigger
+    // This parameter will always be null/empty, forcing task creation
+    $needsInfo = true;
+    
+    if ($needsInfo) {
+        tr069_log("Device $serialNumber needs info update - queueing info task", "INFO");
+        
+        // Get device_id
+        $idStmt = $db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
+        $idStmt->execute([':serial' => $serialNumber]);
+        $deviceId = $idStmt->fetchColumn();
+        
+        if ($deviceId) {
+            // Queue an info task
+            $taskData = json_encode([
+                'names' => [] // Use default parameters in InfoTaskGenerator
+            ]);
+            
+            $insertStmt = $db->prepare("
+                INSERT INTO device_tasks
+                    (device_id, task_type, task_data, status, created_at)
+                VALUES
+                    (:device_id, 'info', :task_data, 'pending', NOW())
+            ");
+            
+            $insertStmt->execute([
+                ':device_id' => $deviceId,
+                ':task_data' => $taskData
+            ]);
+            
+            tr069_log("Queued info task for device $serialNumber", "INFO");
+        }
+    }
+} catch (PDOException $e) {
+    tr069_log("Error checking/queueing info task: " . $e->getMessage(), "ERROR");
+}
