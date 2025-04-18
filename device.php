@@ -549,7 +549,7 @@ try {
                                     <p class="fw-medium"><?php echo htmlspecialchars($device['ipAddress'] ?: 'N/A'); ?></p>
                                 </div>
                                 <div class="mb-3">
-                                    <label class="form-label text-muted mb-1">SSID</label>
+                                    <label class="form-label text-muted mb-1">SSID / WIFI</label>
                                     <p class="fw-medium"><?php echo htmlspecialchars($device['ssid'] ?: 'N/A'); ?></p>
                                 </div>
                                 <?php if (!empty($device['txPower'])): ?>
