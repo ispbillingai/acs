@@ -1,3 +1,4 @@
+
 <?php
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -6,28 +7,43 @@ header('Access-Control-Allow-Headers: Content-Type');
 
 require_once __DIR__ . '/../config/database.php';
 
+function writeLog($message, $isImportant = false) {
+    // Only log essential operations or when explicitly marked as important
+    if ($isImportant) {
+        $logFile = __DIR__ . '/../../device.log';
+        file_put_contents($logFile, date('Y-m-d H:i:s') . " [INFO] " . $message . "\n", FILE_APPEND);
+    }
+}
+
+// Only allow POST requests
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    writeLog("Method not allowed: " . $_SERVER['REQUEST_METHOD'], true);
     http_response_code(405);
     echo json_encode(['error' => 'Method not allowed']);
     exit;
 }
 
 try {
+    writeLog("Processing TR-069 data", true);
     $database = new Database();
     $db = $database->getConnection();
     
     if (!$db) {
+        writeLog("Database connection failed", true);
         throw new Exception("Database connection failed");
     }
     
     // Check if we're processing a file input or direct POST data
     if (isset($_FILES['router_ssids']) && $_FILES['router_ssids']['error'] === UPLOAD_ERR_OK) {
+        // Processing file upload
         $filePath = $_FILES['router_ssids']['tmp_name'];
     } else {
+        // Path to the router_ssids.txt file
         $filePath = $_SERVER['DOCUMENT_ROOT'] . '/router_ssids.txt';
     }
     
     if (!file_exists($filePath)) {
+        writeLog("Router data file not found: " . $filePath, true);
         http_response_code(404);
         echo json_encode(['error' => 'Router data file not found']);
         exit;
@@ -132,6 +148,8 @@ try {
         'connectedHosts' => array_values($hosts)
     ];
     
+    writeLog("Processing device data for: " . $serialNumber, true);
+    
     // Direct database update - critical section
     try {
         // Begin transaction for data consistency
@@ -172,10 +190,12 @@ try {
             ]);
             
             if (!$insertResult) {
+                writeLog("Failed to insert device: " . $serialNumber, true);
                 throw new Exception("Failed to insert device");
             }
             
             $deviceId = $db->lastInsertId();
+            writeLog("New device created: " . $serialNumber, true);
         } else {
             $deviceId = $device['id'];
             
@@ -197,6 +217,7 @@ try {
             ]);
             
             if (!$updateResult) {
+                writeLog("Failed to update device: " . $serialNumber, true);
                 throw new Exception("Failed to update device");
             }
         }
@@ -267,6 +288,8 @@ try {
                     }
                 }
             }
+            
+            writeLog("Updated parameters for device " . $serialNumber . ": " . $paramSuccess . " successful", true);
         }
         
         // Store connected hosts if available
@@ -341,6 +364,8 @@ try {
                     }
                 }
             }
+            
+            writeLog("Updated " . $hostSuccess . " connected hosts for device " . $serialNumber, true);
         }
         
         // Update the connected clients count in the devices table
@@ -355,6 +380,7 @@ try {
         
         // Commit the transaction
         $db->commit();
+        writeLog("Successfully processed TR-069 data for device " . $serialNumber, true);
         
         http_response_code(200);
         echo json_encode([
@@ -365,14 +391,17 @@ try {
         
     } catch (Exception $e) {
         // Roll back the transaction if something failed
+        writeLog("ERROR: " . $e->getMessage(), true);
         $db->rollBack();
         throw $e;
     }
     
 } catch (PDOException $e) {
+    writeLog("DATABASE ERROR: " . $e->getMessage(), true);
     http_response_code(500);
-    echo json_encode(['error' => 'Database error']);
+    echo json_encode(['error' => 'Database error: ' . $e->getMessage()]);
 } catch (Exception $e) {
+    writeLog("ERROR: " . $e->getMessage(), true);
     http_response_code(500);
-    echo json_encode(['error' => 'Failed to store router data']);
+    echo json_encode(['error' => 'Failed to store router data: ' . $e->getMessage()]);
 }
