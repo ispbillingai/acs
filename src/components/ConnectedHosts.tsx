@@ -56,7 +56,7 @@ export const ConnectedHosts = ({ deviceId, refreshTrigger }: ConnectedHostsProps
           lastSeen: host.lastSeen,
           isActive: host.isActive
         })));
-        setHostCount(data.connected_devices || 0); // Use the direct value from database
+        setHostCount(parseInt(data.connectedDevices || '0'));
         console.log("Processed host data:", hosts);
       } else {
         console.log("No connected hosts found in the response");
