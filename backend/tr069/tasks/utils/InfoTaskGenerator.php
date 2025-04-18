@@ -1,6 +1,5 @@
 
 <?php
-
 class InfoTaskGenerator {
     private $logger;
     
@@ -9,7 +8,7 @@ class InfoTaskGenerator {
     }
 
     public function generateParameters(array $data) {
-        // Core device info parameters
+        // First get core parameters including HostNumberOfEntries
         $names = [
             'InternetGatewayDevice.DeviceInfo.HardwareVersion',
             'InternetGatewayDevice.DeviceInfo.SoftwareVersion',
@@ -22,15 +21,18 @@ class InfoTaskGenerator {
             'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries'
         ];
 
-        // First get number of hosts to know how many host parameters to request
-        $hostCount = $data['host_count'] ?? 0;
+        // Get number of hosts from the response data
+        $hostCount = isset($data['HostNumberOfEntries']) ? (int)$data['HostNumberOfEntries'] : 0;
         
-        // If we have hosts, add parameters for each host
+        $this->logger->logToFile("Detected {$hostCount} hosts from HostNumberOfEntries");
+        
+        // Add parameters for each connected host
         if ($hostCount > 0) {
             for ($i = 1; $i <= $hostCount; $i++) {
                 $names[] = "InternetGatewayDevice.LANDevice.1.Hosts.Host.{$i}.Active";
                 $names[] = "InternetGatewayDevice.LANDevice.1.Hosts.Host.{$i}.IPAddress";
                 $names[] = "InternetGatewayDevice.LANDevice.1.Hosts.Host.{$i}.HostName";
+                $this->logger->logToFile("Adding parameters for host {$i}");
             }
         }
 
@@ -45,4 +47,3 @@ class InfoTaskGenerator {
         ];
     }
 }
-
