@@ -4,6 +4,7 @@ require_once __DIR__ . '/../../config/database.php';
 require_once __DIR__ . '/utils/WifiTaskGenerator.php';
 require_once __DIR__ . '/utils/WanTaskGenerator.php';
 require_once __DIR__ . '/utils/RebootTaskGenerator.php';
+require_once __DIR__ . '/utils/InfoTaskGenerator.php';
 require_once __DIR__ . '/utils/CommitHelper.php';
 
 class TaskHandler {
@@ -12,6 +13,7 @@ class TaskHandler {
     private $wifiTaskGenerator;
     private $wanTaskGenerator;
     private $rebootTaskGenerator;
+    private $infoTaskGenerator;
     private $commitHelper;
     
     public function __construct() {
@@ -28,6 +30,7 @@ class TaskHandler {
         $this->wifiTaskGenerator = new WifiTaskGenerator($this);
         $this->wanTaskGenerator = new WanTaskGenerator($this);
         $this->rebootTaskGenerator = new RebootTaskGenerator($this);
+        $this->infoTaskGenerator = new InfoTaskGenerator($this);
         $this->commitHelper = new CommitHelper($this);
     }
     
@@ -123,6 +126,8 @@ class TaskHandler {
                 return $this->wanTaskGenerator->generateParameters($data);
             case 'reboot':
                 return $this->rebootTaskGenerator->generateParameters($data);
+            case 'info':
+                return $this->infoTaskGenerator->generateParameters($data);
             default:
                 $this->logToFile("Unsupported task type: $taskType");
                 return null;
