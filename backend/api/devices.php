@@ -1,3 +1,4 @@
+
 <?php
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -141,6 +142,7 @@ function getDevice($db, $id) {
             'ipAddress' => $device['ipAddress'],
             'softwareVersion' => $device['softwareVersion'],
             'hardwareVersion' => $device['hardwareVersion'],
+            'connected_devices' => $device['connectedDevices'], // Make sure we pass the connected_devices value
             'parameters' => [],
             'connectedHosts' => []
         ];
