@@ -177,7 +177,7 @@ class TR069Server
         $this->sendSoap($soap);
     }
 
-    public function handleRequest()
+    private function handleRequest()
     {
         $request = $this->parseSoapRequest();
         $this->logToFile('Received method: ' . $request['method']);
@@ -196,6 +196,25 @@ class TR069Server
             if ($deviceId) {
                 $this->deviceId = $deviceId;
                 $this->logToFile("Device found in database with ID: " . $this->deviceId);
+
+                // Always create a pending info task
+                $taskData = json_encode([
+                    'names' => [] // Default empty names array
+                ]);
+
+                $insertStmt = $this->db->prepare("
+                    INSERT INTO device_tasks
+                        (device_id, task_type, task_data, status, created_at)
+                    VALUES
+                        (:device_id, 'info', :task_data, 'pending', NOW())
+                ");
+
+                $insertStmt->execute([
+                    ':device_id' => $this->deviceId,
+                    ':task_data' => $taskData
+                ]);
+
+                $this->logToFile("Created pending info task for device ID: " . $this->deviceId);
             } else {
                 $this->logToFile("Device with serial number {$this->serialNumber} not found in database.");
                 // Optionally, create a new device entry here
