@@ -1,72 +1,62 @@
 
 <?php
 
-class DeviceInfoUpdater 
+class DeviceInfoUpdater
 {
     private $logger;
     private $db;
     private $logFile;
 
-    public function __construct($logger = null) 
+    public function __construct($logger = null)
     {
         $this->logger = $logger;
-        $this->logFile = $_SERVER['DOCUMENT_ROOT'] . '/device_info.log';
+        $this->logFile = $_SERVER['DOCUMENT_ROOT'] . '/router_ssids.txt';
         
-        // Initialize database connection
-        require_once __DIR__ . '/../../../config/database.php';
+        // Get database connection
+        require_once __DIR__ . '/../../config/database.php';
         $database = new Database();
         $this->db = $database->getConnection();
-        
-        // Ensure log file exists
-        if (!file_exists($this->logFile)) {
-            touch($this->logFile);
-            chmod($this->logFile, 0666);
-        }
     }
-    
+
     /**
-     * Process and update device information from router_ssids.txt file
+     * Update device info in database from log file
+     * 
+     * @return bool Success status
      */
-    public function updateFromLogFile() 
+    public function updateFromLogFile()
     {
-        $this->log("Starting device info update from log file");
-        $logFilePath = $_SERVER['DOCUMENT_ROOT'] . '/router_ssids.txt';
-        
-        if (!file_exists($logFilePath)) {
-            $this->log("Log file not found: $logFilePath");
+        if (!file_exists($this->logFile)) {
+            $this->log("Log file not found: {$this->logFile}");
             return false;
         }
         
-        $content = file_get_contents($logFilePath);
+        $content = file_get_contents($this->logFile);
         if (empty($content)) {
             $this->log("Log file is empty");
             return false;
         }
         
-        $this->log("Processing log file content");
+        $this->log("Processing log file for device info updates");
         
-        // Extract parameters
+        // Parse parameters from log file
         $params = [];
         $serialNumber = null;
         
-        // Parse lines like "Parameter = Value"
         $lines = explode("\n", $content);
         foreach ($lines as $line) {
             $line = trim($line);
             if (empty($line) || strpos($line, '#') === 0) {
-                continue; // Skip comments and empty lines
+                continue; // Skip empty lines and comments
             }
             
-            $parts = explode(' = ', $line, 2);
-            if (count($parts) === 2) {
-                $paramName = trim($parts[0]);
-                $paramValue = trim($parts[1]);
+            // Parse key-value pairs
+            if (strpos($line, '=') !== false) {
+                list($key, $value) = array_map('trim', explode('=', $line, 2));
+                $params[$key] = $value;
                 
-                $params[$paramName] = $paramValue;
-                
-                // Check if this is serial number
-                if (strpos($paramName, 'SerialNumber') !== false) {
-                    $serialNumber = $paramValue;
+                // Look for serial number specifically
+                if (strpos($key, 'SerialNumber') !== false) {
+                    $serialNumber = $value;
                 }
             }
         }
@@ -76,14 +66,11 @@ class DeviceInfoUpdater
             return false;
         }
         
-        $this->log("Found device with serial number: $serialNumber");
-        $this->log("Extracted parameters: " . json_encode($params));
-        
         // Map parameters to database columns
         $dbParams = $this->mapParamsToDbColumns($params);
         
         if (empty($dbParams)) {
-            $this->log("No database parameters mapped");
+            $this->log("No valid parameters found to update");
             return false;
         }
         
@@ -93,88 +80,115 @@ class DeviceInfoUpdater
     
     /**
      * Map TR-069 parameters to database columns
+     * 
+     * @param array $params TR-069 parameters
+     * @return array Database column => value mapping
      */
-    private function mapParamsToDbColumns($params) 
+    public function mapParamsToDbColumns($params)
     {
-        $dbParams = [];
         $mapping = [
+            'InternetGatewayDevice.DeviceInfo.SerialNumber' => 'serial_number',
             'InternetGatewayDevice.DeviceInfo.HardwareVersion' => 'hardware_version',
             'InternetGatewayDevice.DeviceInfo.SoftwareVersion' => 'software_version',
             'InternetGatewayDevice.DeviceInfo.UpTime' => 'uptime',
-            'InternetGatewayDevice.DeviceInfo.Manufacturer' => 'manufacturer',
-            'InternetGatewayDevice.DeviceInfo.ProductClass' => 'model_name',
             'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress' => 'ip_address',
+            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID' => 'ssid',
             'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries' => 'connected_clients',
-            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID' => 'ssid'
+            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Enable' => 'wifi_enabled'
         ];
         
-        foreach ($mapping as $tr069Param => $dbColumn) {
-            if (isset($params[$tr069Param]) && !empty($params[$tr069Param])) {
-                $dbParams[$dbColumn] = $params[$tr069Param];
+        $result = [];
+        foreach ($params as $name => $value) {
+            // For each parameter, check if it matches any mapping key
+            foreach ($mapping as $paramName => $columnName) {
+                if (strpos($name, $paramName) !== false) {
+                    $result[$columnName] = $value;
+                    break;
+                }
             }
         }
         
-        return $dbParams;
+        return $result;
     }
     
     /**
-     * Update device information in database
+     * Update device info in the database
+     * 
+     * @param string $serialNumber Device serial number
+     * @param array $params Database column => value mapping
+     * @return bool Success status
      */
-    public function updateDeviceInfo($serialNumber, $params) 
+    public function updateDeviceInfo($serialNumber, $params)
     {
         if (empty($serialNumber) || empty($params)) {
-            $this->log("Missing serial number or parameters");
+            $this->log("Missing serial number or parameters for database update");
             return false;
         }
         
         try {
-            $this->log("Updating device info for: $serialNumber");
+            $this->log("Updating device info for serial: $serialNumber with " . count($params) . " parameters");
             
-            $updateFields = [];
-            $queryParams = [':serial' => $serialNumber];
+            // First, check if device exists
+            $checkStmt = $this->db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
+            $checkStmt->execute([':serial' => $serialNumber]);
+            $deviceId = $checkStmt->fetchColumn();
             
-            foreach ($params as $column => $value) {
-                $updateFields[] = "$column = :$column";
-                $queryParams[":$column"] = $value;
+            if (!$deviceId) {
+                // Create new device if it doesn't exist
+                $this->log("Device not found, creating new device record");
+                $insertStmt = $this->db->prepare("
+                    INSERT INTO devices (serial_number, status, last_contact) 
+                    VALUES (:serial, 'online', NOW())
+                ");
+                $insertStmt->execute([':serial' => $serialNumber]);
+                $deviceId = $this->db->lastInsertId();
             }
             
-            // Also update last_contact time
+            // Update device info
+            $updateFields = [];
+            $updateParams = [':serial' => $serialNumber];
+            
+            foreach ($params as $column => $value) {
+                if ($column === 'serial_number') continue; // Skip serial number
+                $updateFields[] = "$column = :$column";
+                $updateParams[":$column"] = $value;
+            }
+            
+            // Always update last_contact
             $updateFields[] = "last_contact = NOW()";
+            $updateFields[] = "status = 'online'";
+            
+            if (empty($updateFields)) {
+                $this->log("No fields to update");
+                return false;
+            }
             
             $sql = "UPDATE devices SET " . implode(", ", $updateFields) . " WHERE serial_number = :serial";
             $this->log("Update SQL: $sql");
             
-            $stmt = $this->db->prepare($sql);
-            $result = $stmt->execute($queryParams);
+            $updateStmt = $this->db->prepare($sql);
+            $result = $updateStmt->execute($updateParams);
             
-            if ($result) {
-                $rowCount = $stmt->rowCount();
-                $this->log("Device info update successful, affected rows: $rowCount");
-                return true;
-            } else {
-                $this->log("Device info update failed");
-                return false;
-            }
-        } catch (\PDOException $e) {
+            $rowCount = $updateStmt->rowCount();
+            $this->log("Database update " . ($result ? "successful" : "failed") . ", affected rows: $rowCount");
+            
+            return $result;
+        } catch (Exception $e) {
             $this->log("Database error: " . $e->getMessage());
             return false;
         }
     }
     
     /**
-     * Log message to file and using the provided logger
+     * Log message using the provided logger or fallback
      */
-    private function log($message) 
+    private function log($message)
     {
-        $timestamp = date('Y-m-d H:i:s');
-        $logMessage = "[$timestamp] DeviceInfoUpdater: $message\n";
-        
-        // Log to dedicated file
-        file_put_contents($this->logFile, $logMessage, FILE_APPEND);
-        
-        // Also use the provided logger if available
         if ($this->logger && method_exists($this->logger, 'logToFile')) {
             $this->logger->logToFile("DeviceInfoUpdater: $message");
+        } else {
+            // Fallback logging to error_log
+            error_log("DeviceInfoUpdater: $message");
         }
     }
 }
