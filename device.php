@@ -526,7 +526,7 @@ try {
                 <!-- Device Information -->
                 <div class="card info-card mb-4">
                     <div class="card-header">
-                        <h5 class="card-title mb-0"><i class='bx bx-info-circle me-2'></i>Device Information</h5>
+                        <h5 class="card-title mb-0"><i class='bx bx-info-circle me-2'></i>Devic Information</h5>
                     </div>
                     <div class="card-body">
                         <div class="row">
