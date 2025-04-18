@@ -22,6 +22,7 @@ class InfoTaskGenerator {
                     uptime = :uptime,
                     ip_address = :ip_address,
                     connected_clients = :connected_clients,
+                    ssid = :ssid,
                     last_contact = NOW()
                     WHERE serial_number = :serial_number";
 
@@ -32,6 +33,7 @@ class InfoTaskGenerator {
                 ':uptime' => $data['uptime'] ?? null,
                 ':ip_address' => $data['ip_address'] ?? null,
                 ':connected_clients' => $data['connected_clients'] ?? 0,
+                ':ssid' => $data['ssid'] ?? null,
                 ':serial_number' => $serialNumber
             ]);
             
@@ -51,7 +53,10 @@ class InfoTaskGenerator {
             'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DNSServers',
             'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.SubnetMask',
             'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DefaultGateway',
-            'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries'
+            'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries',
+            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
+            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Enable',
+            'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Status'
         ];
 
         // First get number of hosts to know how many host parameters to request
@@ -97,6 +102,9 @@ class InfoTaskGenerator {
                             break;
                         case 'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries':
                             $deviceData['connected_clients'] = intval($value);
+                            break;
+                        case 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID':
+                            $deviceData['ssid'] = $value;
                             break;
                     }
                 }
