@@ -45,7 +45,6 @@ class InfoTaskGenerator {
             'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DNSServers',
             'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.SubnetMask',
             'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DefaultGateway',
-            'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPONInterfaceConfig.SignalLevel',
             'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries'
         ];
         
