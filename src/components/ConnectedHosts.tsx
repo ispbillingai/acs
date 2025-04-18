@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -118,6 +119,7 @@ export const ConnectedHosts = ({ deviceId, refreshTrigger }: ConnectedHostsProps
     }
   };
 
+  // Set up auto-refresh every 30 seconds
   useEffect(() => {
     console.log("ConnectedHosts component mounted or refreshTrigger changed");
     fetchHosts();
@@ -130,6 +132,7 @@ export const ConnectedHosts = ({ deviceId, refreshTrigger }: ConnectedHostsProps
     return () => clearInterval(intervalId);
   }, [deviceId, refreshTrigger]);
 
+  // Function to determine what icon to show for each device
   const getDeviceIcon = (hostname: string) => {
     const lowerHostname = hostname.toLowerCase();
     
