@@ -1,5 +1,5 @@
 <?php
-// Disable all error logging
+// Disable all error logging/working till here
 error_reporting(0);
 ini_set('display_errors', 0);
 ini_set('log_errors', 0);
