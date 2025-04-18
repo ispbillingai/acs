@@ -1,4 +1,3 @@
-
 <?php
 
 error_reporting(E_ALL);
@@ -40,6 +39,60 @@ function tr069_log($message, $level = 'INFO') {
     // Also append to retrieve log for debugging
     if (isset($GLOBALS['retrieve_log']) && is_writable($GLOBALS['retrieve_log'])) {
         file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] $logMessage\n", FILE_APPEND);
+    }
+}
+
+// Create a pending info task for a device
+function createPendingInfoTask($deviceId, $db) {
+    try {
+        tr069_log("TASK CREATION: Starting task creation for device ID: " . $deviceId, "INFO");
+        
+        // Default task data for info task
+        $taskData = json_encode(['names' => []]);
+        
+        // Insert the task
+        $insertStmt = $db->prepare("
+            INSERT INTO device_tasks 
+                (device_id, task_type, task_data, status, message, created_at, updated_at) 
+            VALUES 
+                (:device_id, 'info', :task_data, 'pending', 'Auto-created on device connection', NOW(), NOW())
+        ");
+        
+        $insertResult = $insertStmt->execute([
+            ':device_id' => $deviceId,
+            ':task_data' => $taskData
+        ]);
+        
+        if ($insertResult) {
+            $taskId = $db->lastInsertId();
+            tr069_log("TASK CREATION: Successfully created pending info task with ID: {$taskId}", "INFO");
+            
+            // Debug - Double check if task was actually created
+            $verifyStmt = $db->prepare("SELECT * FROM device_tasks WHERE id = :id");
+            $verifyStmt->execute([':id' => $taskId]);
+            $taskExists = $verifyStmt->fetch(PDO::FETCH_ASSOC);
+            
+            if ($taskExists) {
+                tr069_log("TASK CREATION: Verified task exists in database with ID: {$taskId}", "INFO");
+            } else {
+                tr069_log("TASK CREATION ERROR: Task not found in database after creation!", "ERROR");
+            }
+            
+            return true;
+        } else {
+            tr069_log("TASK CREATION ERROR: Failed to create pending info task. Database error.", "ERROR");
+            
+            // More detailed error logging
+            $errorInfo = $insertStmt->errorInfo();
+            tr069_log("TASK CREATION ERROR: " . print_r($errorInfo, true), "ERROR");
+            
+            return false;
+        }
+    } catch (PDOException $e) {
+        tr069_log("TASK CREATION ERROR: Exception while creating pending task: " . $e->getMessage(), "ERROR");
+        tr069_log("TASK CREATION ERROR: Stack trace: " . $e->getTraceAsString(), "ERROR");
+        
+        return false;
     }
 }
 
@@ -199,55 +252,28 @@ try {
                 }
             }
             
-            // Check if we need device information
+            // Get device ID
             try {
-                $infoStmt = $db->prepare("
-                    SELECT ip_address, software_version, hardware_version, ssid, uptime 
-                    FROM devices 
-                    WHERE serial_number = :serial
-                ");
-                $infoStmt->execute([':serial' => $serialNumber]);
-                $deviceInfo = $infoStmt->fetch(PDO::FETCH_ASSOC);
+                $idStmt = $db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
+                $idStmt->execute([':serial' => $serialNumber]);
+                $deviceId = $idStmt->fetchColumn();
                 
-                $needsInfo = (
-                    empty($deviceInfo['ip_address']) || 
-                    empty($deviceInfo['software_version']) || 
-                    empty($deviceInfo['hardware_version']) || 
-                    empty($deviceInfo['ssid']) || 
-                    empty($deviceInfo['uptime'])
-                );
-                
-                if ($needsInfo) {
-                    tr069_log("Device $serialNumber needs info update - queueing info task", "INFO");
+                if ($deviceId) {
+                    tr069_log("Found device ID: $deviceId for serial: $serialNumber", "INFO");
                     
-                    // Get device_id
-                    $idStmt = $db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
-                    $idStmt->execute([':serial' => $serialNumber]);
-                    $deviceId = $idStmt->fetchColumn();
+                    // Always create a pending info task for the device
+                    $taskCreated = createPendingInfoTask($deviceId, $db);
                     
-                    if ($deviceId) {
-                        // Queue an info task
-                        $taskData = json_encode([
-                            'names' => [] // Use default parameters in InfoTaskGenerator
-                        ]);
-                        
-                        $insertStmt = $db->prepare("
-                            INSERT INTO device_tasks
-                                (device_id, task_type, task_data, status, created_at)
-                            VALUES
-                                (:device_id, 'info', :task_data, 'pending', NOW())
-                        ");
-                        
-                        $insertStmt->execute([
-                            ':device_id' => $deviceId,
-                            ':task_data' => $taskData
-                        ]);
-                        
-                        tr069_log("Queued info task for device $serialNumber", "INFO");
+                    if ($taskCreated) {
+                        tr069_log("Successfully created pending info task for device ID: $deviceId", "INFO");
+                    } else {
+                        tr069_log("Failed to create pending info task for device ID: $deviceId", "ERROR");
                     }
+                } else {
+                    tr069_log("Device ID not found for serial: $serialNumber", "ERROR");
                 }
             } catch (PDOException $e) {
-                tr069_log("Error checking/queueing info task: " . $e->getMessage(), "ERROR");
+                tr069_log("Database error finding device ID: " . $e->getMessage(), "ERROR");
             }
             
             // Look for pending tasks for this device
@@ -264,6 +290,8 @@ try {
                 $_SESSION['device_serial'] = $serialNumber;
                 session_write_close();
             } else {
+                tr069_log("No pending tasks for device ID: " . ($deviceId ?: 'unknown'), "INFO");
+                
                 // Check for in-progress tasks that might need to be completed
                 try {
                     $deviceStmt = $db->prepare("SELECT id FROM devices WHERE serial_number = :serial_number");
@@ -739,5 +767,3 @@ try {
   </soapenv:Body>
 </soapenv:Envelope>';
 }
-
-//working very well till here
