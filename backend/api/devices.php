@@ -113,13 +113,9 @@ function getDevice($db, $id) {
                 d.software_version as softwareVersion,
                 d.hardware_version as hardwareVersion,
                 d.last_contact as lastContact,
-                d.connected_devices as connectedDevices,
-                d.rx_power as rxPower,
-                d.tx_power as txPower
+                d.connected_devices as connectedDevices
                 FROM devices d
                 WHERE d.id = :id";
-        
-        writeLog("Executing SQL query: " . $deviceSql);
         
         $deviceStmt = $db->prepare($deviceSql);
         $deviceStmt->execute([':id' => $id]);

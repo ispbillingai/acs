@@ -1,4 +1,3 @@
-
 <?php
 class DeviceManager {
     private $db;
@@ -141,8 +140,6 @@ class DeviceManager {
                 'localAdminPassword' => null,
                 'tr069Password' => null,
                 'connectedClients' => 0,
-                'rxPower' => null,
-                'txPower' => null,
                 'ipAddress' => $_SERVER['REMOTE_ADDR'] // Default to client's IP address
             ], $deviceInfo);
 
@@ -172,41 +169,39 @@ class DeviceManager {
                         tx_power = :tx_power
                         WHERE serial_number = :serial_number";
 
-                $params = [
-                    ':manufacturer' => $deviceInfo['manufacturer'],
-                    ':model_name' => $deviceInfo['modelName'],
-                    ':mac_address' => $deviceInfo['macAddress'],
-                    ':status' => $deviceInfo['status'],
-                    ':ip_address' => $deviceInfo['ipAddress'] ?: $_SERVER['REMOTE_ADDR'],
-                    ':software_version' => $deviceInfo['softwareVersion'],
-                    ':hardware_version' => $deviceInfo['hardwareVersion'],
-                    ':ssid' => $deviceInfo['ssid'],
-                    ':ssid_password' => $deviceInfo['ssidPassword'],
-                    ':uptime' => $deviceInfo['uptime'],
-                    ':local_admin_password' => $deviceInfo['localAdminPassword'],
-                    ':tr069_password' => $deviceInfo['tr069Password'],
-                    ':connected_clients' => $deviceInfo['connectedClients'],
-                    ':rx_power' => $deviceInfo['rxPower'],
-                    ':tx_power' => $deviceInfo['txPower'],
-                    ':serial_number' => $deviceInfo['serialNumber']
-                ];
-                
-                $stmt = $this->db->prepare($sql);
-                $stmt->execute($params);
+            $params = [
+                ':manufacturer' => $deviceInfo['manufacturer'],
+                ':model_name' => $deviceInfo['modelName'],
+                ':mac_address' => $deviceInfo['macAddress'],
+                ':status' => $deviceInfo['status'],
+                ':ip_address' => $deviceInfo['ipAddress'] ?: $_SERVER['REMOTE_ADDR'],
+                ':software_version' => $deviceInfo['softwareVersion'],
+                ':hardware_version' => $deviceInfo['hardwareVersion'],
+                ':ssid' => $deviceInfo['ssid'],
+                ':ssid_password' => $deviceInfo['ssidPassword'],
+                ':uptime' => $deviceInfo['uptime'],
+                ':local_admin_password' => $deviceInfo['localAdminPassword'],
+                ':tr069_password' => $deviceInfo['tr069Password'],
+                ':connected_clients' => $deviceInfo['connectedClients'],
+                ':rx_power' => $deviceInfo['rxPower'],
+                ':tx_power' => $deviceInfo['txPower'],
+                ':serial_number' => $deviceInfo['serialNumber']
+            ];
+            
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute($params);
 
-                return $existingId;
-            } else {
+            return $existingId;
+        } else {
                 // Insert new device
                 $sql = "INSERT INTO devices 
                         (serial_number, manufacturer, model_name, mac_address, status, 
                         last_contact, ip_address, software_version, hardware_version, 
-                        ssid, ssid_password, uptime, local_admin_password, tr069_password, connected_clients,
-                        rx_power, tx_power) 
+                        ssid, ssid_password, uptime, local_admin_password, tr069_password, connected_clients) 
                         VALUES 
                         (:serial_number, :manufacturer, :model_name, :mac_address, :status,
                         NOW(), :ip_address, :software_version, :hardware_version,
-                        :ssid, :ssid_password, :uptime, :local_admin_password, :tr069_password, :connected_clients,
-                        :rx_power, :tx_power)";
+                        :ssid, :ssid_password, :uptime, :local_admin_password, :tr069_password, :connected_clients)";
 
                 $params = [
                     ':serial_number' => $deviceInfo['serialNumber'],
@@ -222,9 +217,7 @@ class DeviceManager {
                     ':uptime' => $deviceInfo['uptime'],
                     ':local_admin_password' => $deviceInfo['localAdminPassword'],
                     ':tr069_password' => $deviceInfo['tr069Password'],
-                    ':connected_clients' => $deviceInfo['connectedClients'],
-                    ':rx_power' => $deviceInfo['rxPower'],
-                    ':tx_power' => $deviceInfo['txPower']
+                    ':connected_clients' => $deviceInfo['connectedClients']
                 ];
 
                 $stmt = $this->db->prepare($sql);
@@ -232,9 +225,9 @@ class DeviceManager {
 
                 return $this->db->lastInsertId();
             }
-        } catch (PDOException $e) {
-            error_log("Database error in updateDevice: " . $e->getMessage());
-            throw $e;
-        }
+    } catch (PDOException $e) {
+        error_log("Database error in updateDevice: " . $e->getMessage());
+        throw $e;
     }
+}
 }
