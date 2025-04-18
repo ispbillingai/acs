@@ -25,8 +25,6 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
   const [tr069SessionId, setTr069SessionId] = useState<string | null>(null);
   
   useEffect(() => {
-    console.log("DeviceConfigurationPanel mounted with deviceId:", deviceId);
-    
     const fetchDeviceSettings = async () => {
       try {
         setLoading(true);
@@ -40,7 +38,6 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
         });
         
         const result = await response.json();
-        console.log("Fetched device settings:", result);
         
         if (result.success && result.settings) {
           // Settings will be handled in their respective components
@@ -55,7 +52,6 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
           toast.error("Failed to load device settings");
         }
       } catch (error) {
-        console.error('Error fetching device settings:', error);
         toast.error("Error loading device settings");
       } finally {
         setLoading(false);
