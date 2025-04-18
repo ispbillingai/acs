@@ -1,6 +1,8 @@
 
 <?php
 
+require_once __DIR__ . '/../../utils/DatabaseUpdater.php';
+
 class WifiTaskGenerator
 {
     /**
@@ -8,10 +10,12 @@ class WifiTaskGenerator
      * @var object
      */
     private $logger;
+    private $dbUpdater;
 
     public function __construct($logger)
     {
         $this->logger = $logger;
+        $this->dbUpdater = new DatabaseUpdater($logger);
     }
 
     /**
@@ -23,6 +27,7 @@ class WifiTaskGenerator
      *   "password"    : "secretPass",    // optional
      *   "instance_24g": 1,                // defaults 1
      *   "instance_5g" : 5                 // optional
+     *   "serial_number": "DEVICE123"      // optional, will be used for DB update
      * }
      */
     public function generateParameters(array $data)
@@ -34,10 +39,24 @@ class WifiTaskGenerator
         $password = (string) ($data['password'] ?? '');
         $inst24   = (int) ($data['instance_24g'] ?? 1);
         $inst5    = isset($data['instance_5g']) ? (int) $data['instance_5g'] : null;
+        $serialNumber = $data['serial_number'] ?? '';
 
         if ($ssid === '') {
             $this->log('SSID missing – aborting');
             return null;
+        }
+
+        // Try to update database with WiFi settings if serial number is provided
+        if (!empty($serialNumber)) {
+            $this->log("Attempting to update database for device: $serialNumber");
+            $wifiData = [
+                'ssid' => $ssid,
+                'password' => $password
+            ];
+            $updateResult = $this->dbUpdater->updateWifiSettings($serialNumber, $wifiData);
+            $this->log("Database update result: " . ($updateResult ? "success" : "failed"));
+        } else {
+            $this->log("No serial number provided, skipping database update");
         }
 
         // Build ParameterValueStruct list
