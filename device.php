@@ -4,6 +4,17 @@ error_reporting(E_ALL);
 ini_set('display_errors', 1);
 ini_set('error_log', __DIR__ . '/device.log');
 
+// Create a custom logging function for debugging
+function debug_log($message, $context = []) {
+    $log_file = __DIR__ . '/acs.log';
+    $timestamp = date('Y-m-d H:i:s');
+    $context_str = !empty($context) ? ' | ' . json_encode($context) : '';
+    file_put_contents($log_file, "[$timestamp] $message$context_str" . PHP_EOL, FILE_APPEND);
+}
+
+// Log the start of the script
+debug_log("Device.php script started");
+
 require_once __DIR__ . '/backend/config/database.php';
 
 try {
@@ -13,6 +24,7 @@ try {
 
     // Get device ID from URL
     $deviceId = isset($_GET['id']) ? $_GET['id'] : null;
+    debug_log("Device ID from URL", ['deviceId' => $deviceId]);
 
     if (!$deviceId) {
         header('Location: index.php');
@@ -30,6 +42,9 @@ try {
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             
             if ($row) {
+                // Log the raw data from database
+                debug_log("Raw device data from database", $row);
+                
                 $device = [
                     'id' => $row['id'],
                     'serialNumber' => $row['serial_number'],
@@ -47,11 +62,16 @@ try {
                     'tr069Password' => $row['tr069_password'],
                     'connectedClients' => $row['connected_devices']
                 ];
+                
+                // Log the connected_devices value specifically
+                debug_log("Original connected_devices value from DB", ['connected_devices' => $row['connected_devices']]);
+                
                 return $device;
             }
             
             return null;
         } catch (PDOException $e) {
+            debug_log("Error in getDevice function", ['error' => $e->getMessage()]);
             return null;
         }
     }
@@ -102,8 +122,11 @@ try {
             $sql = "SELECT * FROM connected_clients WHERE device_id = :deviceId AND is_active = 1";
             $stmt = $db->prepare($sql);
             $stmt->execute([':deviceId' => $deviceId]);
-            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $clients = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            debug_log("Connected clients query result", ['count' => count($clients)]);
+            return $clients;
         } catch (PDOException $e) {
+            debug_log("Error in getConnectedClients function", ['error' => $e->getMessage()]);
             return [];
         }
     }
@@ -115,15 +138,20 @@ try {
             $stmt = $db->prepare($sql);
             $stmt->execute([':deviceId' => $deviceId]);
             $result = $stmt->fetch(PDO::FETCH_ASSOC);
-            return $result ? intval($result['count']) : 0;
+            $count = $result ? intval($result['count']) : 0;
+            debug_log("Counted connected clients", ['count' => $count]);
+            return $count;
         } catch (PDOException $e) {
+            debug_log("Error in countConnectedClients function", ['error' => $e->getMessage()]);
             return 0;
         }
     }
 
     $device = getDevice($db, $deviceId);
+    debug_log("Device data after getDevice", ['device' => $device]);
 
     if (!$device) {
+        debug_log("No device found, redirecting to index.php");
         header('Location: index.php');
         exit;
     }
@@ -132,11 +160,19 @@ try {
     $latestUptime = getParameterValue($db, $deviceId, 'UpTime');
     if ($latestUptime) {
         $device['uptime'] = $latestUptime;
+        debug_log("Updated uptime value", ['uptime' => $latestUptime]);
     }
     
     // Always get the latest connected clients count
     $connectedClientsCount = countConnectedClients($db, $deviceId);
+    debug_log("Original connectedClients value", ['connectedClients' => $device['connectedClients']]);
+    debug_log("Counted connectedClientsCount value", ['connectedClientsCount' => $connectedClientsCount]);
+    
+    // IMPORTANT: Store the original value before overwriting
+    $originalConnectedClients = $device['connectedClients'];
     $device['connectedClients'] = $connectedClientsCount;
+    
+    debug_log("Updated connectedClients value", ['connectedClients' => $device['connectedClients']]);
     
     // Update the device record with the latest values
     $updateSql = "UPDATE devices SET 
@@ -144,11 +180,31 @@ try {
                     connected_devices = :connectedClients 
                 WHERE id = :id";
     $updateStmt = $db->prepare($updateSql);
-    $updateStmt->execute([
-        ':uptime' => $device['uptime'],
-        ':connectedClients' => $device['connectedClients'],
-        ':id' => $deviceId
+    
+    debug_log("Updating device record with new values", [
+        'uptime' => $device['uptime'],
+        'connectedClients' => $device['connectedClients'],
+        'id' => $deviceId
     ]);
+    
+    try {
+        $updateResult = $updateStmt->execute([
+            ':uptime' => $device['uptime'],
+            ':connectedClients' => $device['connectedClients'],
+            ':id' => $deviceId
+        ]);
+        debug_log("Update result", ['success' => $updateResult, 'rows_affected' => $updateStmt->rowCount()]);
+        
+        // Double-check the value after update
+        $checkSql = "SELECT connected_devices FROM devices WHERE id = :id";
+        $checkStmt = $db->prepare($checkSql);
+        $checkStmt->execute([':id' => $deviceId]);
+        $checkResult = $checkStmt->fetch(PDO::FETCH_ASSOC);
+        debug_log("Value after update", ['connected_devices' => $checkResult['connected_devices']]);
+        
+    } catch (PDOException $e) {
+        debug_log("Error updating device record", ['error' => $e->getMessage()]);
+    }
     
     // Check for missing values in device table but exist in parameters
     $keysToCheck = [
@@ -221,8 +277,17 @@ try {
     $tenMinutesAgo = date('Y-m-d H:i:s', strtotime('-10 minutes'));
     $isOnline = strtotime($device['lastContact']) >= strtotime($tenMinutesAgo);
     $device['status'] = $isOnline ? 'online' : 'offline';
+    
+    // Final summary log before rendering
+    debug_log("Final device data for rendering", [
+        'id' => $device['id'],
+        'status' => $device['status'],
+        'connectedClients' => $device['connectedClients'],
+        'originalValue' => $originalConnectedClients
+    ]);
 
 } catch (Exception $e) {
+    debug_log("Fatal error in device.php", ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
     die("An error occurred");
 }
 ?>
