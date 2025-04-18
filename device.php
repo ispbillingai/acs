@@ -128,6 +128,34 @@ try {
         exit;
     }
 
+    // Always get the latest connected clients count
+    $connectedClientsCount = 0;
+    
+    // Try to get connected clients count from connected_devices column first
+    if (!empty($device['connectedClients'])) {
+        $connectedClientsCount = intval($device['connectedClients']);
+    }
+
+    // If connected_devices is 0 or empty, try counting active clients
+    if ($connectedClientsCount === 0) {
+        $countClientsStmt = $db->prepare("SELECT COUNT(*) as count FROM connected_clients WHERE device_id = :deviceId AND is_active = 1");
+        $countClientsStmt->execute([':deviceId' => $deviceId]);
+        $result = $countClientsStmt->fetch(PDO::FETCH_ASSOC);
+        $connectedClientsCount = intval($result['count']);
+    }
+
+    // Update the device's connected devices count in the database
+    $updateSql = "UPDATE devices SET connected_devices = :connectedClientsCount WHERE id = :id";
+    $updateStmt = $db->prepare($updateSql);
+    $updateStmt->execute([
+        ':connectedClientsCount' => $connectedClientsCount,
+        ':id' => $deviceId
+    ]);
+
+    // Refresh the device data after update
+    $device = getDevice($db, $deviceId);
+    $device['connectedClients'] = $connectedClientsCount;
+
     // Always get the latest uptime value from parameters table
     $latestUptime = getParameterValue($db, $deviceId, 'UpTime');
     if ($latestUptime) {
@@ -704,59 +732,3 @@ try {
         // Toggle sidebar on small screens
         document.addEventListener('DOMContentLoaded', function() {
             const mediaQuery = window.matchMedia('(max-width: 768px)');
-            if (mediaQuery.matches) {
-                const sidebar = document.querySelector('.sidebar');
-                if (sidebar) {
-                    sidebar.classList.add('collapse');
-                }
-            }
-            
-            // Add optical readings refresh handler
-            const refreshOpticalBtn = document.getElementById('refresh-optical');
-            if (refreshOpticalBtn) {
-                refreshOpticalBtn.addEventListener('click', function() {
-                    this.disabled = true;
-                    this.innerHTML = '<i class="bx bx-loader-alt bx-spin me-1"></i> Refreshing...';
-                    
-                    // Create an AJAX request to refresh optical readings
-                    const xhr = new XMLHttpRequest();
-                    xhr.open('GET', 'backend/api/refresh_optical.php?id=<?php echo $deviceId; ?>', true);
-                    xhr.onload = function() {
-                        if (this.status >= 200 && this.status < 300) {
-                            // Reload the page to show updated data
-                            window.location.reload();
-                        } else {
-                            alert('Error refreshing optical readings');
-                            refreshOpticalBtn.disabled = false;
-                            refreshOpticalBtn.innerHTML = '<i class="bx bx-refresh me-1"></i> Refresh Optical Readings';
-                        }
-                    };
-                    xhr.onerror = function() {
-                        alert('Network error while refreshing optical readings');
-                        refreshOpticalBtn.disabled = false;
-                        refreshOpticalBtn.innerHTML = '<i class="bx bx-refresh me-1"></i> Refresh Optical Readings';
-                    };
-                    xhr.send();
-                });
-            }
-            
-            // Add main data refresh handler
-            const refreshDataBtn = document.getElementById('refresh-data-btn');
-            if (refreshDataBtn) {
-                refreshDataBtn.addEventListener('click', function() {
-                    this.disabled = true;
-                    this.innerHTML = '<i class="bx bx-loader-alt bx-spin me-1"></i> Refreshing...';
-                    
-                    // Simple reload to get the latest data
-                    window.location.reload();
-                });
-            }
-            
-            // Set auto-refresh every 60 seconds to keep data current
-            setTimeout(function() {
-                window.location.reload();
-            }, 60000); // 60 seconds
-        });
-    </script>
-</body>
-</html>
