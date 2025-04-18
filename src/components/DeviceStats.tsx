@@ -66,7 +66,7 @@ export const DeviceStats = ({ device }: DeviceStatsProps) => {
           <RouterIcon className="h-4 w-4 mr-2 text-blue-500" />
           <h3 className="text-sm font-medium text-gray-500">Connected Clients</h3>
         </div>
-        <p className="text-2xl font-bold">{device.connectedClients || '0'}</p>
+        <p className="text-2xl font-bold">{device.connectedDevices || '0'}</p>
       </Card>
       
       <Card className="p-4 bg-gradient-to-br from-white to-blue-50 border border-blue-100 shadow-sm">

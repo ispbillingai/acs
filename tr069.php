@@ -105,7 +105,7 @@ function saveParameterValues($raw, $serialNumber, $db) {
         'HardwareVersion' => 'hardware_version',
         'UpTime' => 'uptime',
         'SSID' => 'ssid',
-        'HostNumberOfEntries' => 'connected_clients'
+        'HostNumberOfEntries' => 'connected_devices'  // Updated from connected_clients to connected_devices
     ];
     
     // Extract parameters from the response
@@ -130,7 +130,7 @@ function saveParameterValues($raw, $serialNumber, $db) {
             }
         }
     }
-    //everything working
+    
     // Update database if we have values
     if (!empty($pairs)) {
         try {
@@ -451,7 +451,6 @@ try {
             } elseif (isset($_SESSION['in_progress_task'])) {
                 $current_task = $_SESSION['in_progress_task'];
                 tr069_log("Using in-progress task from session: " . $current_task['id'], "DEBUG");
-
                 
                 // Clear the session task as it's now processed
                 unset($_SESSION['in_progress_task']);
@@ -473,7 +472,6 @@ try {
             $GLOBALS['current_task'] = null;
         } else {
             tr069_log("No current task found to update status", "WARNING");
-
             
             // Try to find the most recent in-progress task for this device
             try {

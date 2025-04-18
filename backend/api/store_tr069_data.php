@@ -1,3 +1,4 @@
+
 <?php
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -373,7 +374,7 @@ try {
         
         // Update the connected clients count in the devices table
         $updateClientCountSql = "UPDATE devices SET 
-                                connected_clients = (
+                                connected_devices = (
                                     SELECT COUNT(*) FROM connected_clients 
                                     WHERE device_id = :deviceId AND is_active = 1
                                 )
