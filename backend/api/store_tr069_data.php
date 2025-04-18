@@ -96,6 +96,7 @@ try {
             $ipAddress = $value;
         } else if (strpos($name, 'HostNumberOfEntries') !== false) {
             $hostCount = intval($value);
+            writeLog("Found HostNumberOfEntries = " . $hostCount, true);
         } else if (preg_match('/Hosts\.Host\.(\d+)\./', $name, $matches)) {
             $hostIndex = $matches[1];
             $hostParts = explode('.', $name);
@@ -145,10 +146,13 @@ try {
         'modelName' => $modelName ?? 'Unknown',
         'ipAddress' => $ipAddress ?? $_SERVER['REMOTE_ADDR'],
         'parameters' => $parameters,
-        'connectedHosts' => array_values($hosts)
+        'connectedHosts' => array_values($hosts),
+        'hostCount' => $hostCount  // Add explicit hostCount field
     ];
     
     writeLog("Processing device data for: " . $serialNumber, true);
+    writeLog("Host count from router: " . $hostCount, true);
+    writeLog("Connected hosts count: " . count($data['connectedHosts']), true);
     
     // Direct database update - critical section
     try {
@@ -171,13 +175,15 @@ try {
                 model_name, 
                 ip_address, 
                 status, 
+                connected_clients,
                 last_contact
             ) VALUES (
                 :serialNumber, 
                 :manufacturer, 
                 :modelName, 
                 :ipAddress, 
-                'online', 
+                'online',
+                :connectedClients,
                 NOW()
             )";
             
@@ -186,7 +192,8 @@ try {
                 ':serialNumber' => $data['serialNumber'],
                 ':manufacturer' => $data['manufacturer'],
                 ':modelName' => $data['modelName'],
-                ':ipAddress' => $data['ipAddress']
+                ':ipAddress' => $data['ipAddress'],
+                ':connectedClients' => $hostCount
             ]);
             
             if (!$insertResult) {
@@ -204,6 +211,7 @@ try {
                 manufacturer = :manufacturer,
                 model_name = :modelName,
                 ip_address = :ipAddress,
+                connected_clients = :connectedClients,
                 status = 'online',
                 last_contact = NOW()
                 WHERE id = :id";
@@ -213,8 +221,11 @@ try {
                 ':manufacturer' => $data['manufacturer'],
                 ':modelName' => $data['modelName'],
                 ':ipAddress' => $data['ipAddress'],
+                ':connectedClients' => $hostCount,
                 ':id' => $deviceId
             ]);
+            
+            writeLog("Device update with connected_clients = " . $hostCount, true);
             
             if (!$updateResult) {
                 writeLog("Failed to update device: " . $serialNumber, true);

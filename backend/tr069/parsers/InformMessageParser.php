@@ -132,6 +132,11 @@ class InformMessageParser {
                         $name = (string)$param->Name;
                         $value = (string)$param->Value;
 
+                        // Log host count parameter explicitly
+                        if (strpos($name, 'HostNumberOfEntries') !== false) {
+                            error_log("INFORM: Found HostNumberOfEntries = $value");
+                        }
+
                         // Map standard parameters
                         if (isset($this->parameterMap[$name])) {
                             $key = $this->parameterMap[$name];
