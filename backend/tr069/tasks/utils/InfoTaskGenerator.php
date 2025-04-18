@@ -3,42 +3,9 @@
 
 class InfoTaskGenerator {
     private $logger;
-    private $db;
     
     public function __construct($logger) {
         $this->logger = $logger;
-        
-        // Initialize database connection
-        require_once __DIR__ . '/../../../../config/database.php';
-        $database = new Database();
-        $this->db = $database->getConnection();
-    }
-
-    private function updateDeviceInfo($data, $serialNumber) {
-        try {
-            $sql = "UPDATE devices SET 
-                    hardware_version = :hardware_version,
-                    software_version = :software_version,
-                    uptime = :uptime,
-                    ip_address = :ip_address,
-                    connected_clients = :connected_clients,
-                    last_contact = NOW()
-                    WHERE serial_number = :serial_number";
-
-            $stmt = $this->db->prepare($sql);
-            $stmt->execute([
-                ':hardware_version' => $data['hardware_version'] ?? null,
-                ':software_version' => $data['software_version'] ?? null,
-                ':uptime' => $data['uptime'] ?? null,
-                ':ip_address' => $data['ip_address'] ?? null,
-                ':connected_clients' => $data['connected_clients'] ?? 0,
-                ':serial_number' => $serialNumber
-            ]);
-            
-            $this->logger->logToFile("Updated device info for serial: $serialNumber");
-        } catch (Exception $e) {
-            $this->logger->logToFile("Error updating device info: " . $e->getMessage());
-        }
     }
 
     public function generateParameters(array $data) {
@@ -73,39 +40,7 @@ class InfoTaskGenerator {
 
         return [
             'method' => 'GetParameterValues',
-            'parameterNames' => $names,
-            'updateCallback' => function($params, $serialNumber) {
-                // Process and map the parameters to database columns
-                $deviceData = [];
-                
-                foreach ($params as $param) {
-                    $name = $param[1];
-                    $value = $param[2];
-                    
-                    switch ($name) {
-                        case 'InternetGatewayDevice.DeviceInfo.HardwareVersion':
-                            $deviceData['hardware_version'] = $value;
-                            break;
-                        case 'InternetGatewayDevice.DeviceInfo.SoftwareVersion':
-                            $deviceData['software_version'] = $value;
-                            break;
-                        case 'InternetGatewayDevice.DeviceInfo.UpTime':
-                            $deviceData['uptime'] = intval($value);
-                            break;
-                        case 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress':
-                            $deviceData['ip_address'] = $value;
-                            break;
-                        case 'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries':
-                            $deviceData['connected_clients'] = intval($value);
-                            break;
-                    }
-                }
-                
-                // Update the database
-                if (!empty($deviceData)) {
-                    $this->updateDeviceInfo($deviceData, $serialNumber);
-                }
-            }
+            'parameterNames' => $names
         ];
     }
 }
