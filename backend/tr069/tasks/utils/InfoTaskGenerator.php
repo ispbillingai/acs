@@ -18,12 +18,7 @@ class InfoTaskGenerator {
             'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DNSServers',
             'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.SubnetMask',
             'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DefaultGateway',
-            'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries',
-            // Add optical power parameters (GPON/EPON)
-            'InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.TXPower',
-            'InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.RXPower',
-            'InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.TXPower',
-            'InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.RXPower'
+            'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries'
         ];
 
         // First get number of hosts to know how many host parameters to request
@@ -49,3 +44,4 @@ class InfoTaskGenerator {
         ];
     }
 }
+
