@@ -203,7 +203,6 @@ try {
             
             $deviceId = $db->lastInsertId();
             writeLog("New device created: " . $serialNumber, true);
-            writeLog("Initial connected_clients set to: " . $hostCount, true);
         } else {
             $deviceId = $device['id'];
             
@@ -231,13 +230,6 @@ try {
             if (!$updateResult) {
                 writeLog("Failed to update device: " . $serialNumber, true);
                 throw new Exception("Failed to update device");
-            } else {
-                // Verify the update was successful
-                $verifySql = "SELECT connected_clients FROM devices WHERE id = :id";
-                $verifyStmt = $db->prepare($verifySql);
-                $verifyStmt->execute([':id' => $deviceId]);
-                $currentValue = $verifyStmt->fetchColumn();
-                writeLog("VERIFICATION: connected_clients value after update: " . $currentValue, true);
             }
         }
         
@@ -396,23 +388,6 @@ try {
                                 WHERE id = :deviceId";
         $updateClientCountStmt = $db->prepare($updateClientCountSql);
         $updateClientCountStmt->execute([':deviceId' => $deviceId]);
-        
-        // Verify the update was successful
-        $verifyCountSql = "SELECT connected_clients FROM devices WHERE id = :id";
-        $verifyCountStmt = $db->prepare($verifyCountSql);
-        $verifyCountStmt->execute([':id' => $deviceId]);
-        $finalCount = $verifyCountStmt->fetchColumn();
-        writeLog("FINAL connected_clients count after all updates: " . $finalCount, true);
-        
-        // Force another update to make sure the value sticks
-        $forceUpdateSql = "UPDATE devices SET connected_clients = :count WHERE id = :id";
-        $forceUpdateStmt = $db->prepare($forceUpdateSql);
-        $forceUpdateStmt->execute([
-            ':count' => max($hostCount, count($data['connectedHosts'])), 
-            ':id' => $deviceId
-        ]);
-        
-        writeLog("FORCED connected_clients update to: " . max($hostCount, count($data['connectedHosts'])), true);
         
         // Commit the transaction
         $db->commit();

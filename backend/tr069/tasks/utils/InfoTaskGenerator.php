@@ -19,14 +19,13 @@ class InfoTaskGenerator {
             'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DNSServers',
             'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.SubnetMask',
             'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DefaultGateway',
-            'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries' // This is the critical parameter for connected_clients
+            'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries'
         ];
 
         // First get number of hosts to know how many host parameters to request
         $hostCount = $data['host_count'] ?? 0;
         
         $this->logger->logToFile("InfoTaskGenerator building for host_count: {$hostCount}");
-        $this->logger->logToFile("IMPORTANT: Explicitly requesting HostNumberOfEntries parameter");
         
         // If we have hosts, add parameters for each host
         if ($hostCount > 0) {
