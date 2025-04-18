@@ -37,6 +37,7 @@ export const ConnectedHosts = ({ deviceId, refreshTrigger }: ConnectedHostsProps
   const fetchHosts = async () => {
     try {
       setLoading(true);
+      console.log("Fetching hosts for device ID:", deviceId);
       const response = await fetch(`/backend/api/devices.php?id=${deviceId}`);
       
       if (!response.ok) {
@@ -44,6 +45,7 @@ export const ConnectedHosts = ({ deviceId, refreshTrigger }: ConnectedHostsProps
       }
       
       const data = await response.json();
+      console.log("Fetched device data:", data);
       
       if (data.connectedHosts && Array.isArray(data.connectedHosts)) {
         setHosts(data.connectedHosts.map((host: any) => ({
@@ -55,7 +57,9 @@ export const ConnectedHosts = ({ deviceId, refreshTrigger }: ConnectedHostsProps
           isActive: host.isActive
         })));
         setHostCount(data.connectedHosts.length);
+        console.log("Processed host data:", hosts);
       } else {
+        console.log("No connected hosts found in the response");
         setHosts([]);
         setHostCount(0);
       }
@@ -79,6 +83,7 @@ export const ConnectedHosts = ({ deviceId, refreshTrigger }: ConnectedHostsProps
         description: "Requesting latest data from router...",
       });
       
+      console.log("Refreshing router data...");
       const response = await fetch('/backend/api/store_tr069_data.php', {
         method: 'POST'
       });
@@ -88,6 +93,7 @@ export const ConnectedHosts = ({ deviceId, refreshTrigger }: ConnectedHostsProps
       }
       
       const result = await response.json();
+      console.log("Refresh result:", result);
       
       if (result.success) {
         toast({
@@ -115,9 +121,11 @@ export const ConnectedHosts = ({ deviceId, refreshTrigger }: ConnectedHostsProps
 
   // Set up auto-refresh every 30 seconds
   useEffect(() => {
+    console.log("ConnectedHosts component mounted or refreshTrigger changed");
     fetchHosts();
     
     const intervalId = setInterval(() => {
+      console.log("Auto-refreshing hosts data");
       fetchHosts();
     }, 30000);
     

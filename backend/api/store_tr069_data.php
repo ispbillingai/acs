@@ -318,7 +318,7 @@ try {
                         $updateHostSql = "UPDATE connected_clients SET 
                             hostname = :hostname,
                             mac_address = :macAddress,
-                            is_active = 1,
+                            is_active = :isActive,
                             last_seen = NOW()
                             WHERE id = :id";
                         
@@ -326,6 +326,7 @@ try {
                         $updateHostResult = $updateHostStmt->execute([
                             ':hostname' => $host['hostname'] ?? '',
                             ':macAddress' => $host['macAddress'] ?? '',
+                            ':isActive' => isset($host['isActive']) ? ($host['isActive'] ? 1 : 0) : 1,
                             ':id' => $existingHost['id']
                         ]);
                         
@@ -346,7 +347,7 @@ try {
                             :ipAddress,
                             :hostname,
                             :macAddress,
-                            1,
+                            :isActive,
                             NOW()
                         )";
                         
@@ -355,7 +356,8 @@ try {
                             ':deviceId' => $deviceId,
                             ':ipAddress' => $host['ipAddress'],
                             ':hostname' => $host['hostname'] ?? '',
-                            ':macAddress' => $host['macAddress'] ?? ''
+                            ':macAddress' => $host['macAddress'] ?? '',
+                            ':isActive' => isset($host['isActive']) ? ($host['isActive'] ? 1 : 0) : 1
                         ]);
                         
                         if ($insertHostResult) {
@@ -386,7 +388,9 @@ try {
         echo json_encode([
             'success' => true,
             'message' => 'Device parameters updated successfully',
-            'deviceId' => $deviceId
+            'deviceId' => $deviceId,
+            'parameters' => $paramSuccess ?? 0,
+            'hosts' => $hostSuccess ?? 0
         ]);
         
     } catch (Exception $e) {
