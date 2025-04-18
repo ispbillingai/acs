@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -46,21 +47,23 @@ export const ConnectedHosts = ({ deviceId, refreshTrigger }: ConnectedHostsProps
       const data = await response.json();
       console.log("Fetched device data:", data);
       
-      if (data.connectedHosts && Array.isArray(data.connectedHosts)) {
-        setHosts(data.connectedHosts.map((host: any) => ({
-          id: host.id,
-          ipAddress: host.ipAddress,
-          hostname: host.hostname || 'Unknown Device',
-          macAddress: host.macAddress,
-          lastSeen: host.lastSeen,
-          isActive: host.isActive
-        })));
-        setHostCount(data.connected_devices || 0); // Use the direct value from database
-        console.log("Processed host data:", hosts);
-      } else {
-        console.log("No connected hosts found in the response");
-        setHosts([]);
-        setHostCount(0);
+      if (data.device) {
+        // Directly use the connected_devices value from the database
+        setHostCount(data.device.connected_devices || 0);
+        
+        // Set the hosts array if available
+        if (data.device.connectedHosts && Array.isArray(data.device.connectedHosts)) {
+          setHosts(data.device.connectedHosts.map((host: any) => ({
+            id: host.id,
+            ipAddress: host.ipAddress,
+            hostname: host.hostname || 'Unknown Device',
+            macAddress: host.macAddress,
+            lastSeen: host.lastSeen,
+            isActive: host.isActive
+          })));
+        } else {
+          setHosts([]);
+        }
       }
     } catch (error) {
       console.error("Error fetching hosts:", error);

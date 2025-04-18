@@ -1,4 +1,3 @@
-
 <?php
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -103,9 +102,7 @@ function getDevices($db) {
 
 function getDevice($db, $id) {
     try {
-        writeLog("Fetching device with ID: " . $id);
-        
-        // First get the device basic info
+        // Get device basic info including connected_devices
         $deviceSql = "SELECT 
                 d.*,
                 d.serial_number as serialNumber,
@@ -114,7 +111,7 @@ function getDevice($db, $id) {
                 d.software_version as softwareVersion,
                 d.hardware_version as hardwareVersion,
                 d.last_contact as lastContact,
-                d.connected_devices as connectedDevices
+                d.connected_devices
                 FROM devices d
                 WHERE d.id = :id";
         
@@ -142,7 +139,7 @@ function getDevice($db, $id) {
             'ipAddress' => $device['ipAddress'],
             'softwareVersion' => $device['softwareVersion'],
             'hardwareVersion' => $device['hardwareVersion'],
-            'connected_devices' => $device['connectedDevices'], // Make sure we pass the connected_devices value
+            'connected_devices' => intval($device['connected_devices']), // Ensure we return the connected_devices value
             'parameters' => [],
             'connectedHosts' => []
         ];
@@ -183,7 +180,7 @@ function getDevice($db, $id) {
         $fiveMinutesAgo = strtotime('-5 minutes');
         $result['status'] = $lastContact >= $fiveMinutesAgo ? 'online' : 'offline';
         
-        echo json_encode($result);
+        echo json_encode(['success' => true, 'device' => $result]);
     } catch (PDOException $e) {
         writeLog("Database error in getDevice: " . $e->getMessage());
         http_response_code(500);
