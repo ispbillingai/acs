@@ -130,7 +130,7 @@ function saveParameterValues($raw, $serialNumber, $db) {
             }
         }
     }
-    
+    //everything working
     // Update database if we have values
     if (!empty($pairs)) {
         try {
