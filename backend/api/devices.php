@@ -69,7 +69,8 @@ function getDevices($db) {
                 last_contact as lastContact,
                 ip_address as ipAddress,
                 software_version as softwareVersion,
-                hardware_version as hardwareVersion
+                hardware_version as hardwareVersion,
+                connected_devices as connectedDevices
                 FROM devices 
                 ORDER BY last_contact DESC";
         
@@ -111,7 +112,8 @@ function getDevice($db, $id) {
                 d.ip_address as ipAddress,
                 d.software_version as softwareVersion,
                 d.hardware_version as hardwareVersion,
-                d.last_contact as lastContact
+                d.last_contact as lastContact,
+                d.connected_devices as connectedDevices
                 FROM devices d
                 WHERE d.id = :id";
         

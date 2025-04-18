@@ -1,4 +1,3 @@
-
 -- Simplified Devices table with additional Mikrotik parameters
 CREATE TABLE IF NOT EXISTS devices (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -16,7 +15,7 @@ CREATE TABLE IF NOT EXISTS devices (
     uptime INT UNSIGNED,
     local_admin_password VARCHAR(255),
     tr069_password VARCHAR(255),
-    connected_clients INT DEFAULT 0,
+    connected_devices VARCHAR(255) DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );

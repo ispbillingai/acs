@@ -1,4 +1,3 @@
-
 <?php
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -205,6 +204,7 @@ try {
                 model_name = :modelName,
                 ip_address = :ipAddress,
                 status = 'online',
+                connected_devices = :connected_devices,
                 last_contact = NOW()
                 WHERE id = :id";
             
@@ -213,6 +213,7 @@ try {
                 ':manufacturer' => $data['manufacturer'],
                 ':modelName' => $data['modelName'],
                 ':ipAddress' => $data['ipAddress'],
+                ':connected_devices' => $hostCount > 0 ? strval($hostCount) : NULL,
                 ':id' => $deviceId
             ]);
             
