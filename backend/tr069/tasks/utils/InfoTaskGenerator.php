@@ -1,14 +1,21 @@
-
 <?php
 
 class InfoTaskGenerator {
     private $logger;
+    private $opticalTester;
     
     public function __construct($logger) {
         $this->logger = $logger;
+        $this->opticalTester = new OpticalParameterTester($logger);
     }
 
     public function generateParameters(array $data) {
+        // If optical test is requested
+        if (isset($data['test_optical']) && $data['test_optical'] === true) {
+            $this->logger->logToFile("InfoTaskGenerator: Using optical parameter tester");
+            return $this->opticalTester->generateTestParameters();
+        }
+
         // Core device info parameters
         $names = [
             'InternetGatewayDevice.DeviceInfo.HardwareVersion',
@@ -44,4 +51,3 @@ class InfoTaskGenerator {
         ];
     }
 }
-
