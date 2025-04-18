@@ -1,3 +1,4 @@
+
 <?php
 
 error_reporting(E_ALL);
@@ -689,4 +690,52 @@ try {
 <soapenv:Envelope
     xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
     xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
-    xmlns:xsi="http://www.w3.org/200
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+  </soapenv:Body>
+</soapenv:Envelope>';
+        exit;
+    }
+    
+    // Fall-through - no match for request type, echo a generic empty response
+    header('Content-Type: text/xml');
+    echo '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">1</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+  </soapenv:Body>
+</soapenv:Envelope>';
+    
+} catch (Exception $e) {
+    // Log any uncaught exceptions
+    tr069_log("Unhandled exception: " . $e->getMessage(), "ERROR");
+    tr069_log("Stack trace: " . $e->getTraceAsString(), "ERROR");
+    
+    header('HTTP/1.1 500 Internal Server Error');
+    echo '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">1</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <soapenv:Fault>
+      <faultcode>Server</faultcode>
+      <faultstring>Internal Server Error</faultstring>
+    </soapenv:Fault>
+  </soapenv:Body>
+</soapenv:Envelope>';
+}
