@@ -1,3 +1,4 @@
+
 <?php
 
 error_reporting(E_ALL);
@@ -61,40 +62,22 @@ function saveParameterValues($raw, $serialNumber, $db) {
     $timestamp = date('Y-m-d H:i:s');
     file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Extracted parameters: " . print_r($matches, true) . "\n", FILE_APPEND);
     
-    // Convert the raw parameters to a more structured format for the DatabaseUpdater
-    $parameters = [];
     foreach ($matches as $param) {
         $name = $param[1];
         $value = $param[2];
         
-        // Only include parameters with values
-        if (!empty($value)) {
-            $parameters[] = [
-                'name' => $name,
-                'value' => $value
-            ];
-            
-            // Continue with existing mapping logic for backward compatibility
-            foreach ($map as $needle => $column) {
-                if (strpos($name, $needle) !== false) {
-                    $pairs[$column] = $value;
-                    file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Mapped $name to $column = $value\n", FILE_APPEND);
-                }
+        // Ignore empty values
+        if (empty($value)) continue;
+        
+        // Try to match parameter name to database column
+        foreach ($map as $needle => $column) {
+            if (strpos($name, $needle) !== false) {
+                $pairs[$column] = $value;
+                file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Mapped $name to $column = $value\n", FILE_APPEND);
             }
         }
     }
     
-    // Use the new DatabaseUpdater to update the device
-    $dbUpdater = new DatabaseUpdater(new class {
-        public function logToFile($message) {
-            tr069_log($message, "INFO");
-        }
-    });
-    
-    // Update the device with the parameters
-    $dbUpdater->updateDeviceFromParameters($serialNumber, $parameters);
-    
-    // Continue with existing update logic for backward compatibility
     // Update database if we have values
     if (!empty($pairs)) {
         try {
@@ -127,8 +110,6 @@ require_once __DIR__ . '/backend/config/database.php';
 require_once __DIR__ . '/backend/tr069/auth/AuthenticationHandler.php';
 require_once __DIR__ . '/backend/tr069/responses/InformResponseGenerator.php';
 require_once __DIR__ . '/backend/tr069/tasks/TaskHandler.php';
-// Include the new DatabaseUpdater
-require_once __DIR__ . '/backend/tr069/utils/DatabaseUpdater.php';
 
 // Process the TR-069 request
 try {
@@ -696,4 +677,67 @@ try {
                     exit;
                 }
             } else {
-                tr069_log("Failed to generate parameters
+                tr069_log("Failed to generate parameters for task {$current_task['id']}", "ERROR");
+                $taskHandler->updateTaskStatus($current_task['id'], 'failed', 'Failed to generate parameters');
+            }
+        } else {
+            tr069_log("No pending tasks to process", "DEBUG");
+        }
+        
+        // If we get here, we're done with this session
+        header('Content-Type: text/xml');
+        echo '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+  </soapenv:Body>
+</soapenv:Envelope>';
+        exit;
+    }
+    
+    // Fall-through - no match for request type, echo a generic empty response
+    header('Content-Type: text/xml');
+    echo '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">1</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+  </soapenv:Body>
+</soapenv:Envelope>';
+    
+} catch (Exception $e) {
+    // Log any uncaught exceptions
+    tr069_log("Unhandled exception: " . $e->getMessage(), "ERROR");
+    tr069_log("Stack trace: " . $e->getTraceAsString(), "ERROR");
+    
+    header('HTTP/1.1 500 Internal Server Error');
+    echo '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">1</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <soapenv:Fault>
+      <faultcode>Server</faultcode>
+      <faultstring>Internal Server Error</faultstring>
+    </soapenv:Fault>
+  </soapenv:Body>
+</soapenv:Envelope>';
+}
+
+//working very well till here

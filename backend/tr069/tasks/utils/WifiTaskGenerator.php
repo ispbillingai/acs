@@ -40,11 +40,6 @@ class WifiTaskGenerator
             return null;
         }
 
-        // Store SSID in the database if serial number is provided
-        if (isset($data['serial_number']) && !empty($data['serial_number'])) {
-            $this->updateDeviceWifiInfo($data['serial_number'], $ssid, $password);
-        }
-
         // Build ParameterValueStruct list
         $params = [];
         $this->addRadioParams($params, $inst24, $ssid, $password);
@@ -71,44 +66,6 @@ class WifiTaskGenerator
     }
 
     // ---------------------------------------------------------------------
-    
-    /**
-     * Updates device WiFi information in the database
-     */
-    private function updateDeviceWifiInfo($serialNumber, $ssid, $password)
-    {
-        try {
-            $this->log("Updating WiFi info for device: $serialNumber");
-            
-            // Get database connection
-            require_once __DIR__ . '/../../../config/database.php';
-            $database = new Database();
-            $db = $database->getConnection();
-            
-            // Update the SSID and password
-            $updateSql = "UPDATE devices SET 
-                          ssid = :ssid,
-                          ssid_password = :password,
-                          updated_at = NOW()
-                          WHERE serial_number = :serial_number";
-            
-            $stmt = $db->prepare($updateSql);
-            $result = $stmt->execute([
-                ':ssid' => $ssid,
-                ':password' => !empty($password) ? $password : null,
-                ':serial_number' => $serialNumber
-            ]);
-            
-            if ($result) {
-                $this->log("Successfully updated WiFi info in database for device: $serialNumber");
-            } else {
-                $this->log("Failed to update WiFi info: " . print_r($stmt->errorInfo(), true));
-            }
-        } catch (\PDOException $e) {
-            $this->log("Database error updating WiFi info: " . $e->getMessage());
-        }
-    }
-    
     private function addRadioParams(array &$params, int $instance, string $ssid, string $password): void
     {
         $this->log("Building params for WLANConfiguration instance $instance");
@@ -148,3 +105,4 @@ class WifiTaskGenerator
         $this->logger->logToFile('WifiTaskGenerator: ' . $msg);
     }
 }
+//Working upto here//
