@@ -45,7 +45,7 @@ try {
                     'uptime' => $row['uptime'],
                     'localAdminPassword' => $row['local_admin_password'],
                     'tr069Password' => $row['tr069_password'],
-                    'connectedClients' => $row['connected_clients']
+                    'connectedClients' => $row['connected_devices']
                 ];
                 return $device;
             }
@@ -141,7 +141,7 @@ try {
     // Update the device record with the latest values
     $updateSql = "UPDATE devices SET 
                     uptime = :uptime, 
-                    connected_clients = :connectedClients 
+                    connected_devices = :connectedClients 
                 WHERE id = :id";
     $updateStmt = $db->prepare($updateSql);
     $updateStmt->execute([
