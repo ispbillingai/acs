@@ -40,6 +40,8 @@ try {
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             
             if ($row) {
+                debug_log("Raw device data from database", $row);
+                
                 $device = [
                     'id' => $row['id'],
                     'serialNumber' => $row['serial_number'],
@@ -55,14 +57,90 @@ try {
                     'uptime' => $row['uptime'],
                     'localAdminPassword' => $row['local_admin_password'],
                     'tr069Password' => $row['tr069_password'],
+                    // Use connected_devices directly without modification
                     'connectedClients' => $row['connected_devices']
                 ];
+                
+                debug_log("Connected devices value from DB", ['connected_devices' => $row['connected_devices']]);
+                
                 return $device;
             }
             
             return null;
         } catch (PDOException $e) {
+            debug_log("Error in getDevice function", ['error' => $e->getMessage()]);
             return null;
+        }
+    }
+
+    // Get parameter value from parameters table
+    function getParameterValue($db, $deviceId, $paramName) {
+        try {
+            $sql = "SELECT param_value FROM parameters WHERE device_id = :deviceId AND param_name LIKE :paramName LIMIT 1";
+            $stmt = $db->prepare($sql);
+            $stmt->execute([
+                ':deviceId' => $deviceId,
+                ':paramName' => "%$paramName%"
+            ]);
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if ($result) {
+                return $result['param_value'];
+            }
+            return null;
+        } catch (PDOException $e) {
+            return null;
+        }
+    }
+    
+    // Format uptime from seconds to a more readable format
+    function formatUptime($seconds) {
+        if (!$seconds) return null;
+        
+        $seconds = intval($seconds);
+        $days = floor($seconds / 86400);
+        $hours = floor(($seconds % 86400) / 3600);
+        $minutes = floor(($seconds % 3600) / 60);
+        
+        if ($days > 0) {
+            return "$days days, $hours hours, $minutes minutes";
+        } else if ($hours > 0) {
+            return "$hours hours, $minutes minutes";
+        } else if ($minutes > 0) {
+            return "$minutes minutes";
+        } else {
+            return "$seconds seconds";
+        }
+    }
+    
+    // Get connected clients with details
+    function getConnectedClients($db, $deviceId) {
+        try {
+            $sql = "SELECT * FROM connected_clients WHERE device_id = :deviceId AND is_active = 1";
+            $stmt = $db->prepare($sql);
+            $stmt->execute([':deviceId' => $deviceId]);
+            $clients = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            debug_log("Connected clients query result", ['count' => count($clients)]);
+            return $clients;
+        } catch (PDOException $e) {
+            debug_log("Error in getConnectedClients function", ['error' => $e->getMessage()]);
+            return [];
+        }
+    }
+
+    // Count active connected clients
+    function countConnectedClients($db, $deviceId) {
+        try {
+            $sql = "SELECT COUNT(*) as count FROM connected_clients WHERE device_id = :deviceId AND is_active = 1";
+            $stmt = $db->prepare($sql);
+            $stmt->execute([':deviceId' => $deviceId]);
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            $count = $result ? intval($result['count']) : 0;
+            debug_log("Counted connected clients", ['count' => $count]);
+            return $count;
+        } catch (PDOException $e) {
+            debug_log("Error in countConnectedClients function", ['error' => $e->getMessage()]);
+            return 0;
         }
     }
 
@@ -81,7 +159,13 @@ try {
         $device['uptime'] = $latestUptime;
         debug_log("Updated uptime value", ['uptime' => $latestUptime]);
     }
+    
+    // Remove the lines that were recalculating connectedClients
+    $connectedClientsCount = countConnectedClients($db, $deviceId);
+    $device['connectedClients'] = $device['connectedClients']; // Keep original value
 
+    // Remove the update SQL that was changing the connected_devices value
+    
     // Check for missing values in device table but exist in parameters
     $keysToCheck = [
         ['deviceKey' => 'ssid', 'paramName' => 'SSID', 'dbColumn' => 'ssid'],
@@ -165,7 +249,6 @@ try {
     debug_log("Fatal error in device.php", ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
     die("An error occurred");
 }
-
 ?>
 
 <!DOCTYPE html>
@@ -638,9 +721,4 @@ try {
     <script>
         // Initialize tooltips
         var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
-        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
-            return new bootstrap.Tooltip(tooltipTriggerEl)
-        })
-    </script>
-</body>
-</html>
+        var tooltipList = tooltip
