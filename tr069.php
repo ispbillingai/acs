@@ -134,11 +134,22 @@ try {
                 }
             }
             
-            // Auto-queue info task if key fields are null
+            // Auto-queue info task only if no pending or in-progress info tasks exist
             try {
-                $deviceStmt = $db->prepare("SELECT * FROM devices WHERE serial_number = :s");
+                $deviceStmt = $db->prepare("SELECT id, ip_address, software_version, ssid FROM devices WHERE serial_number = :s");
                 $deviceStmt->execute([':s' => $serialNumber]);
                 $deviceRow = $deviceStmt->fetch(PDO::FETCH_ASSOC);
+                $deviceId = $deviceRow['id'];
+
+                // Check for existing info tasks
+                $taskStmt = $db->prepare("
+                    SELECT COUNT(*) FROM device_tasks 
+                    WHERE device_id = :device_id 
+                    AND task_type = 'info' 
+                    AND status IN ('pending', 'in_progress')
+                ");
+                $taskStmt->execute([':device_id' => $deviceId]);
+                $infoTaskCount = $taskStmt->fetchColumn();
 
                 $needsInfo = (
                     empty($deviceRow['ip_address']) ||
@@ -146,39 +157,56 @@ try {
                     empty($deviceRow['ssid'])
                 );
 
-                if ($needsInfo) {
+                if ($needsInfo && $infoTaskCount == 0) {
                     $taskJson = json_encode(['names' => []]);
                     $ins = $db->prepare("
                         INSERT INTO device_tasks (device_id, task_type, task_data, status, created_at, updated_at)
                         VALUES (:d, 'info', :data, 'pending', NOW(), NOW())
-                        ON DUPLICATE KEY UPDATE id = id
                     ");
                     $ins->execute([
                         ':d' => $deviceRow['id'],
                         ':data' => $taskJson
                     ]);
                     tr069_log("Queued info task for device: $serialNumber", "INFO");
+                } elseif ($infoTaskCount > 0) {
+                    tr069_log("Skipped queuing info task for device: $serialNumber (existing info task pending or in_progress)", "INFO");
                 }
             } catch (PDOException $e) {
-                tr069_log("Error queuing info task: " . $e->getMessage(), "ERROR");
+                tr069_log("Error checking or queuing info task: " . $e->getMessage(), "ERROR");
             }
 
             // Look for pending tasks for this device
             $pendingTasks = $taskHandler->getPendingTasks($serialNumber);
 
             if (!empty($pendingTasks)) {
-                // Store the first task to process after Inform
+                // Store the first task to process
                 $GLOBALS['current_task'] = $pendingTasks[0];
                 tr069_log("Found pending task: " . $pendingTasks[0]['task_type'] . " - ID: " . $pendingTasks[0]['id'], "INFO");
                 
-                // Store the task in the session for later use
+                // Store task in database as current task
+                try {
+                    $stmt = $db->prepare("
+                        UPDATE devices 
+                        SET current_task_id = :task_id 
+                        WHERE serial_number = :serial
+                    ");
+                    $stmt->execute([
+                        ':task_id' => $pendingTasks[0]['id'],
+                        ':serial' => $serialNumber
+                    ]);
+                    tr069_log("Stored task {$pendingTasks[0]['id']} as current task for device: $serialNumber", "INFO");
+                } catch (PDOException $e) {
+                    tr069_log("Database error storing current task: " . $e->getMessage(), "ERROR");
+                }
+
+                // Initialize session
                 session_start();
                 $_SESSION['current_task'] = $pendingTasks[0];
                 $_SESSION['device_serial'] = $serialNumber;
-                $_SESSION['task_retries'] = 0; // Initialize retry counter
+                $_SESSION['task_retries'] = 0;
                 session_write_close();
             } else {
-                // Check for in-progress tasks that might need to be completed
+                // Check for in-progress tasks
                 try {
                     $deviceStmt = $db->prepare("SELECT id FROM devices WHERE serial_number = :serial_number");
                     $deviceStmt->execute([':serial_number' => $serialNumber]);
@@ -195,21 +223,22 @@ try {
                         $inProgressTask = $inProgressStmt->fetch(PDO::FETCH_ASSOC);
                         
                         if ($inProgressTask) {
-                            tr069_log("Found in-progress task that might need completion: " . $inProgressTask['task_type'] . " - ID: " . $inProgressTask['id'], "INFO");
+                            tr069_log("Found in-progress task: " . $inProgressTask['task_type'] . " - ID: " . $inProgressTask['id'], "INFO");
                             
-                            // Auto-complete tasks that have been in progress for more than 5 minutes
+                            // Check for timeout (5 minutes)
                             $taskTime = strtotime($inProgressTask['updated_at']);
                             $currentTime = time();
                             
-                            if (($currentTime - $taskTime) > 300) { // 5 minutes
-                                $taskHandler->updateTaskStatus($inProgressTask['id'], 'completed', 'Auto-completed after device reconnection');
-                                tr069_log("Auto-completed task ID: " . $inProgressTask['id'] . " after timeout", "INFO");
+                            if (($currentTime - $taskTime) > 300) {
+                                $taskHandler->updateTaskStatus($inProgressTask['id'], 'failed', 'Auto-failed after timeout');
+                                tr069_log("Auto-failed task ID: " . $inProgressTask['id'] . " after timeout", "INFO");
                             } else {
-                                // Add this to session to complete it in this session
+                                // Resume in-progress task
+                                $GLOBALS['current_task'] = $inProgressTask;
                                 session_start();
-                                $_SESSION['in_progress_task'] = $inProgressTask;
+                                $_SESSION['current_task'] = $inProgressTask;
                                 $_SESSION['device_serial'] = $serialNumber;
-                                $_SESSION['task_retries'] = 0; // Initialize retry counter
+                                $_SESSION['task_retries'] = 0;
                                 session_write_close();
                             }
                         }
@@ -218,14 +247,67 @@ try {
                     tr069_log("Database error checking in-progress tasks: " . $e->getMessage(), "ERROR");
                 }
             }
+
+            // If current task is an info task, send GetParameterValues immediately
+            if ($GLOBALS['current_task'] && $GLOBALS['current_task']['task_type'] === 'info') {
+                $current_task = $GLOBALS['current_task'];
+                $parameterRequest = $taskHandler->generateParameterValues($current_task['task_type'], $current_task['task_data']);
+                
+                if ($parameterRequest && $parameterRequest['method'] === 'GetParameterValues') {
+                    $names = $parameterRequest['parameterNames'];
+                    $n = count($names);
+                    
+                    $nameXml = '';
+                    foreach ($names as $nm) {
+                        $nameXml .= "        <string>$nm</string>\n";
+                    }
+                    
+                    $gpv = '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+                  xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+                  xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/"
+                  xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:GetParameterValues>
+      <ParameterNames soap-enc:arrayType="xsd:string[' . $n . ']">
+' . $nameXml . '      </ParameterNames>
+    </cwmp:GetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>';
+                    
+                    header('Content-Type: text/xml');
+                    echo $gpv;
+                    
+                    $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 'Sent GetParameterValues');
+                    tr069_log("Sent GetParameterValues (task {$current_task['id']}): " . implode(", ", $names), "INFO");
+                    exit;
+                }
+            }
+            
+            // Otherwise, send InformResponse
+            $response = $responseGenerator->createResponse($soapId);
+            tr069_log("Sending InformResponse", "DEBUG");
+            
+            header('Content-Type: text/xml');
+            echo $response;
+            exit;
         }
         
-        // Respond with InformResponse
-        $response = $responseGenerator->createResponse($soapId);
-        tr069_log("Sending InformResponse", "DEBUG");
-        
+        // Invalid Inform (no serial number)
+        tr069_log("Invalid Inform message: No serial number found", "ERROR");
         header('Content-Type: text/xml');
-        echo $response;
+        echo '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body/>
+</soapenv:Envelope>';
         exit;
     }
     
@@ -243,27 +325,42 @@ try {
         
         // Try to extract status if available
         preg_match('/<Status>(.*?)<\/Status>/s', $raw_post, $statusMatches);
-        $status = isset($statusMatches[1]) ? trim($statusMatches[1]) : '0'; // Default to success if not found
+        $status = isset($statusMatches[1]) ? trim($statusMatches[1]) : '0';
         
         tr069_log("Extracted status from response: $status", "INFO");
         
-        // Get current task from session or global variable
+        // Get current task from database or session
         $current_task = null;
-        if ($GLOBALS['current_task']) {
-            $current_task = $GLOBALS['current_task'];
-            tr069_log("Using task from global variable: " . $current_task['id'], "DEBUG");
-        } else {
-            session_start();
-            if (isset($_SESSION['current_task'])) {
-                $current_task = $_SESSION['current_task'];
-                tr069_log("Using task from session: " . $current_task['id'], "DEBUG");
-                unset($_SESSION['current_task'], $_SESSION['task_retries']);
-            } elseif (isset($_SESSION['in_progress_task'])) {
-                $current_task = $_SESSION['in_progress_task'];
-                tr069_log("Using in-progress task from session: " . $current_task['id'], "DEBUG");
-                unset($_SESSION['in_progress_task'], $_SESSION['task_retries']);
+        session_start();
+        $serialNumber = $_SESSION['device_serial'] ?? null;
+        if (isset($_SESSION['current_task'])) {
+            $current_task = $_SESSION['current_task'];
+            tr069_log("Using task from session: " . $current_task['id'], "DEBUG");
+        }
+        session_write_close();
+        
+        if (!$current_task && $serialNumber) {
+            try {
+                $deviceStmt = $db->prepare("
+                    SELECT current_task_id FROM devices 
+                    WHERE serial_number = :serial
+                ");
+                $deviceStmt->execute([':serial' => $serialNumber]);
+                $taskId = $deviceStmt->fetchColumn();
+                
+                if ($taskId) {
+                    $taskStmt = $db->prepare("
+                        SELECT * FROM device_tasks 
+                        WHERE id = :task_id 
+                        AND status = 'in_progress'
+                    ");
+                    $taskStmt->execute([':task_id' => $taskId]);
+                    $current_task = $taskStmt->fetch(PDO::FETCH_ASSOC);
+                    tr069_log("Retrieved task {$taskId} from database", "DEBUG");
+                }
+            } catch (PDOException $e) {
+                tr069_log("Database error retrieving current task: " . $e->getMessage(), "ERROR");
             }
-            session_write_close();
         }
         
         // Update task status
@@ -276,16 +373,28 @@ try {
                 tr069_log("Task failed: " . $current_task['id'] . " - Status: " . $status, "ERROR");
             }
             
+            // Clear current task in database
+            try {
+                $stmt = $db->prepare("
+                    UPDATE devices 
+                    SET current_task_id = NULL 
+                    WHERE serial_number = :serial
+                ");
+                $stmt->execute([':serial' => $serialNumber]);
+                tr069_log("Cleared current task for device: $serialNumber", "INFO");
+            } catch (PDOException $e) {
+                tr069_log("Database error clearing current task: " . $e->getMessage(), "ERROR");
+            }
+            
+            session_start();
+            unset($_SESSION['current_task'], $_SESSION['task_retries']);
+            session_write_close();
             $GLOBALS['current_task'] = null;
         } else {
-            tr069_log("No current task found to update status", "WARNING");
+            tr069_log("No current task found for SetParameterValuesResponse", "WARNING");
             
-            try {
-                session_start();
-                $serialNumber = isset($_SESSION['device_serial']) ? $_SESSION['device_serial'] : null;
-                session_write_close();
-                
-                if ($serialNumber) {
+            if ($serialNumber) {
+                try {
                     $deviceStmt = $db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
                     $deviceStmt->execute([':serial' => $serialNumber]);
                     $deviceId = $deviceStmt->fetchColumn();
@@ -303,18 +412,24 @@ try {
                         if ($inProgressTask) {
                             if ($status === '0') {
                                 $taskHandler->updateTaskStatus($inProgressTask['id'], 'completed', 'Successfully applied ' . $inProgressTask['task_type'] . ' configuration');
-                                tr069_log("Found and completed in-progress task: " . $inProgressTask['id'], "INFO");
+                                tr069_log("Completed in-progress task: " . $inProgressTask['id'], "INFO");
                             } else {
                                 $taskHandler->updateTaskStatus($inProgressTask['id'], 'failed', 'Device returned error status: ' . $status);
-                                tr069_log("Found and marked as failed in-progress task: " . $inProgressTask['id'] . " - Status: " . $status, "ERROR");
+                                tr069_log("Failed in-progress task: " . $inProgressTask['id'] . " - Status: " . $status, "ERROR");
                             }
-                        } else {
-                            tr069_log("No in-progress tasks found for device ID: $deviceId", "WARNING");
+                            
+                            // Clear current task
+                            $stmt = $db->prepare("
+                                UPDATE devices 
+                                SET current_task_id = NULL 
+                                WHERE serial_number = :serial
+                            ");
+                            $stmt->execute([':serial' => $serialNumber]);
                         }
                     }
+                } catch (PDOException $e) {
+                    tr069_log("Database error processing in-progress tasks: " . $e->getMessage(), "ERROR");
                 }
-            } catch (PDOException $e) {
-                tr069_log("Database error finding in-progress tasks: " . $e->getMessage(), "ERROR");
             }
         }
         
@@ -336,9 +451,9 @@ try {
     }
     
     // Check if this is an empty post (device asking for more commands)
-    if (empty(trim($raw_post)) || $raw_post === "\r\n" || stripos($raw_post, '<cwmp:GetParameterValuesResponse>') !== false) {
+    if (empty(trim($raw_post)) || $raw_post === "\r\n") {
         // Log raw request for debugging
-        tr069_log("Raw request received (empty POST or GPVR check): " . substr($raw_post, 0, 200) . "...", "DEBUG");
+        tr069_log("Raw request received (empty POST): " . substr($raw_post, 0, 200) . "...", "DEBUG");
 
         // Extract the SOAP ID if available
         $soapId = '1';
@@ -347,32 +462,43 @@ try {
             $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
         }
 
-        // Process pending task if we have one
+        // Get current task from database or session
         $current_task = null;
-
-        if ($GLOBALS['current_task']) {
-            $current_task = $GLOBALS['current_task'];
-        } else {
-            session_start();
-            if (isset($_SESSION['current_task'])) {
-                $current_task = $_SESSION['current_task'];
-                if (isset($_SESSION['device_serial'])) {
-                    $serialNumber = $_SESSION['device_serial'];
+        session_start();
+        $serialNumber = $_SESSION['device_serial'] ?? null;
+        if (isset($_SESSION['current_task'])) {
+            $current_task = $_SESSION['current_task'];
+            $_SESSION['task_retries'] = isset($_SESSION['task_retries']) ? $_SESSION['task_retries'] + 1 : 1;
+            tr069_log("Task retry count for task {$current_task['id']}: {$_SESSION['task_retries']}", "DEBUG");
+        }
+        session_write_close();
+        
+        if (!$current_task && $serialNumber) {
+            try {
+                $deviceStmt = $db->prepare("
+                    SELECT current_task_id FROM devices 
+                    WHERE serial_number = :serial
+                ");
+                $deviceStmt->execute([':serial' => $serialNumber]);
+                $taskId = $deviceStmt->fetchColumn();
+                
+                if ($taskId) {
+                    $taskStmt = $db->prepare("
+                        SELECT * FROM device_tasks 
+                        WHERE id = :task_id 
+                        AND status IN ('pending', 'in_progress')
+                    ");
+                    $taskStmt->execute([':task_id' => $taskId]);
+                    $current_task = $taskStmt->fetch(PDO::FETCH_ASSOC);
+                    tr069_log("Retrieved task {$taskId} from database for empty POST", "DEBUG");
                 }
-                // Increment retry counter
-                $_SESSION['task_retries'] = isset($_SESSION['task_retries']) ? $_SESSION['task_retries'] + 1 : 1;
-                tr069_log("Task retry count for task {$current_task['id']}: {$_SESSION['task_retries']}", "DEBUG");
-            } elseif (isset($_SESSION['in_progress_task'])) {
-                $inProgressTask = $_SESSION['in_progress_task'];
-                $taskHandler->updateTaskStatus($inProgressTask['id'], 'completed', 'Auto-completed during session');
-                tr069_log("Auto-completed in-progress task: " . $inProgressTask['id'], "INFO");
-                unset($_SESSION['in_progress_task'], $_SESSION['task_retries']);
+            } catch (PDOException $e) {
+                tr069_log("Database error retrieving current task for empty POST: " . $e->getMessage(), "ERROR");
             }
-            session_write_close();
         }
 
         if ($current_task) {
-            // Check retry limit (e.g., 10 attempts)
+            // Check retry limit (10 attempts)
             $maxRetries = 10;
             session_start();
             $retries = $_SESSION['task_retries'] ?? 1;
@@ -381,6 +507,20 @@ try {
             if ($retries > $maxRetries) {
                 $taskHandler->updateTaskStatus($current_task['id'], 'failed', "Task failed after $maxRetries retries");
                 tr069_log("Task {$current_task['id']} failed after $maxRetries retries", "ERROR");
+                
+                // Clear current task
+                try {
+                    $stmt = $db->prepare("
+                        UPDATE devices 
+                        SET current_task_id = NULL 
+                        WHERE serial_number = :serial
+                    ");
+                    $stmt->execute([':serial' => $serialNumber]);
+                    tr069_log("Cleared current task for device: $serialNumber", "INFO");
+                } catch (PDOException $e) {
+                    tr069_log("Database error clearing current task: " . $e->getMessage(), "ERROR");
+                }
+                
                 session_start();
                 unset($_SESSION['current_task'], $_SESSION['task_retries']);
                 session_write_close();
@@ -399,7 +539,7 @@ try {
                 exit;
             }
 
-            // Check if task is too old (e.g., in_progress for more than 5 minutes)
+            // Check for timeout (5 minutes)
             try {
                 $taskStmt = $db->prepare("SELECT updated_at FROM device_tasks WHERE id = :task_id");
                 $taskStmt->execute([':task_id' => $current_task['id']]);
@@ -407,6 +547,15 @@ try {
                 if ($taskRow && strtotime($taskRow['updated_at']) < (time() - 300)) {
                     $taskHandler->updateTaskStatus($current_task['id'], 'failed', 'Task timed out after 5 minutes');
                     tr069_log("Task {$current_task['id']} failed due to timeout", "ERROR");
+                    
+                    // Clear current task
+                    $stmt = $db->prepare("
+                        UPDATE devices 
+                        SET current_task_id = NULL 
+                        WHERE serial_number = :serial
+                    ");
+                    $stmt->execute([':serial' => $serialNumber]);
+                    
                     session_start();
                     unset($_SESSION['current_task'], $_SESSION['task_retries']);
                     session_write_close();
@@ -472,6 +621,37 @@ try {
                     $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 'Sent parameters to device');
                     tr069_log("Task marked as in_progress: {$current_task['id']}", "INFO");
                     exit;
+                } elseif ($parameterRequest['method'] === 'GetParameterValues') {
+                    $names = $parameterRequest['parameterNames'];
+                    $n = count($names);
+                    
+                    $nameXml = '';
+                    foreach ($names as $nm) {
+                        $nameXml .= "        <string>$nm</string>\n";
+                    }
+                    
+                    $gpv = '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+                  xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+                  xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/"
+                  xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:GetParameterValues>
+      <ParameterNames soap-enc:arrayType="xsd:string[' . $n . ']">
+' . $nameXml . '      </ParameterNames>
+    </cwmp:GetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>';
+                    
+                    header('Content-Type: text/xml');
+                    echo $gpv;
+                    
+                    $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 'Sent GetParameterValues');
+                    tr069_log("Sent GetParameterValues (task {$current_task['id']}): " . implode(", ", $names), "INFO");
+                    exit;
                 } elseif ($parameterRequest['method'] === 'Reboot') {
                     $rebootRequest = '<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
@@ -529,55 +709,12 @@ try {
                     $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 'Sent vendor reboot command to device');
                     tr069_log("Task marked as in_progress: {$current_task['id']}", "INFO");
                     exit;
-                } elseif ($parameterRequest['method'] === 'GetParameterValues') {
-                    $names = $parameterRequest['parameterNames'];
-                    $n = count($names);
-                    
-                    $nameXml = '';
-                    foreach ($names as $nm) {
-                        $nameXml .= "        <string>$nm</string>\n";
-                    }
-                    
-                    $gpv = '<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-                  xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
-                  xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/"
-                  xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-  <soapenv:Header>
-    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </soapenv:Header>
-  <soapenv:Body>
-    <cwmp:GetParameterValues>
-      <ParameterNames soap-enc:arrayType="xsd:string[' . $n . ']">
-' . $nameXml . '      </ParameterNames>
-    </cwmp:GetParameterValues>
-  </soapenv:Body>
-</soapenv:Envelope>';
-                    
-                    header('Content-Type: text/xml');
-                    echo $gpv;
-                    
-                    $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 'Sent GetParameterValues');
-                    tr069_log("Sent GetParameterValues (task {$current_task['id']}): " . implode(", ", $names), "INFO");
-                    exit;
-                } else {
-                    tr069_log("No pending tasks to process", "DEBUG");
-                    header('Content-Type: text/xml');
-                    echo '<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-                  xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-  <soapenv:Header>
-    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </soapenv:Header>
-  <soapenv:Body/>
-</soapenv:Envelope>';
-                    exit;
                 }
             }
         }
         
         // No tasks to process
-        tr069_log("No pending tasks to process", "DEBUG");
+        tr069_log("No pending tasks to process for empty POST", "DEBUG");
         header('Content-Type: text/xml');
         echo '<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
@@ -590,6 +727,99 @@ try {
         exit;
     }
     
+    // Check if this is a GetParameterValuesResponse
+    if (stripos($raw_post, 'GetParameterValuesResponse') !== false || 
+        (stripos($raw_post, 'ParameterList') !== false && stripos($raw_post, 'ParameterValueStruct') !== false)) {
+        
+        tr069_log("Detected GetParameterValuesResponse: " . substr($raw_post, 0, 200) . "...", "INFO");
+        
+        // Extract the SOAP ID
+        preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
+        $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
+        
+        // Get serial number and current task
+        session_start();
+        $serialNumber = $_SESSION['device_serial'] ?? null;
+        $current_task = $_SESSION['current_task'] ?? null;
+        session_write_close();
+        
+        if (!$current_task && $serialNumber) {
+            try {
+                $deviceStmt = $db->prepare("
+                    SELECT current_task_id FROM devices 
+                    WHERE serial_number = :serial
+                ");
+                $deviceStmt->execute([':serial' => $serialNumber]);
+                $taskId = $deviceStmt->fetchColumn();
+                
+                if ($taskId) {
+                    $taskStmt = $db->prepare("
+                        SELECT * FROM device_tasks 
+                        WHERE id = :task_id 
+                        AND status = 'in_progress'
+                    ");
+                    $taskStmt->execute([':task_id' => $taskId]);
+                    $current_task = $taskStmt->fetch(PDO::FETCH_ASSOC);
+                    tr069_log("Retrieved task {$taskId} from database for GPVR", "DEBUG");
+                }
+            } catch (PDOException $e) {
+                tr069_log("Database error retrieving current task for GPVR: " . $e->getMessage(), "ERROR");
+            }
+        }
+        
+        if ($serialNumber) {
+            try {
+                $saver = new ParameterSaver($db, new class {
+                    public function logToFile($m) { tr069_log($m, 'INFO'); }
+                });
+                $saver->save($serialNumber, $raw_post);
+                tr069_log("Processed GetParameterValuesResponse for serial: $serialNumber", "INFO");
+                
+                if ($current_task) {
+                    $taskHandler->updateTaskStatus($current_task['id'], 'completed', 'Completed after receiving GetParameterValuesResponse');
+                    tr069_log("Completed info task: " . $current_task['id'], "INFO");
+                    
+                    // Clear current task
+                    try {
+                        $stmt = $db->prepare("
+                            UPDATE devices 
+                            SET current_task_id = NULL 
+                            WHERE serial_number = :serial
+                        ");
+                        $stmt->execute([':serial' => $serialNumber]);
+                        tr069_log("Cleared current task for device: $serialNumber", "INFO");
+                    } catch (PDOException $e) {
+                        tr069_log("Database error clearing current task: " . $e->getMessage(), "ERROR");
+                    }
+                    
+                    session_start();
+                    unset($_SESSION['current_task'], $_SESSION['task_retries']);
+                    session_write_close();
+                    $GLOBALS['current_task'] = null;
+                }
+            } catch (Exception $e) {
+                tr069_log("Error processing GetParameterValuesResponse: " . $e->getMessage(), "ERROR");
+            }
+        } else {
+            tr069_log("GPV response received but serialNumber missing", "WARNING");
+        }
+        
+        header('Content-Type: text/xml');
+        echo '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+  </soapenv:Body>
+</soapenv:Envelope>';
+        exit;
+    }
+    
     // Check if this is a RebootResponse
     if (stripos($raw_post, 'RebootResponse') !== false || stripos($raw_post, 'X_HW_DelayRebootResponse') !== false) {
         preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
@@ -597,24 +827,56 @@ try {
         
         tr069_log("Received RebootResponse", "INFO");
         
-        $current_task = null;
-        if ($GLOBALS['current_task']) {
-            $current_task = $GLOBALS['current_task'];
-        } else {
-            session_start();
-            if (isset($_SESSION['current_task'])) {
-                $current_task = $_SESSION['current_task'];
-                unset($_SESSION['current_task'], $_SESSION['task_retries']);
+        session_start();
+        $serialNumber = $_SESSION['device_serial'] ?? null;
+        $current_task = $_SESSION['current_task'] ?? null;
+        session_write_close();
+        
+        if (!$current_task && $serialNumber) {
+            try {
+                $deviceStmt = $db->prepare("
+                    SELECT current_task_id FROM devices 
+                    WHERE serial_number = :serial
+                ");
+                $deviceStmt->execute([':serial' => $serialNumber]);
+                $taskId = $deviceStmt->fetchColumn();
+                
+                if ($taskId) {
+                    $taskStmt = $db->prepare("
+                        SELECT * FROM device_tasks 
+                        WHERE id = :task_id 
+                        AND status = 'in_progress'
+                    ");
+                    $taskStmt->execute([':task_id' => $taskId]);
+                    $current_task = $taskStmt->fetch(PDO::FETCH_ASSOC);
+                    tr069_log("Retrieved task {$taskId} from database for RebootResponse", "DEBUG");
+                }
+            } catch (PDOException $e) {
+                tr069_log("Database error retrieving current task for RebootResponse: " . $e->getMessage(), "ERROR");
             }
-            session_write_close();
         }
         
         if ($current_task) {
             $taskHandler->updateTaskStatus($current_task['id'], 'completed', 'Device reboot initiated successfully');
             tr069_log("Reboot task completed: " . $current_task['id'], "INFO");
+            
+            // Clear current task
+            try {
+                $stmt = $db->prepare("
+                    UPDATE devices 
+                    SET current_task_id = NULL 
+                    WHERE serial_number = :serial
+                ");
+                $stmt->execute([':serial' => $serialNumber]);
+                tr069_log("Cleared current task for device: $serialNumber", "INFO");
+            } catch (PDOException $e) {
+                tr069_log("Database error clearing current task: " . $e->getMessage(), "ERROR");
+            }
+            
+            session_start();
+            unset($_SESSION['current_task'], $_SESSION['task_retries']);
+            session_write_close();
             $GLOBALS['current_task'] = null;
-        } else {
-            tr069_log("No current task found to update status for reboot", "WARNING");
         }
         
         header('Content-Type: text/xml');
@@ -644,7 +906,7 @@ try {
         exit;
     }
     
-    // Additional message type handling for other SOAP responses
+    // Handle generic SOAP responses (including faults)
     if (stripos($raw_post, 'SOAP-ENV:Envelope') !== false || stripos($raw_post, 'soap:Envelope') !== false) {
         preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
         $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
@@ -660,15 +922,53 @@ try {
             
             tr069_log("SOAP Fault received - Code: $faultCode, String: $faultString", "ERROR");
             
-            // Fail the current task if present
+            // Fail the current task
             session_start();
-            $current_task = $_SESSION['current_task'] ?? null;
             $serialNumber = $_SESSION['device_serial'] ?? null;
+            $current_task = $_SESSION['current_task'] ?? null;
             session_write_close();
+            
+            if (!$current_task && $serialNumber) {
+                try {
+                    $deviceStmt = $db->prepare("
+                        SELECT current_task_id FROM devices 
+                        WHERE serial_number = :serial
+                    ");
+                    $deviceStmt->execute([':serial' => $serialNumber]);
+                    $taskId = $deviceStmt->fetchColumn();
+                    
+                    if ($taskId) {
+                        $taskStmt = $db->prepare("
+                            SELECT * FROM device_tasks 
+                            WHERE id = :task_id 
+                            AND status = 'in_progress'
+                        ");
+                        $taskStmt->execute([':task_id' => $taskId]);
+                        $current_task = $taskStmt->fetch(PDO::FETCH_ASSOC);
+                        tr069_log("Retrieved task {$taskId} from database for SOAP Fault", "DEBUG");
+                    }
+                } catch (PDOException $e) {
+                    tr069_log("Database error retrieving current task for SOAP Fault: " . $e->getMessage(), "ERROR");
+                }
+            }
             
             if ($current_task) {
                 $taskHandler->updateTaskStatus($current_task['id'], 'failed', "SOAP Fault: $faultCode - $faultString");
                 tr069_log("Task {$current_task['id']} failed due to SOAP Fault", "ERROR");
+                
+                // Clear current task
+                try {
+                    $stmt = $db->prepare("
+                        UPDATE devices 
+                        SET current_task_id = NULL 
+                        WHERE serial_number = :serial
+                    ");
+                    $stmt->execute([':serial' => $serialNumber]);
+                    tr069_log("Cleared current task for device: $serialNumber", "INFO");
+                } catch (PDOException $e) {
+                    tr069_log("Database error clearing current task: " . $e->getMessage(), "ERROR");
+                }
+                
                 session_start();
                 unset($_SESSION['current_task'], $_SESSION['task_retries']);
                 session_write_close();
@@ -692,146 +992,7 @@ try {
             exit;
         }
         
-        // Handle GetParameterValuesResponse
-        if (stripos($raw_post, 'GetParameterValuesResponse') !== false) {
-            session_start();
-            $serialNumber = $_SESSION['device_serial'] ?? null;
-            $current_task = $_SESSION['current_task'] ?? null;
-            session_write_close();
-            
-            if ($serialNumber) {
-                try {
-                    $saver = new ParameterSaver($db, new class {
-                        public function logToFile($m) { tr069_log($m, 'INFO'); }
-                    });
-                    $saver->save($serialNumber, $raw_post);
-                    tr069_log("Processed GetParameterValuesResponse for serial: $serialNumber", "INFO");
-                    
-                    if ($current_task) {
-                        $taskHandler->updateTaskStatus($current_task['id'], 'completed', 'Completed after receiving GetParameterValuesResponse');
-                        tr069_log("Completed info task: " . $current_task['id'], "INFO");
-                        session_start();
-                        unset($_SESSION['current_task'], $_SESSION['task_retries']);
-                        session_write_close();
-                        $GLOBALS['current_task'] = null;
-                    } else {
-                        try {
-                            $deviceStmt = $db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
-                            $deviceStmt->execute([':serial' => $serialNumber]);
-                            $deviceId = $deviceStmt->fetchColumn();
-                            
-                            if ($deviceId) {
-                                $taskStmt = $db->prepare("
-                                    SELECT * FROM device_tasks 
-                                    WHERE device_id = :device_id 
-                                    AND task_type = 'info' 
-                                    AND status = 'in_progress' 
-                                    ORDER BY updated_at DESC LIMIT 1
-                                ");
-                                $taskStmt->execute([':device_id' => $deviceId]);
-                                $inProgressTask = $taskStmt->fetch(PDO::FETCH_ASSOC);
-                                
-                                if ($inProgressTask) {
-                                    $taskHandler->updateTaskStatus($inProgressTask['id'], 'completed', 'Completed after receiving GetParameterValuesResponse');
-                                    tr069_log("Completed info task: " . $inProgressTask['id'], "INFO");
-                                }
-                            }
-                        } catch (PDOException $e) {
-                            tr069_log("Database error processing GPV task: " . $e->getMessage(), "ERROR");
-                        }
-                    }
-                } catch (Exception $e) {
-                    tr069_log("Error processing GetParameterValuesResponse: " . $e->getMessage(), "ERROR");
-                }
-            } else {
-                tr069_log("GPV response received but serialNumber missing", "WARNING");
-            }
-            
-            header('Content-Type: text/xml');
-            echo '<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope
-    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
-    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-  <soapenv:Header>
-    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </soapenv:Header>
-  <soapenv:Body>
-  </soapenv:Body>
-</soapenv:Envelope>';
-            exit;
-        }
-        
-        // Check if this appears to be a SetParameterValuesResponse without proper markup
-        if (stripos($raw_post, 'SetParameterValuesResponse') !== false || 
-            stripos($raw_post, 'Status') !== false || 
-            stripos($raw_post, 'Parameter') !== false) {
-            
-            tr069_log("Generic response appears to be a SetParameterValuesResponse", "INFO");
-            
-            try {
-                session_start();
-                $serialNumber = isset($_SESSION['device_serial']) ? $_SESSION['device_serial'] : null;
-                $current_task = isset($_SESSION['current_task']) ? $_SESSION['current_task'] : null;
-                $in_progress_task = isset($_SESSION['in_progress_task']) ? $_SESSION['in_progress_task'] : null;
-                session_write_close();
-                
-                if ($current_task) {
-                    $taskHandler->updateTaskStatus($current_task['id'], 'completed', 'Auto-completed after receiving generic response');
-                    tr069_log("Auto-completed pending task: " . $current_task['id'] . " after receiving generic response", "INFO");
-                    session_start();
-                    unset($_SESSION['current_task'], $_SESSION['task_retries']);
-                    session_write_close();
-                    $GLOBALS['current_task'] = null;
-                } elseif ($in_progress_task) {
-                    $taskHandler->updateTaskStatus($in_progress_task['id'], 'completed', 'Auto-completed after receiving generic response');
-                    tr069_log("Auto-completed in-progress task: " . $in_progress_task['id'] . " after receiving generic response", "INFO");
-                    session_start();
-                    unset($_SESSION['in_progress_task'], $_SESSION['task_retries']);
-                    session_write_close();
-                } elseif ($serialNumber) {
-                    $deviceStmt = $db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
-                    $deviceStmt->execute([':serial' => $serialNumber]);
-                    $deviceId = $deviceStmt->fetchColumn();
-                    
-                    if ($deviceId) {
-                        $taskStmt = $db->prepare("
-                            SELECT * FROM device_tasks 
-                            WHERE device_id = :device_id 
-                            AND status = 'in_progress' 
-                            ORDER BY updated_at DESC LIMIT 1
-                        ");
-                        $taskStmt->execute([':device_id' => $deviceId]);
-                        $inProgressTask = $taskStmt->fetch(PDO::FETCH_ASSOC);
-                        
-                        if ($inProgressTask) {
-                            $taskHandler->updateTaskStatus($inProgressTask['id'], 'completed', 'Auto-completed after receiving generic response');
-                            tr069_log("Auto-completed device task: " . $inProgressTask['id'] . " after receiving generic response", "INFO");
-                        }
-                    }
-                }
-            } catch (PDOException $e) {
-                tr069_log("Database error auto-completing task: " . $e->getMessage(), "ERROR");
-            }
-            
-            header('Content-Type: text/xml');
-            echo '<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope
-    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
-    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-  <soapenv:Header>
-    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </soapenv:Header>
-  <soapenv:Body>
-  </soapenv:Body>
-</soapenv:Envelope>';
-            exit;
-        }
-        
-        // Send empty response for unhandled SOAP messages
+        // Unhandled SOAP message
         tr069_log("Unhandled SOAP message received", "WARNING");
         header('Content-Type: text/xml');
         echo '<?xml version="1.0" encoding="UTF-8"?>
