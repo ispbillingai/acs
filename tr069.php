@@ -1,3 +1,4 @@
+
 <?php
 
 error_reporting(E_ALL);
@@ -44,7 +45,7 @@ function tr069_log($message, $level = 'INFO') {
 
 // Helper function to save parameter values to the database
 function saveParameterValues($raw, $serialNumber, $db) {
-    // Detailed parameter mapping for Huawei devices
+    // Map TR-069 parameter names to database columns
     $map = [
         'ExternalIPAddress' => 'ip_address',
         'SoftwareVersion' => 'software_version',
@@ -53,59 +54,54 @@ function saveParameterValues($raw, $serialNumber, $db) {
         'SSID' => 'ssid',
         'HostNumberOfEntries' => 'connected_clients'
     ];
-
+    
+    // Extract parameters from the response
     $pairs = [];
-    $timestamp = date('Y-m-d H:i:s');
-
-    // More robust regex to extract parameter values
     preg_match_all('/<ParameterValueStruct>.*?<Name>(.*?)<\/Name>.*?<Value[^>]*>(.*?)<\/Value>/s', $raw, $matches, PREG_SET_ORDER);
-
-    tr069_log("Extracted " . count($matches) . " parameter value structs", "DEBUG");
-
-    foreach ($matches as $match) {
-        $name = $match[1];
-        $value = $match[2];
-
-        // Skip empty values
-        if (empty($value) || $value === '(null)') {
-            tr069_log("Skipping empty value for parameter: $name", "DEBUG");
-            continue;
-        }
-
-        // Log each extracted parameter
-        tr069_log("Extracted parameter: $name = $value", "DEBUG");
-
-        // Match parameter to database column
+    
+    $timestamp = date('Y-m-d H:i:s');
+    file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Extracted parameters: " . print_r($matches, true) . "\n", FILE_APPEND);
+    
+    foreach ($matches as $param) {
+        $name = $param[1];
+        $value = $param[2];
+        
+        // Ignore empty values
+        if (empty($value)) continue;
+        
+        // Try to match parameter name to database column
         foreach ($map as $needle => $column) {
-            if (stripos($name, $needle) !== false) {
+            if (strpos($name, $needle) !== false) {
                 $pairs[$column] = $value;
-                tr069_log("Mapped $name to $column = $value", "DEBUG");
-                break;
+                file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Mapped $name to $column = $value\n", FILE_APPEND);
             }
         }
     }
-
+    
     // Update database if we have values
     if (!empty($pairs)) {
         try {
             $setStatements = [];
             $params = [':serial' => $serialNumber];
-
+            
             foreach ($pairs as $column => $value) {
                 $setStatements[] = "$column = :$column";
                 $params[":$column"] = $value;
             }
-
+            
             $sql = "UPDATE devices SET " . implode(', ', $setStatements) . " WHERE serial_number = :serial";
+            file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] SQL: $sql\n", FILE_APPEND);
+            file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Params: " . print_r($params, true) . "\n", FILE_APPEND);
+            
             $stmt = $db->prepare($sql);
             $result = $stmt->execute($params);
-
-            tr069_log("Updated device $serialNumber with " . implode(', ', array_keys($pairs)), "INFO");
+            
+            file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Update result: " . ($result ? "success" : "failed") . "\n", FILE_APPEND);
+            tr069_log("Device $serialNumber updated with " . implode(', ', array_keys($pairs)), "INFO");
         } catch (Exception $e) {
-            tr069_log("Database error updating device data: " . $e->getMessage(), "ERROR");
+            file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Database error: " . $e->getMessage() . "\n", FILE_APPEND);
+            tr069_log("Error updating device data: " . $e->getMessage(), "ERROR");
         }
-    } else {
-        tr069_log("No parameter values could be extracted from the response", "WARNING");
     }
 }
 
@@ -336,14 +332,14 @@ try {
         session_write_close();
         
         if ($serialNumber) {
-            // Process the parameter values and log extensively
+            // Process the parameter values
             saveParameterValues($raw_post, $serialNumber, $db);
-        
+            
             // Update task status if available
             if ($current_task) {
                 $taskHandler->updateTaskStatus($current_task['id'], 'completed', 'Successfully retrieved device information');
                 tr069_log("Info task completed: " . $current_task['id'], "INFO");
-            
+                
                 // Clear the session task
                 session_start();
                 unset($_SESSION['current_task']);
@@ -703,3 +699,43 @@ try {
   </soapenv:Body>
 </soapenv:Envelope>';
         exit;
+    }
+    
+    // Fall-through - no match for request type, echo a generic empty response
+    header('Content-Type: text/xml');
+    echo '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">1</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+  </soapenv:Body>
+</soapenv:Envelope>';
+    
+} catch (Exception $e) {
+    // Log any uncaught exceptions
+    tr069_log("Unhandled exception: " . $e->getMessage(), "ERROR");
+    tr069_log("Stack trace: " . $e->getTraceAsString(), "ERROR");
+    
+    header('HTTP/1.1 500 Internal Server Error');
+    echo '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">1</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <soapenv:Fault>
+      <faultcode>Server</faultcode>
+      <faultstring>Internal Server Error</faultstring>
+    </soapenv:Fault>
+  </soapenv:Body>
+</soapenv:Envelope>';
+}
