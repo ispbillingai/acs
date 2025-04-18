@@ -1,4 +1,3 @@
-
 <?php
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -103,8 +102,6 @@ function getDevices($db) {
 
 function getDevice($db, $id) {
     try {
-        writeLog("DEBUG: Fetching device with ID: " . $id);
-        
         // Get device basic info including connected_devices
         $deviceSql = "SELECT 
                 d.*,
@@ -118,7 +115,6 @@ function getDevice($db, $id) {
                 FROM devices d
                 WHERE d.id = :id";
         
-        writeLog("DEBUG: Executing SQL query: " . $deviceSql);
         $deviceStmt = $db->prepare($deviceSql);
         $deviceStmt->execute([':id' => $id]);
         $device = $deviceStmt->fetch(PDO::FETCH_ASSOC);
@@ -130,8 +126,7 @@ function getDevice($db, $id) {
             return;
         }
         
-        writeLog("DEBUG: Raw device data: " . print_r($device, true));
-        writeLog("DEBUG: Connected devices from DB: " . (isset($device['connected_devices']) ? $device['connected_devices'] : 'NOT SET'));
+        writeLog("Device basic data found: " . print_r($device, true));
         
         // Format the device data
         $result = [
@@ -144,12 +139,10 @@ function getDevice($db, $id) {
             'ipAddress' => $device['ipAddress'],
             'softwareVersion' => $device['softwareVersion'],
             'hardwareVersion' => $device['hardwareVersion'],
-            'connected_devices' => isset($device['connected_devices']) ? intval($device['connected_devices']) : 0, // Ensure we return the connected_devices value
+            'connected_devices' => intval($device['connected_devices']), // Ensure we return the connected_devices value
             'parameters' => [],
             'connectedHosts' => []
         ];
-        
-        writeLog("DEBUG: Formatted result connected_devices: " . $result['connected_devices']);
         
         // Get parameters
         $paramsSql = "SELECT 
@@ -186,10 +179,6 @@ function getDevice($db, $id) {
         $lastContact = strtotime($result['lastContact']);
         $fiveMinutesAgo = strtotime('-5 minutes');
         $result['status'] = $lastContact >= $fiveMinutesAgo ? 'online' : 'offline';
-        
-        // Double-check final structure before sending
-        writeLog("DEBUG: Final connected_devices value: " . $result['connected_devices']);
-        writeLog("DEBUG: Final response structure: " . substr(json_encode(['success' => true, 'device' => $result]), 0, 200) . "...");
         
         echo json_encode(['success' => true, 'device' => $result]);
     } catch (PDOException $e) {
