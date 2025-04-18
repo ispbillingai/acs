@@ -1,3 +1,4 @@
+
 import { Card } from "@/components/ui/card";
 import { CircleIcon, WifiIcon, ClockIcon, HardDriveIcon, ServerIcon, CpuIcon, RouterIcon, ZapIcon, SignalIcon } from "lucide-react";
 import { Device } from "@/types";
@@ -68,7 +69,7 @@ export const DeviceInfo = ({ device }: DeviceInfoProps) => {
     },
     { 
       label: "Connected Clients", 
-      value: device.connectedDevices?.toString() || "0",
+      value: device.connectedDevices || "0",
       icon: <RouterIcon className="h-4 w-4 text-blue-500" />
     },
     { 

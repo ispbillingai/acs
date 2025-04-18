@@ -12,9 +12,11 @@ export interface Device {
   ssid?: string;
   ssidPassword?: string;
   uptime?: string;
-  connectedClients?: number;
+  connectedDevices?: string;
   txPower?: string;
   rxPower?: string;
+  connectedHosts?: Client[];
+  parameters?: Parameter[];
 }
 
 export interface Client {

@@ -1,119 +1,133 @@
 
-import React from 'react';
-import { useParams } from 'react-router-dom';
-import { Device } from '@/types';
-import { DeviceInfo } from '@/components/DeviceInfo';
-import { DeviceActions } from '@/components/DeviceActions';
-import { ConnectedClientsTable } from '@/components/ConnectedClientsTable';
-import { DeviceParameters } from '@/components/DeviceParameters';
-import { DeviceStats } from '@/components/DeviceStats';
-import { OpticalReadings } from '@/components/OpticalReadings';
+import { useParams } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 
-const DevicePage = () => {
+import { fetchDeviceById } from "@/utils/apiClient";
+import { Card } from "@/components/ui/card";
+import { DeviceStats } from "@/components/DeviceStats";
+import { DeviceInfo } from "@/components/DeviceInfo";
+import { DeviceActions } from "@/components/DeviceActions";
+import { DeviceParameters } from "@/components/DeviceParameters";
+import { OpticalReadings } from "@/components/OpticalReadings";
+import { ConnectedHosts } from "@/components/ConnectedHosts";
+import { DeviceConfiguration } from "@/components/DeviceConfiguration";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CircleIcon } from "lucide-react";
+
+const DeviceDetailsPage = () => {
   const { id } = useParams<{ id: string }>();
-  
-  // This would typically fetch data from an API
-  const [device, setDevice] = React.useState<Device | null>(null);
-  const [isLoading, setIsLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const deviceId = id || "";
 
-  React.useEffect(() => {
-    // In a real app, fetch actual device data from an API
-    const fetchDevice = async () => {
-      try {
-        setIsLoading(true);
-        // Simulate API call with timeout
-        setTimeout(() => {
-          // Mock data for preview
-          const mockDevice: Device = {
-            id: id || '1',
-            serialNumber: 'SN12345678',
-            manufacturer: 'Huawei',
-            model: 'HG8546',
-            softwareVersion: '1.0.5',
-            hardwareVersion: '2.1',
-            status: 'online',
-            lastContact: new Date().toISOString(),
-            ipAddress: '192.168.1.1',
-            ssid: 'HomeNetwork',
-            uptime: '259200', // 3 days in seconds
-            connectedClients: 3,
-            txPower: '-5.2 dBm',
-            rxPower: '-23.4 dBm'
-          };
-          
-          setDevice(mockDevice);
-          setIsLoading(false);
-        }, 1000);
-      } catch (err) {
-        setError('Failed to load device data');
-        setIsLoading(false);
-      }
-    };
+  // Fetch device data
+  const {
+    data: device,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ["device", deviceId, refreshTrigger],
+    queryFn: () => fetchDeviceById(deviceId),
+    enabled: !!deviceId,
+    refetchInterval: 30000, // Auto-refresh every 30 seconds
+  });
 
-    fetchDevice();
-  }, [id]);
+  // Add debugging for the fetched device data
+  useEffect(() => {
+    if (device) {
+      console.log("Device page - Full device data:", device);
+      console.log("Device page - Connected devices value:", device.connectedDevices);
+    }
+  }, [device]);
 
   const handleRefresh = () => {
-    // Re-fetch data
-    if (id) {
-      // This would trigger a new API call in a real app
-      setIsLoading(true);
-      setTimeout(() => {
-        setIsLoading(false);
-      }, 1000);
-    }
-  };
-
-  const handleRefreshOptical = () => {
-    // Specifically refresh optical readings
-    if (id && device) {
-      console.log("Refreshing optical readings for device:", id);
-      // Simulate refreshing optical readings
-      setTimeout(() => {
-        setDevice({
-          ...device,
-          txPower: `-${Math.random() * 10 + 1 }.${Math.floor(Math.random() * 10)} dBm`,
-          rxPower: `-${Math.random() * 20 + 10}.${Math.floor(Math.random() * 10)} dBm`
-        });
-      }, 1000);
-    }
+    setRefreshTrigger((prev) => prev + 1);
+    refetch();
   };
 
   if (isLoading) {
-    return <div className="p-8 text-center">Loading device data...</div>;
+    return (
+      <div className="flex items-center justify-center h-96">
+        <p className="text-lg font-medium">Loading device details...</p>
+      </div>
+    );
   }
 
-  if (error) {
-    return <div className="p-8 text-center text-red-500">{error}</div>;
+  if (isError) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <p className="text-lg font-medium text-red-500">
+          Error loading device: {(error as Error)?.message || "Unknown error"}
+        </p>
+      </div>
+    );
   }
 
   if (!device) {
-    return <div className="p-8 text-center">Device not found</div>;
+    return (
+      <div className="flex items-center justify-center h-96">
+        <p className="text-lg font-medium">Device not found</p>
+      </div>
+    );
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold">Device {device.serialNumber}</h1>
+    <div className="container mx-auto px-4 py-8">
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <div className="flex items-center">
+            <CircleIcon
+              className={`h-3 w-3 mr-2 ${
+                device.status === "online"
+                  ? "text-green-500"
+                  : "text-red-500"
+              }`}
+            />
+            <h1 className="text-xl font-semibold">
+              {device.manufacturer} {device.model}
+            </h1>
+          </div>
+          <p className="text-sm text-gray-500">S/N: {device.serialNumber}</p>
+        </div>
+        
         <DeviceActions 
           device={device} 
-          onRefresh={handleRefresh}
-          onRefreshOptical={handleRefreshOptical} 
+          onRefresh={handleRefresh} 
         />
       </div>
-      
-      <DeviceStats device={device} />
-      
-      <DeviceInfo device={device} />
-      
-      <OpticalReadings device={device} onRefresh={handleRefreshOptical} />
-      
-      <ConnectedClientsTable deviceId={device.id} />
-      
-      <DeviceParameters deviceId={device.id} />
+
+      <Tabs defaultValue="overview" className="w-full">
+        <TabsList className="mb-4">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="parameters">Parameters</TabsTrigger>
+          <TabsTrigger value="configuration">Configuration</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="space-y-6">
+          <DeviceStats device={device} />
+          <DeviceInfo device={device} />
+          <OpticalReadings device={device} />
+          {device.connectedHosts && device.connectedHosts.length > 0 && (
+            <ConnectedHosts hosts={device.connectedHosts} />
+          )}
+        </TabsContent>
+
+        <TabsContent value="parameters">
+          <DeviceParameters 
+            device={device} 
+          />
+        </TabsContent>
+
+        <TabsContent value="configuration">
+          <Card className="p-6">
+            <DeviceConfiguration device={device} />
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };
 
-export default DevicePage;
+export default DeviceDetailsPage;

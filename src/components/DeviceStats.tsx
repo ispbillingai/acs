@@ -41,6 +41,10 @@ export const DeviceStats = ({ device }: DeviceStatsProps) => {
     }
   };
 
+  // Add console logs to debug the data we're receiving
+  console.log("DeviceStats - Full device data:", device);
+  console.log("DeviceStats - Connected devices value:", device.connectedDevices);
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
       <Card className="p-4 bg-gradient-to-br from-white to-blue-50 border border-blue-100 shadow-sm">
