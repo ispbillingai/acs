@@ -96,6 +96,7 @@ function createPendingInfoTask($deviceId, $db) {
     }
 }
 
+
 // Helper function to save parameter values to the database
 function saveParameterValues($raw, $serialNumber, $db) {
     // Map TR-069 parameter names to database columns
@@ -105,7 +106,9 @@ function saveParameterValues($raw, $serialNumber, $db) {
         'HardwareVersion' => 'hardware_version',
         'UpTime' => 'uptime',
         'SSID' => 'ssid',
-        'HostNumberOfEntries' => 'connected_devices'  // Updated from connected_clients to connected_devices
+        'HostNumberOfEntries' => 'connected_devices',
+        'X_GponInterafceConfig.TXPower' => 'tx_power', // Added for optical TX power
+        'X_GponInterafceConfig.RXPower' => 'rx_power'  // Added for optical RX power
     ];
     
     // Extract parameters from the response
