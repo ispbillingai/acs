@@ -77,33 +77,6 @@ class TaskHandler {
                 }
             } else {
                 $this->logToFile("No pending tasks for device ID: $deviceId");
-                
-                // If no pending tasks, let's create an info task
-                $infoTaskData = json_encode(['host_count' => 10]); // Request info for up to 10 hosts
-                
-                // Create the info task
-                $insertStmt = $this->db->prepare("
-                    INSERT INTO device_tasks (device_id, task_type, task_data, status, message, created_at, updated_at)
-                    VALUES (:device_id, 'info', :task_data, 'pending', 'Auto-created on device checking for tasks', NOW(), NOW())
-                ");
-                
-                $insertResult = $insertStmt->execute([
-                    ':device_id' => $deviceId,
-                    ':task_data' => $infoTaskData
-                ]);
-                
-                if ($insertResult) {
-                    $taskId = $this->db->lastInsertId();
-                    $this->logToFile("Created auto info task with ID: {$taskId} for device ID: {$deviceId}");
-                    
-                    // Now get the task we just created
-                    $stmt = $this->db->prepare("
-                        SELECT * FROM device_tasks 
-                        WHERE id = :task_id"
-                    );
-                    $stmt->execute([':task_id' => $taskId]);
-                    $tasks = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                }
             }
             
             return $tasks;

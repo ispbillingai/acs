@@ -25,15 +25,12 @@ class InfoTaskGenerator {
         // First get number of hosts to know how many host parameters to request
         $hostCount = $data['host_count'] ?? 0;
         
-        $this->logger->logToFile("InfoTaskGenerator building for host_count: {$hostCount}");
-        
         // If we have hosts, add parameters for each host
         if ($hostCount > 0) {
             for ($i = 1; $i <= $hostCount; $i++) {
                 $names[] = "InternetGatewayDevice.LANDevice.1.Hosts.Host.{$i}.Active";
                 $names[] = "InternetGatewayDevice.LANDevice.1.Hosts.Host.{$i}.IPAddress";
                 $names[] = "InternetGatewayDevice.LANDevice.1.Hosts.Host.{$i}.HostName";
-                $names[] = "InternetGatewayDevice.LANDevice.1.Hosts.Host.{$i}.PhysAddress";
             }
         }
 
@@ -48,3 +45,4 @@ class InfoTaskGenerator {
         ];
     }
 }
+
