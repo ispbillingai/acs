@@ -39,15 +39,7 @@ class TR069Server
 
     public function logToFile($message)
     {
-        $timestamp = date('Y-m-d H:i:s');
-        $logMessage = "[{$timestamp}] [TR-069] {$message}" . PHP_EOL;
-
-        // Log to Apache error log as backup
-        error_log("[TR-069] {$message}", 0);
-
-        // Log to dedicated device.log file
-        $logFile = $_SERVER['DOCUMENT_ROOT'] . '/device.log';
-        file_put_contents($logFile, $logMessage, FILE_APPEND);
+        // Logging disabled
     }
 
     private function parseSoapRequest()

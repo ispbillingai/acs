@@ -12,18 +12,12 @@ $GLOBALS['currentHostIndex'] = 1;
 
 // Log only important parameter set operations
 function writeLog($message, $isSetParam = false) {
-    if ($isSetParam) {
-        $logFile = __DIR__ . '/../device.log';
-        file_put_contents($logFile, date('Y-m-d H:i:s') . " [INFO] " . $message . "\n", FILE_APPEND);
-    }
+    // Logging disabled
 }
 
 // Minimal logging for router data
 function logRouterData($paramName, $paramValue) {
-    // Only log parameter set operations, ignore gets and queries
-    if (stripos($paramName, 'SetParameterValues') !== false) {
-        writeLog("Set Parameter: {$paramName} = {$paramValue}", true);
-    }
+    // Logging disabled
 }
 
 // Set unlimited execution time for long-running sessions
@@ -167,8 +161,7 @@ function generateParameterRequestXML($soapId, $parameters) {
 
 // Function to generate a parameter SET request XML
 function generateSetParameterRequestXML($soapId, $paramName, $paramValue, $paramType = "xsd:string") {
-    // Log parameter set operations to device.log
-    writeLog("Setting parameter: {$paramName} = {$paramValue}", true);
+    // Logging disabled
     
     $response = '<?xml version="1.0" encoding="UTF-8"?>
 <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
@@ -207,7 +200,7 @@ function generateCommitRequestXML($soapId) {
   </SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
 
-    writeLog("Commit RPC sent (key $commandKey)", true);
+    // Logging disabled
     return $response;
 }
 
