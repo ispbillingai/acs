@@ -1,3 +1,4 @@
+
 <?php
 require_once __DIR__ . '/tasks/utils/CommitHelper.php';
 
@@ -196,6 +197,9 @@ class TR069Server
             if ($deviceId) {
                 $this->deviceId = $deviceId;
                 $this->logToFile("Device found in database with ID: " . $this->deviceId);
+                
+                // ALWAYS create a pending task for this device, regardless of other factors
+                $this->createPendingInfoTask($deviceId);
             } else {
                 $this->logToFile("Device with serial number {$this->serialNumber} not found in database.");
                 // Optionally, create a new device entry here
@@ -211,6 +215,53 @@ class TR069Server
             $this->processTasks();
         } else {
             $this->logToFile('No device ID available, skipping task processing.');
+        }
+    }
+    
+    private function createPendingInfoTask($deviceId) 
+    {
+        try {
+            $this->logToFile("Creating pending info task for device ID: " . $deviceId);
+            
+            // Check if there are any pending tasks for this device
+            $checkStmt = $this->db->prepare("
+                SELECT COUNT(*) FROM device_tasks 
+                WHERE device_id = :device_id AND status = 'pending'
+            ");
+            $checkStmt->execute([':device_id' => $deviceId]);
+            $pendingCount = $checkStmt->fetchColumn();
+            
+            $this->logToFile("Found {$pendingCount} existing pending tasks for device ID: {$deviceId}");
+            
+            // Only create a new task if no pending tasks exist
+            if ($pendingCount == 0) {
+                // Default task data for info task
+                $taskData = json_encode(['names' => []]);
+                
+                // Insert the task
+                $insertStmt = $this->db->prepare("
+                    INSERT INTO device_tasks 
+                        (device_id, task_type, task_data, status, message, created_at, updated_at) 
+                    VALUES 
+                        (:device_id, 'info', :task_data, 'pending', 'Auto-created on device connection', NOW(), NOW())
+                ");
+                
+                $insertResult = $insertStmt->execute([
+                    ':device_id' => $deviceId,
+                    ':task_data' => $taskData
+                ]);
+                
+                if ($insertResult) {
+                    $taskId = $this->db->lastInsertId();
+                    $this->logToFile("Successfully created pending info task with ID: {$taskId}");
+                } else {
+                    $this->logToFile("Failed to create pending info task. Database error.");
+                }
+            } else {
+                $this->logToFile("Skipping task creation, device already has pending tasks.");
+            }
+        } catch (PDOException $e) {
+            $this->logToFile("ERROR creating pending task: " . $e->getMessage());
         }
     }
 
