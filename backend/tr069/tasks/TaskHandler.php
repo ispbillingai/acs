@@ -8,7 +8,6 @@ require_once __DIR__ . '/utils/CommitHelper.php';
 
 class TaskHandler {
     private $db;
-    private $logFile;
     private $wifiTaskGenerator;
     private $wanTaskGenerator;
     private $rebootTaskGenerator;
@@ -17,12 +16,6 @@ class TaskHandler {
     public function __construct() {
         $database = new Database();
         $this->db = $database->getConnection();
-        $this->logFile = $_SERVER['DOCUMENT_ROOT'] . '/device.log';
-        
-        // Make sure log directory exists
-        if (!file_exists(dirname($this->logFile))) {
-            mkdir(dirname($this->logFile), 0755, true);
-        }
         
         // Initialize task generators
         $this->wifiTaskGenerator = new WifiTaskGenerator($this);
@@ -31,31 +24,16 @@ class TaskHandler {
         $this->commitHelper = new CommitHelper($this);
     }
     
-    // Log to device.log file
-    public function logToFile($message) {
-        $timestamp = date('Y-m-d H:i:s');
-        $logMessage = "[{$timestamp}] [TR-069] {$message}" . PHP_EOL;
-        
-        // Log to Apache error log as backup
-        error_log("[TR-069] {$message}", 0);
-        
-        // Log to dedicated device.log file
-        file_put_contents($this->logFile, $logMessage, FILE_APPEND);
-    }
-    
     public function getPendingTasks($deviceSerialNumber) {
         try {
-            // Get device ID from serial number
             $deviceStmt = $this->db->prepare("SELECT id FROM devices WHERE serial_number = :serial_number");
             $deviceStmt->execute([':serial_number' => $deviceSerialNumber]);
             $deviceId = $deviceStmt->fetchColumn();
             
             if (!$deviceId) {
-                $this->logToFile("No device found with serial number: $deviceSerialNumber");
                 return [];
             }
             
-            // Get pending tasks for this device
             $stmt = $this->db->prepare("
                 SELECT * FROM device_tasks 
                 WHERE device_id = :device_id 
@@ -65,20 +43,8 @@ class TaskHandler {
             $stmt->execute([':device_id' => $deviceId]);
             $tasks = $stmt->fetchAll(PDO::FETCH_ASSOC);
             
-            if (!empty($tasks)) {
-                $this->logToFile("Found " . count($tasks) . " pending tasks for device ID: $deviceId");
-                
-                // Log details of each task
-                foreach ($tasks as $task) {
-                    $this->logToFile("Task ID: {$task['id']} - Type: {$task['task_type']} - Data: {$task['task_data']}");
-                }
-            } else {
-                $this->logToFile("No pending tasks for device ID: $deviceId");
-            }
-            
             return $tasks;
         } catch (PDOException $e) {
-            $this->logToFile("Database error in getPendingTasks: " . $e->getMessage());
             return [];
         }
     }
@@ -98,10 +64,8 @@ class TaskHandler {
                 ':id' => $taskId
             ]);
             
-            $this->logToFile("Updated task ID: $taskId - Status: $status - Message: $message");
             return true;
         } catch (PDOException $e) {
-            $this->logToFile("Database error in updateTaskStatus: " . $e->getMessage());
             return false;
         }
     }
@@ -110,11 +74,8 @@ class TaskHandler {
         $data = json_decode($taskData, true);
         
         if (!$data) {
-            $this->logToFile("Invalid task data JSON: $taskData");
             return null;
         }
-        
-        $this->logToFile("Generating parameters for task type: $taskType with data: $taskData");
         
         switch ($taskType) {
             case 'wifi':
@@ -124,7 +85,6 @@ class TaskHandler {
             case 'reboot':
                 return $this->rebootTaskGenerator->generateParameters($data);
             default:
-                $this->logToFile("Unsupported task type: $taskType");
                 return null;
         }
     }

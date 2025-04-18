@@ -7,8 +7,6 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import { Wifi, Globe, PowerOff, Server } from "lucide-react";
-
-// Fix import statements to use default imports
 import WifiConfiguration from './deviceConfiguration/WifiConfiguration';
 import { WanConfiguration } from './deviceConfiguration/WanConfiguration';
 import RebootConfiguration from './deviceConfiguration/RebootConfiguration';
@@ -43,7 +41,6 @@ export const DeviceConfigurationPanel: React.FC<DeviceConfigurationPanelProps> =
         console.log("Fetched device settings:", result);
         
         if (result.success && result.settings) {
-          // Settings will be handled in their respective components
           if (result.connection_request) {
             setConnectionRequest(result.connection_request);
           }
