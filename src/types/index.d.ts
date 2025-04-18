@@ -1,4 +1,3 @@
-
 export interface Device {
   id: string;
   serialNumber: string;
@@ -12,7 +11,7 @@ export interface Device {
   ssid?: string;
   ssidPassword?: string;
   uptime?: string;
-  connectedClients?: number;
+  connectedDevices?: string;
   txPower?: string;
   rxPower?: string;
 }
