@@ -64,7 +64,7 @@ try {
                 ];
                 
                 // Log the connected_devices value specifically
-                debug_log("Original connected_devices value from DB", ['connected_devices' => $row['connected_devices']]);
+                debug_log("Connected devices value from DB", ['connected_devices' => $row['connected_devices']]);
                 
                 return $device;
             }
@@ -115,37 +115,6 @@ try {
             return "$seconds seconds";
         }
     }
-    
-    // Get connected clients with details
-    function getConnectedClients($db, $deviceId) {
-        try {
-            $sql = "SELECT * FROM connected_clients WHERE device_id = :deviceId AND is_active = 1";
-            $stmt = $db->prepare($sql);
-            $stmt->execute([':deviceId' => $deviceId]);
-            $clients = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            debug_log("Connected clients query result", ['count' => count($clients)]);
-            return $clients;
-        } catch (PDOException $e) {
-            debug_log("Error in getConnectedClients function", ['error' => $e->getMessage()]);
-            return [];
-        }
-    }
-
-    // Count active connected clients
-    function countConnectedClients($db, $deviceId) {
-        try {
-            $sql = "SELECT COUNT(*) as count FROM connected_clients WHERE device_id = :deviceId AND is_active = 1";
-            $stmt = $db->prepare($sql);
-            $stmt->execute([':deviceId' => $deviceId]);
-            $result = $stmt->fetch(PDO::FETCH_ASSOC);
-            $count = $result ? intval($result['count']) : 0;
-            debug_log("Counted connected clients", ['count' => $count]);
-            return $count;
-        } catch (PDOException $e) {
-            debug_log("Error in countConnectedClients function", ['error' => $e->getMessage()]);
-            return 0;
-        }
-    }
 
     $device = getDevice($db, $deviceId);
     debug_log("Device data after getDevice", ['device' => $device]);
@@ -156,54 +125,25 @@ try {
         exit;
     }
 
-    // Always get the latest uptime value from parameters table
+    // Get the latest uptime value from parameters table
     $latestUptime = getParameterValue($db, $deviceId, 'UpTime');
     if ($latestUptime) {
         $device['uptime'] = $latestUptime;
         debug_log("Updated uptime value", ['uptime' => $latestUptime]);
-    }
-    
-    // Always get the latest connected clients count
-    $connectedClientsCount = countConnectedClients($db, $deviceId);
-    debug_log("Original connectedClients value", ['connectedClients' => $device['connectedClients']]);
-    debug_log("Counted connectedClientsCount value", ['connectedClientsCount' => $connectedClientsCount]);
-    
-    // IMPORTANT: Store the original value before overwriting
-    $originalConnectedClients = $device['connectedClients'];
-    $device['connectedClients'] = $connectedClientsCount;
-    
-    debug_log("Updated connectedClients value", ['connectedClients' => $device['connectedClients']]);
-    
-    // Update the device record with the latest values
-    $updateSql = "UPDATE devices SET 
-                    uptime = :uptime, 
-                    connected_devices = :connectedClients 
-                WHERE id = :id";
-    $updateStmt = $db->prepare($updateSql);
-    
-    debug_log("Updating device record with new values", [
-        'uptime' => $device['uptime'],
-        'connectedClients' => $device['connectedClients'],
-        'id' => $deviceId
-    ]);
-    
-    try {
-        $updateResult = $updateStmt->execute([
-            ':uptime' => $device['uptime'],
-            ':connectedClients' => $device['connectedClients'],
-            ':id' => $deviceId
-        ]);
-        debug_log("Update result", ['success' => $updateResult, 'rows_affected' => $updateStmt->rowCount()]);
         
-        // Double-check the value after update
-        $checkSql = "SELECT connected_devices FROM devices WHERE id = :id";
-        $checkStmt = $db->prepare($checkSql);
-        $checkStmt->execute([':id' => $deviceId]);
-        $checkResult = $checkStmt->fetch(PDO::FETCH_ASSOC);
-        debug_log("Value after update", ['connected_devices' => $checkResult['connected_devices']]);
+        // Update the device record with the latest uptime
+        $updateSql = "UPDATE devices SET uptime = :uptime WHERE id = :id";
+        $updateStmt = $db->prepare($updateSql);
         
-    } catch (PDOException $e) {
-        debug_log("Error updating device record", ['error' => $e->getMessage()]);
+        try {
+            $updateResult = $updateStmt->execute([
+                ':uptime' => $device['uptime'],
+                ':id' => $deviceId
+            ]);
+            debug_log("Update uptime result", ['success' => $updateResult, 'rows_affected' => $updateStmt->rowCount()]);
+        } catch (PDOException $e) {
+            debug_log("Error updating device uptime", ['error' => $e->getMessage()]);
+        }
     }
     
     // Check for missing values in device table but exist in parameters
@@ -269,9 +209,6 @@ try {
     } else {
         $device['formattedUptime'] = 'N/A';
     }
-    
-    // Get connected clients
-    $connectedClients = getConnectedClients($db, $deviceId);
 
     // Check if device is online (last contact within 10 minutes)
     $tenMinutesAgo = date('Y-m-d H:i:s', strtotime('-10 minutes'));
@@ -282,8 +219,7 @@ try {
     debug_log("Final device data for rendering", [
         'id' => $device['id'],
         'status' => $device['status'],
-        'connectedClients' => $device['connectedClients'],
-        'originalValue' => $originalConnectedClients
+        'connectedClients' => $device['connectedClients']
     ]);
 
 } catch (Exception $e) {
@@ -591,7 +527,7 @@ try {
                 <!-- Device Information -->
                 <div class="card info-card mb-4">
                     <div class="card-header">
-                        <h5 class="card-title mb-0"><i class='bx bx-info-circle me-2'></i>Devic Information</h5>
+                        <h5 class="card-title mb-0"><i class='bx bx-info-circle me-2'></i>Device Information</h5>
                     </div>
                     <div class="card-body">
                         <div class="row">
@@ -697,63 +633,6 @@ try {
                         </div>
                     </div>
                 </div>
-                
-                <?php if (!empty($connectedClients)): ?>
-                <!-- Connected Clients -->
-                <div class="card table-card mb-4">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5 class="card-title mb-0"><i class='bx bx-wifi me-2'></i>Connected Clients</h5>
-                        <span class="badge bg-primary"><?php echo count($connectedClients); ?> Active</span>
-                    </div>
-                    <div class="card-body p-0">
-                        <div class="table-responsive">
-                            <table class="table table-hover">
-                                <thead>
-                                    <tr>
-                                        <th>Device</th>
-                                        <th>Hostname</th>
-                                        <th>IP Address</th>
-                                        <th>MAC Address</th>
-                                        <th>Status</th>
-                                        <th>Last Seen</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($connectedClients as $client): ?>
-                                    <tr>
-                                        <td>
-                                            <?php
-                                            $hostname = strtolower($client['hostname'] ?: '');
-                                            if (strpos($hostname, 'galaxy') !== false || strpos($hostname, 'android') !== false || 
-                                                strpos($hostname, 'a04s') !== false || strpos($hostname, 'iphone') !== false) {
-                                                echo '<i class="bx bx-mobile text-primary fs-5"></i>';
-                                            } elseif (strpos($hostname, 'pc') !== false || strpos($hostname, 'laptop') !== false ||
-                                                      strpos($hostname, 'desktop') !== false || strpos($hostname, 'mac') !== false) {
-                                                echo '<i class="bx bx-laptop text-info fs-5"></i>';
-                                            } else {
-                                                echo '<i class="bx bx-devices text-secondary fs-5"></i>';
-                                            }
-                                            ?>
-                                        </td>
-                                        <td class="fw-medium"><?php echo htmlspecialchars($client['hostname'] ?: 'Unknown Device'); ?></td>
-                                        <td><?php echo htmlspecialchars($client['ip_address']); ?></td>
-                                        <td><?php echo htmlspecialchars($client['mac_address'] ?: 'N/A'); ?></td>
-                                        <td>
-                                            <?php if ($client['is_active']): ?>
-                                                <span class="badge bg-success">Active</span>
-                                            <?php else: ?>
-                                                <span class="badge bg-secondary">Inactive</span>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td><?php echo date('Y-m-d H:i:s', strtotime($client['last_seen'])); ?></td>
-                                    </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-                <?php endif; ?>
             </div>
         </div>
     </div>
