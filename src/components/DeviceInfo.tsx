@@ -69,7 +69,7 @@ export const DeviceInfo = ({ device }: DeviceInfoProps) => {
     },
     { 
       label: "Connected Clients", 
-      value: device.connectedDevices?.toString() || "0",
+      value: device.connectedDevices || "0",
       icon: <RouterIcon className="h-4 w-4 text-blue-500" />
     },
     { 

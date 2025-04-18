@@ -1,3 +1,4 @@
+
 export interface Device {
   id: string;
   serialNumber: string;
@@ -14,6 +15,8 @@ export interface Device {
   connectedDevices?: string;
   txPower?: string;
   rxPower?: string;
+  connectedHosts?: Client[];
+  parameters?: Parameter[];
 }
 
 export interface Client {
