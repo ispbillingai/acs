@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -37,7 +36,7 @@ export const ConnectedHosts = ({ deviceId, refreshTrigger }: ConnectedHostsProps
   const fetchHosts = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/backend/api/devices.php?id=${deviceId}`);
+      const response = await fetch(`/backend/api/devices.php?id=${deviceId}&action=connected_clients`);
       
       if (!response.ok) {
         throw new Error(`HTTP error: ${response.status}`);
@@ -45,9 +44,9 @@ export const ConnectedHosts = ({ deviceId, refreshTrigger }: ConnectedHostsProps
       
       const data = await response.json();
       
-      if (data.connectedHosts && Array.isArray(data.connectedHosts)) {
-        setHosts(data.connectedHosts);
-        setHostCount(data.connectedHosts.length);
+      if (data.connectedClients && Array.isArray(data.connectedClients)) {
+        setHosts(data.connectedClients);
+        setHostCount(data.connectedClients.length);
       } else {
         setHosts([]);
         setHostCount(0);
@@ -89,7 +88,6 @@ export const ConnectedHosts = ({ deviceId, refreshTrigger }: ConnectedHostsProps
           variant: "default",
         });
         
-        // Refresh the host list
         await fetchHosts();
       } else {
         throw new Error(result.error || "Unknown error");
@@ -106,7 +104,6 @@ export const ConnectedHosts = ({ deviceId, refreshTrigger }: ConnectedHostsProps
     }
   };
 
-  // Set up auto-refresh every 30 seconds
   useEffect(() => {
     fetchHosts();
     
@@ -117,7 +114,6 @@ export const ConnectedHosts = ({ deviceId, refreshTrigger }: ConnectedHostsProps
     return () => clearInterval(intervalId);
   }, [deviceId, refreshTrigger]);
 
-  // Function to determine what icon to show for each device
   const getDeviceIcon = (hostname: string) => {
     const lowerHostname = hostname.toLowerCase();
     
