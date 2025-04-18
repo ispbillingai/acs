@@ -1,3 +1,4 @@
+
 -- Simplified Devices table with additional Mikrotik parameters
 CREATE TABLE IF NOT EXISTS devices (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -37,14 +38,14 @@ CREATE TABLE IF NOT EXISTS parameters (
 CREATE TABLE IF NOT EXISTS connected_clients (
     id INT PRIMARY KEY AUTO_INCREMENT,
     device_id INT,
-    hostname VARCHAR(64),
-    ip_address VARCHAR(45),
     mac_address VARCHAR(17),
-    is_active BOOLEAN DEFAULT FALSE,
-    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
-    INDEX idx_device_clients (device_id),
-    INDEX idx_mac_address (mac_address)
+    ip_address VARCHAR(45),
+    hostname VARCHAR(64),
+    signal_strength INT,
+    connected_since DATETIME,
+    last_seen DATETIME,
+    is_active BOOLEAN DEFAULT TRUE,
+    FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
 );
 
 -- Sessions table remains unchanged

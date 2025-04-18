@@ -115,43 +115,12 @@ function saveParameterValues($raw, $serialNumber, $db) {
     $timestamp = date('Y-m-d H:i:s');
     file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Extracted parameters: " . print_r($matches, true) . "\n", FILE_APPEND);
     
-    // Extract connected clients data
-    $hosts = [];
-    $hostPattern = '/InternetGatewayDevice\.LANDevice\.1\.Hosts\.Host\.(\d+)\.(Active|IPAddress|HostName|MACAddress)/';
-    
     foreach ($matches as $param) {
         $name = $param[1];
         $value = $param[2];
         
-        // Parse host information
-        if (preg_match($hostPattern, $name, $hostMatches)) {
-            $hostIndex = $hostMatches[1];
-            $property = $hostMatches[2];
-            
-            if (!isset($hosts[$hostIndex])) {
-                $hosts[$hostIndex] = [
-                    'is_active' => false,
-                    'ip_address' => '',
-                    'hostname' => '',
-                    'mac_address' => ''
-                ];
-            }
-            
-            switch ($property) {
-                case 'Active':
-                    $hosts[$hostIndex]['is_active'] = ($value === '1' || strtolower($value) === 'true');
-                    break;
-                case 'IPAddress':
-                    $hosts[$hostIndex]['ip_address'] = $value;
-                    break;
-                case 'HostName':
-                    $hosts[$hostIndex]['hostname'] = $value;
-                    break;
-                case 'MACAddress':
-                    $hosts[$hostIndex]['mac_address'] = $value;
-                    break;
-            }
-        }
+        // Ignore empty values
+        if (empty($value)) continue;
         
         // Try to match parameter name to database column
         foreach ($map as $needle => $column) {
@@ -161,7 +130,7 @@ function saveParameterValues($raw, $serialNumber, $db) {
             }
         }
     }
-    
+    //everything working
     // Update database if we have values
     if (!empty($pairs)) {
         try {
@@ -185,47 +154,6 @@ function saveParameterValues($raw, $serialNumber, $db) {
         } catch (Exception $e) {
             file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Database error: " . $e->getMessage() . "\n", FILE_APPEND);
             tr069_log("Error updating device data: " . $e->getMessage(), "ERROR");
-        }
-    }
-    
-    // Update connected clients if we have host data
-    if (!empty($hosts)) {
-        try {
-            // Get device ID
-            $deviceStmt = $db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
-            $deviceStmt->execute([':serial' => $serialNumber]);
-            $deviceId = $deviceStmt->fetchColumn();
-            
-            if ($deviceId) {
-                // First, mark all existing clients as inactive
-                $deactivateStmt = $db->prepare("UPDATE connected_clients SET is_active = FALSE WHERE device_id = :device_id");
-                $deactivateStmt->execute([':device_id' => $deviceId]);
-                
-                // Now insert or update each client
-                $upsertStmt = $db->prepare("
-                    INSERT INTO connected_clients 
-                        (device_id, hostname, ip_address, mac_address, is_active, last_seen) 
-                    VALUES 
-                        (:device_id, :hostname, :ip_address, :mac_address, :is_active, NOW())
-                    ON DUPLICATE KEY UPDATE
-                        hostname = VALUES(hostname),
-                        ip_address = VALUES(ip_address),
-                        is_active = VALUES(is_active),
-                        last_seen = NOW()
-                ");
-                
-                foreach ($hosts as $host) {
-                    $upsertStmt->execute([
-                        ':device_id' => $deviceId,
-                        ':hostname' => $host['hostname'],
-                        ':ip_address' => $host['ip_address'],
-                        ':mac_address' => $host['mac_address'],
-                        ':is_active' => $host['is_active']
-                    ]);
-                }
-            }
-        } catch (PDOException $e) {
-            error_log("Error updating connected clients: " . $e->getMessage());
         }
     }
 }
@@ -700,4 +628,164 @@ try {
                     }
                     
                     $getValuesRequest = '<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:GetParameterValues>
+      <ParameterNames soap-enc:arrayType="xsd:string[' . $paramCount . ']">
+' . $nameXml . '      </ParameterNames>
+    </cwmp:GetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>';
+
+                    header('Content-Type: text/xml');
+                    echo $getValuesRequest;
+                    
+                    // Mark task as in progress
+                    $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 'Sent GetParameterValues request to device');
+                    tr069_log("Task marked as in_progress: {$current_task['id']}", "INFO");
+                    exit;
+                }
+                elseif ($parameterRequest['method'] === 'Reboot') {
+                    // Create a custom reboot request using the SOAP format
+                    $rebootRequest = '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:Reboot>
+      <CommandKey>' . $parameterRequest['commandKey'] . '</CommandKey>
+    </cwmp:Reboot>
+  </soapenv:Body>
+</soapenv:Envelope>';
+
+                    tr069_log("Sending reboot command with key: " . $parameterRequest['commandKey'], "INFO");
+                    
+                    // Close the connection properly to allow the device to reboot
+                    header('Content-Type: text/xml');
+                    header('Connection: close');
+                    header('Content-Length: ' . strlen($rebootRequest));
+                    echo $rebootRequest;
+                    flush();
+                    if (function_exists('fastcgi_finish_request')) {
+                        fastcgi_finish_request();
+                    }
+                    
+                    // Mark task as in progress
+                    $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 'Sent reboot command to device');
+                    tr069_log("Task marked as in_progress: {$current_task['id']}", "INFO");
+
+                    exit;
+                } 
+                elseif ($parameterRequest['method'] === 'X_HW_DelayReboot') {
+                    // Handle vendor-specific reboot command for Huawei devices
+                    $rebootRequest = '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:X_HW_DelayReboot>
+      <CommandKey>' . $parameterRequest['commandKey'] . '</CommandKey>
+      <DelaySeconds>' . $parameterRequest['delay'] . '</DelaySeconds>
+    </cwmp:X_HW_DelayReboot>
+  </soapenv:Body>
+</soapenv:Envelope>';
+
+                    tr069_log("Sending Huawei vendor reboot command with key: " . $parameterRequest['commandKey'], "INFO");
+                    
+                    // Close the connection properly to allow the device to reboot
+                    header('Content-Type: text/xml');
+                    header('Connection: close');
+                    header('Content-Length: ' . strlen($rebootRequest));
+                    echo $rebootRequest;
+                    flush();
+                    if (function_exists('fastcgi_finish_request')) {
+                        fastcgi_finish_request();
+                    }
+                    
+                    // Mark task as in progress
+                    $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 'Sent vendor reboot command to device');
+                    tr069_log("Task marked as in_progress: {$current_task['id']}", "INFO");
+
+                    exit;
+                }
+            } else {
+                tr069_log("Failed to generate parameters for task {$current_task['id']}", "ERROR");
+                $taskHandler->updateTaskStatus($current_task['id'], 'failed', 'Failed to generate parameters');
+            }
+        } else {
+            tr069_log("No pending tasks to process", "DEBUG");
+        }
+        
+        // If we get here, we're done with this session
+        header('Content-Type: text/xml');
+        echo '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+  </soapenv:Body>
+</soapenv:Envelope>';
+        exit;
+    }
+    
+    // Fall-through - no match for request type, echo a generic empty response
+    header('Content-Type: text/xml');
+    echo '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">1</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+  </soapenv:Body>
+</soapenv:Envelope>';
+    
+} catch (Exception $e) {
+    // Log any uncaught exceptions
+    tr069_log("Unhandled exception: " . $e->getMessage(), "ERROR");
+    tr069_log("Stack trace: " . $e->getTraceAsString(), "ERROR");
+    
+    header('HTTP/1.1 500 Internal Server Error');
+    echo '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">1</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <soapenv:Fault>
+      <faultcode>Server</faultcode>
+      <faultstring>Internal Server Error</faultstring>
+    </soapenv:Fault>
+  </soapenv:Body>
+</soapenv:Envelope>';
+}
