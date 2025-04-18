@@ -1,21 +1,14 @@
+
 <?php
 
 class InfoTaskGenerator {
     private $logger;
-    private $opticalTester;
     
     public function __construct($logger) {
         $this->logger = $logger;
-        $this->opticalTester = new OpticalParameterTester($logger);
     }
 
     public function generateParameters(array $data) {
-        // If optical test is requested
-        if (isset($data['test_optical']) && $data['test_optical'] === true) {
-            $this->logger->logToFile("InfoTaskGenerator: Using optical parameter tester");
-            return $this->opticalTester->generateTestParameters();
-        }
-
         // Core device info parameters
         $names = [
             'InternetGatewayDevice.DeviceInfo.HardwareVersion',
@@ -25,7 +18,12 @@ class InfoTaskGenerator {
             'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DNSServers',
             'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.SubnetMask',
             'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DefaultGateway',
-            'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries'
+            'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries',
+            // Add optical parameters to regular parameter retrieval
+            'InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.TXPower',
+            'InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.RXPower',
+            'InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.TXPower',
+            'InternetGatewayDevice.WANDevice.1.X_EponInterfaceConfig.RXPower'
         ];
 
         // First get number of hosts to know how many host parameters to request
@@ -51,3 +49,4 @@ class InfoTaskGenerator {
         ];
     }
 }
+
