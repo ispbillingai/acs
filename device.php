@@ -1,3 +1,4 @@
+
 <?php
 // Enable error reporting to device.log
 error_reporting(E_ALL);
@@ -59,13 +60,24 @@ try {
     // Get connected clients count from database
     $connectedClientsCount = countConnectedClients($db, $deviceId);
     debug_log("Connected clients count from function: " . $connectedClientsCount);
-    debug_log("Current device connected_clients value: " . $device['connectedClients']);
+    
+    // Check both connected_clients and connected_devices columns
+    $deviceConnectedClients = isset($device['connected_clients']) ? (int)$device['connected_clients'] : 0;
+    $deviceConnectedDevices = isset($device['connected_devices']) ? (int)$device['connected_devices'] : 0;
+    
+    debug_log("Current device connected_clients value: " . $deviceConnectedClients);
+    debug_log("Current device connected_devices value: " . $deviceConnectedDevices);
+
+    // Determine which value to use (connected_devices has priority)
+    $currentDeviceCount = $deviceConnectedDevices > 0 ? $deviceConnectedDevices : $deviceConnectedClients;
+    debug_log("Current device count determined as: " . $currentDeviceCount);
 
     // Update device with connected clients count if different
-    if ($device['connectedClients'] != $connectedClientsCount) {
-        debug_log("Updating connected clients count from {$device['connectedClients']} to {$connectedClientsCount}");
+    if ($currentDeviceCount != $connectedClientsCount) {
+        debug_log("Updating connected clients count from {$currentDeviceCount} to {$connectedClientsCount}");
         
-        $updateSql = "UPDATE devices SET connected_clients = :count WHERE id = :id";
+        // Update both columns to maintain consistency
+        $updateSql = "UPDATE devices SET connected_clients = :count, connected_devices = :count WHERE id = :id";
         $updateStmt = $db->prepare($updateSql);
         $result = $updateStmt->execute([
             ':count' => $connectedClientsCount,
@@ -73,12 +85,20 @@ try {
         ]);
         
         debug_log("Update result: " . ($result ? "success" : "failed"));
-        $device['connectedClients'] = $connectedClientsCount;
+        
+        // Update the local device array for display
+        $device['connected_clients'] = $connectedClientsCount;
+        $device['connected_devices'] = $connectedClientsCount;
+        
+        debug_log("Device data after update: " . print_r($device, true));
+    } else {
+        debug_log("No update needed. Current count matches database count: " . $currentDeviceCount);
     }
 
     // Get connected clients details
     $connectedClients = getConnectedClients($db, $deviceId);
     debug_log("Connected clients details: " . print_r($connectedClients, true));
+    debug_log("Total connected clients found: " . count($connectedClients));
 
     ?>
     <!DOCTYPE html>
@@ -94,13 +114,13 @@ try {
             <p>Serial Number: <?= htmlspecialchars($device['serial_number']) ?></p>
             <p>Manufacturer: <?= htmlspecialchars($device['manufacturer']) ?></p>
             <p>Model: <?= htmlspecialchars($device['model_name']) ?></p>
-            <p>Connected Clients: <?= htmlspecialchars($device['connected_clients']) ?></p>
+            <p>Connected Clients: <?= htmlspecialchars($device['connected_devices'] ?? $device['connected_clients'] ?? '0') ?></p>
 
             <h2>Connected Clients</h2>
             <?php if ($connectedClients): ?>
                 <ul>
                     <?php foreach ($connectedClients as $client): ?>
-                        <li><?= htmlspecialchars($client['hostname']) ?> - <?= htmlspecialchars($client['ip_address']) ?></li>
+                        <li><?= htmlspecialchars($client['hostname'] ?? 'Unknown') ?> - <?= htmlspecialchars($client['ip_address']) ?></li>
                     <?php endforeach; ?>
                 </ul>
             <?php else: ?>
