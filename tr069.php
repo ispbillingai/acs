@@ -1,5 +1,5 @@
 <?php
-// Enable error logging to Apache error log
+
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
@@ -7,6 +7,8 @@ ini_set('log_errors', 1);
 // Tracking variables
 $GLOBALS['session_id'] = 'session-' . substr(md5(time()), 0, 8);
 $GLOBALS['current_task'] = null;
+
+
 
 // Define device.log file path
 $GLOBALS['device_log'] = __DIR__ . '/device.log';
@@ -35,6 +37,10 @@ function tr069_log($message, $level = 'INFO') {
     if (is_dir($logDir)) {
         $logFile = $logDir . '/tr069_' . date('Y-m-d') . '.log';
         file_put_contents($logFile, date('Y-m-d H:i:s') . " $logMessage\n", FILE_APPEND);
+
+
+
+
     }
 }
 
@@ -44,10 +50,8 @@ require_once __DIR__ . '/backend/tr069/auth/AuthenticationHandler.php';
 require_once __DIR__ . '/backend/tr069/responses/InformResponseGenerator.php';
 require_once __DIR__ . '/backend/tr069/tasks/TaskHandler.php';
 
-<<<<<<< HEAD
 
-=======
->>>>>>> parent of 168d551 (dfhfg)
+
 // Process the TR-069 request
 try {
     // Create database connection
@@ -66,12 +70,16 @@ try {
     // Get the raw POST data
     $raw_post = file_get_contents('php://input');
     tr069_log("Received request: " . substr($raw_post, 0, 200) . "...", "DEBUG");
+
+
     
     // Initialize response generator
     $responseGenerator = new InformResponseGenerator();
+
     
     // Initialize task handler
     $taskHandler = new TaskHandler();
+
     
     // Check if this is an Inform message
     if (stripos($raw_post, '<cwmp:Inform>') !== false) {
@@ -82,9 +90,19 @@ try {
         // Extract device serial number
         preg_match('/<SerialNumber>(.*?)<\/SerialNumber>/s', $raw_post, $serialMatches);
         $serialNumber = isset($serialMatches[1]) ? trim($serialMatches[1]) : null;
+
+
+
+
         
         if ($serialNumber) {
             tr069_log("Device inform received - Serial: $serialNumber", "INFO");
+
+
+
+
+
+
             
             // Update device status in database
             try {
@@ -114,11 +132,26 @@ try {
                 try {
                     $updateFields = [];
                     $params = [':serial' => $serialNumber];
+
+
+
                     
                     if ($model) {
                         $updateFields[] = "model_name = :model";
                         $params[':model'] = $model;
+
+
+
+
+
                     }
+
+
+
+
+
+
+
                     
                     if ($manufacturer) {
                         $updateFields[] = "manufacturer = :manufacturer";
@@ -130,55 +163,67 @@ try {
                         $stmt = $db->prepare($sql);
                         $stmt->execute($params);
                         tr069_log("Updated device details - Model: $model, Manufacturer: $manufacturer", "INFO");
+
+
+
+
+
+
+
+
+
                     }
                 } catch (PDOException $e) {
                     tr069_log("Database error updating device details: " . $e->getMessage(), "ERROR");
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
                 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
             }
             
             // Look for pending tasks for this device
-<<<<<<< HEAD
-
-
-
-/* ---------- AUTO‑QUEUE INFO TASK IF KEY FIELDS ARE NULL --------------- */
-try {
-    $deviceStmt = $db->prepare("SELECT * FROM devices WHERE serial_number = :s");
-    $deviceStmt->execute([':s' => $serialNumber]);
-    $deviceRow = $deviceStmt->fetch(PDO::FETCH_ASSOC);
-
-    $needsInfo = (
-        empty($deviceRow['ip_address'])       ||
-        empty($deviceRow['software_version']) ||
-        empty($deviceRow['ssid'])
-    );
-
-    if ($needsInfo) {
-        $taskJson = json_encode(['names' => []]);   // let generator use defaults
-        $ins = $db->prepare("
-            INSERT INTO device_tasks (device_id, task_type, task_data,
-                                      status, created_at, updated_at)
-            VALUES (:d, 'info', :data, 'pending', NOW(), NOW())
-            ON DUPLICATE KEY UPDATE id = id   /* ignore duplicate pending */
-        ");
-        $ins->execute([
-            ':d'    => $deviceRow['id'],
-            ':data' => $taskJson
-        ]);
-       
-    }
-} catch (PDOException $e) {
-  
-}
-/* --------------------------------------------------------------------- */
-
-/* existing line — do NOT remove */
-$pendingTasks = $taskHandler->getPendingTasks($serialNumber);
-
-
-=======
             $pendingTasks = $taskHandler->getPendingTasks($serialNumber);
->>>>>>> parent of 168d551 (dfhfg)
+
+
+
             
             if (!empty($pendingTasks)) {
                 // Store the first task to process after Inform
@@ -224,15 +269,55 @@ $pendingTasks = $taskHandler->getPendingTasks($serialNumber);
                                 $_SESSION['device_serial'] = $serialNumber;
                                 session_write_close();
                             }
+
+
+
+
+
+
+
+
                         }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
                     }
                 } catch (PDOException $e) {
                     tr069_log("Database error checking in-progress tasks: " . $e->getMessage(), "ERROR");
                 }
+
+
+
+
+
+
             }
+
+
+
+
+
+
+
+
+
         }
         
         // Respond with InformResponse
+
+
         $response = $responseGenerator->createResponse($soapId);
         tr069_log("Sending InformResponse", "DEBUG");
         
@@ -248,16 +333,22 @@ $pendingTasks = $taskHandler->getPendingTasks($serialNumber);
          (stripos($raw_post, 'ParameterValue') !== false || stripos($raw_post, 'Parameter') !== false))) {
         
         tr069_log("Detected potential SetParameterValuesResponse: " . substr($raw_post, 0, 100), "INFO");
+
         
         // Extract the SOAP ID
         preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
         $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
+
         
         // Try to extract status if available
         preg_match('/<Status>(.*?)<\/Status>/s', $raw_post, $statusMatches);
         $status = isset($statusMatches[1]) ? trim($statusMatches[1]) : '0'; // Default to success if not found
+
         
         tr069_log("Extracted status from response: $status", "INFO");
+
+
+
         
         // Get current task from session or global variable
         $current_task = null;
@@ -276,6 +367,7 @@ $pendingTasks = $taskHandler->getPendingTasks($serialNumber);
             } elseif (isset($_SESSION['in_progress_task'])) {
                 $current_task = $_SESSION['in_progress_task'];
                 tr069_log("Using in-progress task from session: " . $current_task['id'], "DEBUG");
+
                 
                 // Clear the session task as it's now processed
                 unset($_SESSION['in_progress_task']);
@@ -291,12 +383,32 @@ $pendingTasks = $taskHandler->getPendingTasks($serialNumber);
             } else {
                 $taskHandler->updateTaskStatus($current_task['id'], 'failed', 'Device returned error status: ' . $status);
                 tr069_log("Task failed: " . $current_task['id'] . " - Status: " . $status, "ERROR");
+
+
+
+
+
+
+
+
+
             }
             
             // Clear the global task as well
             $GLOBALS['current_task'] = null;
         } else {
             tr069_log("No current task found to update status", "WARNING");
+
+
+
+
+
+
+
+
+
+
+
             
             // Try to find the most recent in-progress task for this device
             try {
@@ -331,6 +443,14 @@ $pendingTasks = $taskHandler->getPendingTasks($serialNumber);
                             tr069_log("No in-progress tasks found for device ID: $deviceId", "WARNING");
                         }
                     }
+
+
+
+
+
+
+
+
                 }
             } catch (PDOException $e) {
                 tr069_log("Database error finding in-progress tasks: " . $e->getMessage(), "ERROR");
@@ -345,7 +465,6 @@ $pendingTasks = $taskHandler->getPendingTasks($serialNumber);
     xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-<<<<<<< HEAD
   <soapenv:Header>
     <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
   </soapenv:Header>
@@ -362,98 +481,19 @@ $pendingTasks = $taskHandler->getPendingTasks($serialNumber);
         if (!empty($raw_post)) {
             preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
             $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
+
         }
         
         // Process pending task if we have one
         $current_task = null;
-        
-        // First check if we have a task in the global variable
-        if ($GLOBALS['current_task']) {
-            $current_task = $GLOBALS['current_task'];
-        } else {
-            // If not, try to get it from the session
-            session_start();
-            if (isset($_SESSION['current_task'])) {
-                $current_task = $_SESSION['current_task'];
-                // Also restore the device serial if available
-                if (isset($_SESSION['device_serial'])) {
-                    $serialNumber = $_SESSION['device_serial'];
-                }
-            } elseif (isset($_SESSION['in_progress_task'])) {
-                // If we have an in-progress task, let's complete it
-                $inProgressTask = $_SESSION['in_progress_task'];
-                $taskHandler->updateTaskStatus($inProgressTask['id'], 'completed', 'Auto-completed during session');
-                tr069_log("Auto-completed in-progress task: " . $inProgressTask['id'], "INFO");
-                unset($_SESSION['in_progress_task']);
-            }
-            session_write_close();
-        }
-        
-        if ($current_task) {
-            tr069_log("Processing task from session: {$current_task['task_type']} - ID: {$current_task['id']}", "INFO");
-            
-            // Generate parameters for this task
-            $parameterRequest = $taskHandler->generateParameterValues($current_task['task_type'], $current_task['task_data']);
-            
-            if ($parameterRequest) {
-                // Log what we're about to do
-                tr069_log("Sending {$parameterRequest['method']} request for task {$current_task['id']}", "INFO");
-                
-// ---------------------------------------------------------------------
-// Build the appropriate request for this $current_task
-            }
-        }
-// ---------------------------------------------------------------------
-if ($parameterRequest['method'] === 'SetParameterValues') {
 
-    /* ---------------- XML builder (unchanged) ----------------------- */
-    $paramXml   = '';
-    $paramCount = count($parameterRequest['parameters']);
 
-    foreach ($parameterRequest['parameters'] as $param) {
-        $paramXml .= "        <ParameterValueStruct>\n";
-        $paramXml .= "          <Name>"  . htmlspecialchars($param['name'])  . "</Name>\n";
-        $paramXml .= "          <Value xsi:type=\"" . $param['type'] . "\">"
-                  . htmlspecialchars($param['value']) . "</Value>\n";
-        $paramXml .= "        </ParameterValueStruct>\n";
 
-        tr069_log("Setting parameter: {$param['name']} = {$param['value']}", "DEBUG");
-    }
 
-    $setParamRequest = '<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-                  xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
-                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                  xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-                  xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">
-=======
->>>>>>> parent of 168d551 (dfhfg)
-  <soapenv:Header>
-    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </soapenv:Header>
-  <soapenv:Body>
-<<<<<<< HEAD
-    <cwmp:SetParameterValues>
-      <ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct['.$paramCount.']">
-'.$paramXml.'      </ParameterList>
-      <ParameterKey>Task-'.$current_task['id'].'-'.substr(md5(time()),0,8).'</ParameterKey>
-=======
-  </soapenv:Body>
-</soapenv:Envelope>';
-        exit;
-    }
-    
-    // Check if this is an empty post (device asking for more commands)
-    if (empty(trim($raw_post)) || $raw_post === "\r\n" || stripos($raw_post, '<cwmp:GetParameterValuesResponse>') !== false) {
-        // Extract the SOAP ID if available
-        $soapId = '1';
-        if (!empty($raw_post)) {
-            preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
-            $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
-        }
-        
-        // Process pending task if we have one
-        $current_task = null;
+
+
+
+
         
         // First check if we have a task in the global variable
         if ($GLOBALS['current_task']) {
@@ -516,135 +556,22 @@ if ($parameterRequest['method'] === 'SetParameterValues') {
       <ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[' . $paramCount . ']">
 ' . $paramXml . '      </ParameterList>
       <ParameterKey>Task-' . $current_task['id'] . '-' . substr(md5(time()), 0, 8) . '</ParameterKey>
->>>>>>> parent of 168d551 (dfhfg)
     </cwmp:SetParameterValues>
   </soapenv:Body>
 </soapenv:Envelope>';
 
-<<<<<<< HEAD
-    header('Content-Type: text/xml');
-    echo $setParamRequest;
-
-    $taskHandler->updateTaskStatus($current_task['id'],'in_progress',
-        'Sent parameters to device');
-    tr069_log("Task marked as in_progress: {$current_task['id']}", "INFO");
-    exit;                                                                  // <- keep!
-
-} elseif ($parameterRequest['method'] === 'Reboot') {
-
-    /* ---------------- standard CWMP Reboot -------------------------- */
-    $rebootRequest = '<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-                  xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
-                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                  xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-  <soapenv:Header>
-    <cwmp:ID soapenv:mustUnderstand="1">'.$soapId.'</cwmp:ID>
-  </soapenv:Header>
-  <soapenv:Body>
-    <cwmp:Reboot>
-      <CommandKey>'.$parameterRequest['commandKey'].'</CommandKey>
-    </cwmp:Reboot>
-  </soapenv:Body>
-</soapenv:Envelope>';
-
-    header('Content-Type: text/xml');
-    header('Connection: close');
-    header('Content-Length: '.strlen($rebootRequest));
-    echo $rebootRequest;
-    flush();
-    if (function_exists('fastcgi_finish_request')) { fastcgi_finish_request(); }
-
-    $taskHandler->updateTaskStatus($current_task['id'],'in_progress',
-        'Sent reboot command to device');
-    tr069_log("Task marked as in_progress: {$current_task['id']}", "INFO");
-    exit;
-
-} elseif ($parameterRequest['method'] === 'X_HW_DelayReboot') {
-
-    /* ---------------- Huawei vendor reboot -------------------------- */
-    $rebootRequest = '<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-                  xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
-                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                  xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-  <soapenv:Header>
-    <cwmp:ID soapenv:mustUnderstand="1">'.$soapId.'</cwmp:ID>
-  </soapenv:Header>
-  <soapenv:Body>
-    <cwmp:X_HW_DelayReboot>
-      <CommandKey>'.$parameterRequest['commandKey'].'</CommandKey>
-      <DelaySeconds>'.$parameterRequest['delay'].'</DelaySeconds>
-    </cwmp:X_HW_DelayReboot>
-  </soapenv:Body>
-</soapenv:Envelope>';
-
-    header('Content-Type: text/xml');
-    header('Connection: close');
-    header('Content-Length: '.strlen($rebootRequest));
-    echo $rebootRequest;
-    flush();
-    if (function_exists('fastcgi_finish_request')) { fastcgi_finish_request(); }
-
-    $taskHandler->updateTaskStatus($current_task['id'],'in_progress',
-        'Sent vendor reboot command to device');
-    tr069_log("Task marked as in_progress: {$current_task['id']}", "INFO");
-    exit;
-
-} elseif ($parameterRequest['method'] === 'GetParameterValues') {
-
-    /* ---------------- Build & send GPV ------------------------------ */
-    $names = $parameterRequest['parameterNames'];
-    $n     = count($names);
-
-    $nameXml = '';
-    foreach ($names as $nm) {
-        $nameXml .= "        <string>$nm</string>\n";
-    }
-
-    $gpv = '<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-                  xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
-                  xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/"
-                  xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-  <soapenv:Header>
-    <cwmp:ID soapenv:mustUnderstand="1">'.$soapId.'</cwmp:ID>
-  </soapenv:Header>
-  <soapenv:Body>
-    <cwmp:GetParameterValues>
-      <ParameterNames soap-enc:arrayType="xsd:string['.$n.']">
-'.$nameXml.'      </ParameterNames>
-    </cwmp:GetParameterValues>
-  </soapenv:Body>
-</soapenv:Envelope>';
-
-    header('Content-Type: text/xml');
-    echo $gpv;
-
-    $taskHandler->updateTaskStatus($current_task['id'],'in_progress',
-        'Sent GetParameterValues');
-    tr069_log("Sent GetParameterValues (task {$current_task['id']})", "INFO");
-    exit;
-
-} else {
-
-    /* ----------- Nothing to do ------------------------------------- */
-    tr069_log("No pending tasks to process", "DEBUG");
-    header('Content-Type: text/xml');
-    echo '<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-                  xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-  <soapenv:Header>
-    <cwmp:ID soapenv:mustUnderstand="1">'.$soapId.'</cwmp:ID>
-  </soapenv:Header>
-  <soapenv:Body/>
-=======
                     header('Content-Type: text/xml');
                     echo $setParamRequest;
                     
                     // Mark task as in progress
                     $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 'Sent parameters to device');
                     tr069_log("Task marked as in_progress: {$current_task['id']}", "INFO");
+
+
+
+
+
+
                     
                     exit;
                 } 
@@ -681,7 +608,10 @@ if ($parameterRequest['method'] === 'SetParameterValues') {
                     // Mark task as in progress
                     $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 'Sent reboot command to device');
                     tr069_log("Task marked as in_progress: {$current_task['id']}", "INFO");
+
                     
+
+
                     exit;
                 } elseif ($parameterRequest['method'] === 'X_HW_DelayReboot') {
                     // Handle vendor-specific reboot command for Huawei devices
@@ -717,6 +647,9 @@ if ($parameterRequest['method'] === 'SetParameterValues') {
                     // Mark task as in progress
                     $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 'Sent vendor reboot command to device');
                     tr069_log("Task marked as in_progress: {$current_task['id']}", "INFO");
+
+
+
                     
                     exit;
                 }
@@ -729,6 +662,10 @@ if ($parameterRequest['method'] === 'SetParameterValues') {
         }
         
         // If we get here, we're done with this session
+
+
+
+
         header('Content-Type: text/xml');
         echo '<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope
@@ -749,9 +686,19 @@ if ($parameterRequest['method'] === 'SetParameterValues') {
     if (stripos($raw_post, 'RebootResponse') !== false || stripos($raw_post, 'X_HW_DelayRebootResponse') !== false) {
         // Extract the SOAP ID
         preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
+
+
+
+
+
+
+
+
         $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
         
         tr069_log("Received RebootResponse", "INFO");
+
+
         
         // Get current task from session or global variable
         $current_task = null;
@@ -766,12 +713,15 @@ if ($parameterRequest['method'] === 'SetParameterValues') {
                 unset($_SESSION['current_task']);
             }
             session_write_close();
+
         }
         
         // Update task status
         if ($current_task) {
             $taskHandler->updateTaskStatus($current_task['id'], 'completed', 'Device reboot initiated successfully');
             tr069_log("Reboot task completed: " . $current_task['id'], "INFO");
+
+
             
             // Clear the global task
             $GLOBALS['current_task'] = null;
@@ -782,6 +732,8 @@ if ($parameterRequest['method'] === 'SetParameterValues') {
         // Send empty response to complete the session and ensure connection is closed
         header('Content-Type: text/xml');
         header('Connection: close');
+
+
         
         $response = '<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope
@@ -802,9 +754,27 @@ if ($parameterRequest['method'] === 'SetParameterValues') {
         
         if (function_exists('fastcgi_finish_request')) {
             fastcgi_finish_request();
+
+
+
+
+
+
+
+
+
+
         }
         
         exit;
+
+
+
+
+
+
+
+
     }
     
     // Additional message type handling for other SOAP responses
@@ -812,15 +782,45 @@ if ($parameterRequest['method'] === 'SetParameterValues') {
         // Extract the SOAP ID
         preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
         $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
+
+
+
+
+
         
         tr069_log("Received generic SOAP response: " . substr($raw_post, 0, 100) . "...", "DEBUG");
+
+
+
+
+
+
+
+
+
         
         // Check if this appears to be a SetParameterValuesResponse without proper markup
         if (stripos($raw_post, 'SetParameterValuesResponse') !== false || 
             stripos($raw_post, 'Status') !== false || 
             stripos($raw_post, 'Parameter') !== false) {
+
+
+
+
+
             
             tr069_log("Generic response appears to be a SetParameterValuesResponse", "INFO");
+
+
+
+
+
+
+
+
+
+
+
             
             try {
                 session_start();
@@ -878,9 +878,14 @@ if ($parameterRequest['method'] === 'SetParameterValues') {
 </soapenv:Envelope>';
         exit;
     }
+
+
+
+
     
     // Default response for unhandled message types
     tr069_log("Unhandled message type: " . substr($raw_post, 0, 100) . "...", "WARNING");
+
     
     header('Content-Type: text/xml');
     echo '<?xml version="1.0" encoding="UTF-8"?>
@@ -895,9 +900,42 @@ if ($parameterRequest['method'] === 'SetParameterValues') {
   <soapenv:Body>
   </soapenv:Body>
 </soapenv:Envelope>';
+
+
+
+
+
+
+
+
+
 
 } catch (Exception $e) {
     tr069_log("Exception: " . $e->getMessage(), "ERROR");
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     
     header('Content-Type: text/xml');
     echo '<?xml version="1.0" encoding="UTF-8"?>
@@ -911,264 +949,5 @@ if ($parameterRequest['method'] === 'SetParameterValues') {
   </soapenv:Header>
   <soapenv:Body>
   </soapenv:Body>
->>>>>>> parent of 168d551 (dfhfg)
 </soapenv:Envelope>';
-    exit;
 }
-<<<<<<< HEAD
-}   // <-- add this
-}   
-    
-    // Check if this is a RebootResponse
-    if (stripos($raw_post, 'RebootResponse') !== false || stripos($raw_post, 'X_HW_DelayRebootResponse') !== false) {
-        // Extract the SOAP ID
-        preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
-        $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
-        
-        tr069_log("Received RebootResponse", "INFO");
-        
-        // Get current task from session or global variable
-        $current_task = null;
-        if ($GLOBALS['current_task']) {
-            $current_task = $GLOBALS['current_task'];
-        } else {
-            // Try to get it from the session
-            session_start();
-            if (isset($_SESSION['current_task'])) {
-                $current_task = $_SESSION['current_task'];
-                // Clear the session task as it's now processed
-                unset($_SESSION['current_task']);
-            }
-            session_write_close();
-        }
-        
-        // Update task status
-        if ($current_task) {
-            $taskHandler->updateTaskStatus($current_task['id'], 'completed', 'Device reboot initiated successfully');
-            tr069_log("Reboot task completed: " . $current_task['id'], "INFO");
-            
-            // Clear the global task
-            $GLOBALS['current_task'] = null;
-        } else {
-            tr069_log("No current task found to update status for reboot", "WARNING");
-        }
-        
-        // Send empty response to complete the session and ensure connection is closed
-        header('Content-Type: text/xml');
-        header('Connection: close');
-        
-        $response = '<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope
-    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-    xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
-    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-  <soapenv:Header>
-    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </soapenv:Header>
-  <soapenv:Body>
-  </soapenv:Body>
-</soapenv:Envelope>';
-        
-        header('Content-Length: ' . strlen($response));
-        echo $response;
-        flush();
-        
-        if (function_exists('fastcgi_finish_request')) {
-            fastcgi_finish_request();
-        }
-        
-        exit;
-    }
-    
-    // Additional message type handling for other SOAP responses
-    if (stripos($raw_post, 'SOAP-ENV:Envelope') !== false || stripos($raw_post, 'soap:Envelope') !== false) {
-        // Extract the SOAP ID
-        preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
-        $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
-
-
-    /* ---------------------------------------------------------------- */
-
-        
-        tr069_log("Received generic SOAP response: " . substr($raw_post, 0, 100) . "...", "DEBUG");
-        
-        // Check if this appears to be a SetParameterValuesResponse without proper markup
-        if (stripos($raw_post, 'SetParameterValuesResponse') !== false || 
-            stripos($raw_post, 'Status') !== false || 
-            stripos($raw_post, 'Parameter') !== false) {
-            
-            tr069_log("Generic response appears to be a SetParameterValuesResponse", "INFO");
-            
-            try {
-                session_start();
-                $serialNumber = isset($_SESSION['device_serial']) ? $_SESSION['device_serial'] : null;
-                $current_task = isset($_SESSION['current_task']) ? $_SESSION['current_task'] : null;
-                $in_progress_task = isset($_SESSION['in_progress_task']) ? $_SESSION['in_progress_task'] : null;
-                session_write_close();
-                
-                if ($current_task) {
-                    tr069_log("Processing task from session: {$current_task['task_type']} - ID: {$current_task['id']}", "INFO");
-                    
-                    // Generate parameters for this task
-                    $parameterRequest = $taskHandler->generateParameterValues($current_task['task_type'], $current_task['task_data']);
-                    
-                    if ($parameterRequest) {
-                        // Log what we're about to do
-                        tr069_log("Sending {$parameterRequest['method']} request for task {$current_task['id']}", "INFO");
-                        
-                        // Build the appropriate request for this $current_task
-                        if ($parameterRequest['method'] === 'SetParameterValues') {
-                            /* ---------------- XML builder (unchanged) ----------------------- */
-                            $paramXml   = '';
-                            $paramCount = count($parameterRequest['parameters']);
-                            
-                            foreach ($parameterRequest['parameters'] as $param) {
-                                $paramXml .= "        <ParameterValueStruct>\n";
-                                $paramXml .= "          <Name>"  . htmlspecialchars($param['name'])  . "</Name>\n";
-                                $paramXml .= "          <Value xsi:type=\"" . $param['type'] . "\">" 
-                                          . htmlspecialchars($param['value']) . "</Value>\n";
-                                $paramXml .= "        </ParameterValueStruct>\n";
-                                
-                                tr069_log("Setting parameter: {$param['name']} = {$param['value']}", "DEBUG");
-                            }
-                            
-                            $setParamRequest = '<?xml version="1.0" encoding="UTF-8"?>
-                <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-                                  xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
-                                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                                  xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-                                  xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">
-                  <soapenv:Header>
-                    <cwmp:ID soapenv:mustUnderstand="1">'.$soapId.'</cwmp:ID>
-                  </soapenv:Header>
-                  <soapenv:Body>
-                    <cwmp:SetParameterValues>
-                      <ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct['.$paramCount.']">
-                '.$paramXml.'      </ParameterList>
-                      <ParameterKey>Task-'.$current_task['id'].'-'.substr(md5(time()),0,8).'</ParameterKey>
-                    </cwmp:SetParameterValues>
-                  </soapenv:Body>
-                </soapenv:Envelope>';
-                            
-                            header('Content-Type: text/xml');
-                            echo $setParamRequest;
-                            
-                            $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 
-                                'Sent parameters to device');
-                            tr069_log("Task marked as in_progress: {$current_task['id']}", "INFO");
-                            exit;
-                        } elseif ($parameterRequest['method'] === 'Reboot') {
-                            /* ---------------- standard CWMP Reboot -------------------------- */
-                            $rebootRequest = '<?xml version="1.0" encoding="UTF-8"?>
-                <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-                                  xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
-                                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                                  xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-                  <soapenv:Header>
-                    <cwmp:ID soapenv:mustUnderstand="1">'.$soapId.'</cwmp:ID>
-                  </soapenv:Header>
-                  <soapenv:Body>
-                    <cwmp:Reboot>
-                      <CommandKey>'.$parameterRequest['commandKey'].'</CommandKey>
-                    </cwmp:Reboot>
-                  </soapenv:Body>
-                </soapenv:Envelope>';
-                            
-                            header('Content-Type: text/xml');
-                            header('Connection: close');
-                            header('Content-Length: '.strlen($rebootRequest));
-                            echo $rebootRequest;
-                            flush();
-                            if (function_exists('fastcgi_finish_request')) { fastcgi_finish_request(); }
-                            
-                            $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 
-                                'Sent reboot command to device');
-                            tr069_log("Task marked as in_progress: {$current_task['id']}", "INFO");
-                            exit;
-                        } elseif ($parameterRequest['method'] === 'X_HW_DelayReboot') {
-                            /* ---------------- Huawei vendor reboot -------------------------- */
-                            $rebootRequest = '<?xml version="1.0" encoding="UTF-8"?>
-                <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-                                  xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
-                                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                                  xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-                  <soapenv:Header>
-                    <cwmp:ID soapenv:mustUnderstand="1">'.$soapId.'</cwmp:ID>
-                  </soapenv:Header>
-                  <soapenv:Body>
-                    <cwmp:X_HW_DelayReboot>
-                      <CommandKey>'.$parameterRequest['commandKey'].'</CommandKey>
-                      <DelaySeconds>'.$parameterRequest['delay'].'</DelaySeconds>
-                    </cwmp:X_HW_DelayReboot>
-                  </soapenv:Body>
-                </soapenv:Envelope>';
-                            
-                            header('Content-Type: text/xml');
-                            header('Connection: close');
-                            header('Content-Length: '.strlen($rebootRequest));
-                            echo $rebootRequest;
-                            flush();
-                            if (function_exists('fastcgi_finish_request')) { fastcgi_finish_request(); }
-                            
-                            $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 
-                                'Sent vendor reboot command to device');
-                            tr069_log("Task marked as in_progress: {$current_task['id']}", "INFO");
-                            exit;
-                        } elseif ($parameterRequest['method'] === 'GetParameterValues') {
-                            /* ---------------- Build & send GPV ------------------------------ */
-                            $names = $parameterRequest['parameterNames'];
-                            $n     = count($names);
-                            
-                            $nameXml = '';
-                            foreach ($names as $nm) {
-                                $nameXml .= "        <string>$nm</string>\n";
-                            }
-                            
-                            $gpv = '<?xml version="1.0" encoding="UTF-8"?>
-                <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-                                  xmlns:cwmp="urn:dslforum-org:cwmp-1-0"
-                                  xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/"
-                                  xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-                  <soapenv:Header>
-                    <cwmp:ID soapenv:mustUnderstand="1">'.$soapId.'</cwmp:ID>
-                  </soapenv:Header>
-                  <soapenv:Body>
-                    <cwmp:GetParameterValues>
-                      <ParameterNames soap-enc:arrayType="xsd:string['.$n.']">
-                '.$nameXml.'      </ParameterNames>
-                    </cwmp:GetParameterValues>
-                  </soapenv:Body>
-                </soapenv:Envelope>';
-                            
-                            header('Content-Type: text/xml');
-                            echo $gpv;
-                            
-                            $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 
-                                'Sent GetParameterValues');
-                            tr069_log("Sent GetParameterValues (task {$current_task['id']})", "INFO");
-                            exit;
-                        } else {
-                            /* ----------- Nothing to do ------------------------------------- */
-                            tr069_log("No pending tasks to process", "DEBUG");
-                            header('Content-Type: text/xml');
-                            echo '<?xml version="1.0" encoding="UTF-8"?>
-                <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-                                  xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-                  <soapenv:Header>
-                    <cwmp:ID soapenv:mustUnderstand="1">'.$soapId.'</cwmp:ID>
-                  </soapenv:Header>
-                  <soapenv:Body/>
-                </soapenv:Envelope>';
-                            exit;
-                        }
-                    } // Close if ($parameterRequest)
-                } 
-            }
-            catch (Throwable $e) {        // <‑‑ add this block
-                tr069_log("Unexpected error: ".$e->getMessage(), "ERROR");
-            }
-        }
-    }
-=======
->>>>>>> parent of 168d551 (dfhfg)
