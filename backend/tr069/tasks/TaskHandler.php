@@ -20,7 +20,7 @@ class TaskHandler {
         $database = new Database();
         $this->db = $database->getConnection();
         $this->logFile = $_SERVER['DOCUMENT_ROOT'] . '/device.log';
-        
+        //working now
         // Make sure log directory exists
         if (!file_exists(dirname($this->logFile))) {
             mkdir(dirname($this->logFile), 0755, true);
