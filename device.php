@@ -60,11 +60,14 @@ try {
                     'uptime' => $row['uptime'],
                     'localAdminPassword' => $row['local_admin_password'],
                     'tr069Password' => $row['tr069_password'],
-                    'connectedClients' => $row['connected_devices']
+                    'connectedClients' => $row['connected_devices'],
+                    'txPower' => $row['tx_power'],
+                    'rxPower' => $row['rx_power']
                 ];
                 
-                // Log the connected_devices value specifically
+                // Log specific values
                 debug_log("Connected devices value from DB", ['connected_devices' => $row['connected_devices']]);
+                debug_log("TX and RX power from DB", ['tx_power' => $row['tx_power'], 'rx_power' => $row['rx_power']]);
                 
                 return $device;
             }
@@ -76,7 +79,7 @@ try {
         }
     }
 
-    // Get parameter value from parameters table
+    // Get parameter value from parameters table (for other parameters)
     function getParameterValue($db, $deviceId, $paramName) {
         try {
             $sql = "SELECT param_value FROM parameters WHERE device_id = :deviceId AND param_name LIKE :paramName LIMIT 1";
@@ -168,18 +171,6 @@ try {
         }
     }
     
-    // Also check for TX and RX power
-    $txPower = getParameterValue($db, $deviceId, 'TXPower');
-    $rxPower = getParameterValue($db, $deviceId, 'RXPower');
-    
-    if ($txPower) {
-        $device['txPower'] = $txPower;
-    }
-    
-    if ($rxPower) {
-        $device['rxPower'] = $rxPower;
-    }
-    
     // If we found values in parameters that aren't in the device table, update the device table
     if ($needsUpdate) {
         $updateSql = "UPDATE devices SET ";
@@ -219,7 +210,9 @@ try {
     debug_log("Final device data for rendering", [
         'id' => $device['id'],
         'status' => $device['status'],
-        'connectedClients' => $device['connectedClients']
+        'connectedClients' => $device['connectedClients'],
+        'txPower' => $device['txPower'],
+        'rxPower' => $device['rxPower']
     ]);
 
 } catch (Exception $e) {
@@ -381,7 +374,7 @@ try {
                             <a class="nav-link d-flex align-items-center" href="#" data-bs-toggle="collapse" data-bs-target="#competitionSubmenu">
                                 <i class='bx bx-trophy me-2'></i>
                                 <span>Competition</span>
-                                <i class='bx bx-chevron-down ms-auto'></i>
+                                <i class='bx  ms-auto'></i>
                             </a>
                             <div class="collapse" id="competitionSubmenu">
                                 <ul class="nav flex-column ms-3 mt-2">
