@@ -48,7 +48,7 @@ function createPendingInfoTask($deviceId, $db) {
         tr069_log("TASK CREATION: Starting task creation for device ID: " . $deviceId, "INFO");
         
         // Default task data for info task
-        $taskData = json_encode(['names' => []]);
+        $taskData = json_encode(['host_count' => 10]); // Request info for up to 10 hosts
         
         // Insert the task
         $insertStmt = $db->prepare("
@@ -115,6 +115,8 @@ function saveParameterValues($raw, $serialNumber, $db) {
     $timestamp = date('Y-m-d H:i:s');
     file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Extracted parameters: " . print_r($matches, true) . "\n", FILE_APPEND);
     
+    $hasHostNumberOfEntries = false;
+    
     foreach ($matches as $param) {
         $name = $param[1];
         $value = $param[2];
@@ -127,6 +129,11 @@ function saveParameterValues($raw, $serialNumber, $db) {
             if (strpos($name, $needle) !== false) {
                 $pairs[$column] = $value;
                 file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Mapped $name to $column = $value\n", FILE_APPEND);
+                
+                // Track if we found the HostNumberOfEntries parameter
+                if ($needle === 'HostNumberOfEntries') {
+                    $hasHostNumberOfEntries = true;
+                }
             }
         }
     }
@@ -142,6 +149,11 @@ function saveParameterValues($raw, $serialNumber, $db) {
                 $params[":$column"] = $value;
             }
             
+            // Ensure we're updating connected_clients explicitly
+            if ($hasHostNumberOfEntries) {
+                file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] IMPORTANT: Explicitly updating connected_clients to: {$pairs['connected_clients']}\n", FILE_APPEND);
+            }
+            
             $sql = "UPDATE devices SET " . implode(', ', $setStatements) . " WHERE serial_number = :serial";
             file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] SQL: $sql\n", FILE_APPEND);
             file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Params: " . print_r($params, true) . "\n", FILE_APPEND);
@@ -151,6 +163,28 @@ function saveParameterValues($raw, $serialNumber, $db) {
             
             file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Update result: " . ($result ? "success" : "failed") . "\n", FILE_APPEND);
             tr069_log("Device $serialNumber updated with " . implode(', ', array_keys($pairs)), "INFO");
+            
+            // Verify the update by checking the current values
+            if ($result && $hasHostNumberOfEntries) {
+                $verifyStmt = $db->prepare("SELECT connected_clients FROM devices WHERE serial_number = :serial");
+                $verifyStmt->execute([':serial' => $serialNumber]);
+                $currentValue = $verifyStmt->fetchColumn();
+                
+                file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] VERIFICATION: connected_clients after update: $currentValue\n", FILE_APPEND);
+                
+                // If the value is not what we expected, force an update
+                if ((int)$currentValue !== (int)$pairs['connected_clients']) {
+                    file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] MISMATCH: Forcing update of connected_clients\n", FILE_APPEND);
+                    
+                    $forceStmt = $db->prepare("UPDATE devices SET connected_clients = :value WHERE serial_number = :serial");
+                    $forceResult = $forceStmt->execute([
+                        ':value' => $pairs['connected_clients'],
+                        ':serial' => $serialNumber
+                    ]);
+                    
+                    file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Force update result: " . ($forceResult ? "success" : "failed") . "\n", FILE_APPEND);
+                }
+            }
         } catch (Exception $e) {
             file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Database error: " . $e->getMessage() . "\n", FILE_APPEND);
             tr069_log("Error updating device data: " . $e->getMessage(), "ERROR");

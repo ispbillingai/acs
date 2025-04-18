@@ -28,14 +28,18 @@ try {
     // Update device status based on last contact time
     foreach ($devices as $key => $device) {
         $isOnline = strtotime($device['lastContact']) >= strtotime($tenMinutesAgo);
-        $devices[$key]['status'] = $isOnline ? 'online' : 'offline';
         
-        // Also update status in database to ensure consistency
-        $updateStmt = $db->prepare("UPDATE devices SET status = :status WHERE id = :id");
-        $updateStmt->execute([
-            ':status' => $isOnline ? 'online' : 'offline',
-            ':id' => $device['id']
-        ]);
+        // Only update the status, don't touch connected_clients
+        if ($devices[$key]['status'] !== ($isOnline ? 'online' : 'offline')) {
+            $updateStmt = $db->prepare("UPDATE devices SET status = :status WHERE id = :id");
+            $updateStmt->execute([
+                ':status' => $isOnline ? 'online' : 'offline',
+                ':id' => $device['id']
+            ]);
+            
+            // Update the status in our local array
+            $devices[$key]['status'] = $isOnline ? 'online' : 'offline';
+        }
     }
     
     // Count online and offline devices for footer stats
