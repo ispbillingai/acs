@@ -4,13 +4,16 @@ error_reporting(E_ALL);
 ini_set('display_errors', 1);
 ini_set('error_log', __DIR__ . '/device.log');
 
-// Create log function for debugging
+// Create a custom logging function for debugging
 function debug_log($message, $context = []) {
     $log_file = __DIR__ . '/acs.log';
     $timestamp = date('Y-m-d H:i:s');
     $context_str = !empty($context) ? ' | ' . json_encode($context) : '';
     file_put_contents($log_file, "[$timestamp] $message$context_str" . PHP_EOL, FILE_APPEND);
 }
+
+// Log the start of the script
+debug_log("Device.php script started");
 
 require_once __DIR__ . '/backend/config/database.php';
 
@@ -21,7 +24,6 @@ try {
 
     // Get device ID from URL
     $deviceId = isset($_GET['id']) ? $_GET['id'] : null;
-
     debug_log("Device ID from URL", ['deviceId' => $deviceId]);
 
     if (!$deviceId) {
@@ -40,6 +42,7 @@ try {
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             
             if ($row) {
+                // Log the raw data from database
                 debug_log("Raw device data from database", $row);
                 
                 $device = [
@@ -57,11 +60,11 @@ try {
                     'uptime' => $row['uptime'],
                     'localAdminPassword' => $row['local_admin_password'],
                     'tr069Password' => $row['tr069_password'],
-                    // Use connected_devices directly without modification
                     'connectedClients' => $row['connected_devices']
                 ];
                 
-                debug_log("Connected devices value from DB", ['connected_devices' => $row['connected_devices']]);
+                // Log the connected_devices value specifically
+                debug_log("Original connected_devices value from DB", ['connected_devices' => $row['connected_devices']]);
                 
                 return $device;
             }
@@ -160,11 +163,48 @@ try {
         debug_log("Updated uptime value", ['uptime' => $latestUptime]);
     }
     
-    // Remove the lines that were recalculating connectedClients
+    // Always get the latest connected clients count
     $connectedClientsCount = countConnectedClients($db, $deviceId);
-    $device['connectedClients'] = $device['connectedClients']; // Keep original value
-
-    // Remove the update SQL that was changing the connected_devices value
+    debug_log("Original connectedClients value", ['connectedClients' => $device['connectedClients']]);
+    debug_log("Counted connectedClientsCount value", ['connectedClientsCount' => $connectedClientsCount]);
+    
+    // IMPORTANT: Store the original value before overwriting
+    $originalConnectedClients = $device['connectedClients'];
+    $device['connectedClients'] = $connectedClientsCount;
+    
+    debug_log("Updated connectedClients value", ['connectedClients' => $device['connectedClients']]);
+    
+    // Update the device record with the latest values
+    $updateSql = "UPDATE devices SET 
+                    uptime = :uptime, 
+                    connected_devices = :connectedClients 
+                WHERE id = :id";
+    $updateStmt = $db->prepare($updateSql);
+    
+    debug_log("Updating device record with new values", [
+        'uptime' => $device['uptime'],
+        'connectedClients' => $device['connectedClients'],
+        'id' => $deviceId
+    ]);
+    
+    try {
+        $updateResult = $updateStmt->execute([
+            ':uptime' => $device['uptime'],
+            ':connectedClients' => $device['connectedClients'],
+            ':id' => $deviceId
+        ]);
+        debug_log("Update result", ['success' => $updateResult, 'rows_affected' => $updateStmt->rowCount()]);
+        
+        // Double-check the value after update
+        $checkSql = "SELECT connected_devices FROM devices WHERE id = :id";
+        $checkStmt = $db->prepare($checkSql);
+        $checkStmt->execute([':id' => $deviceId]);
+        $checkResult = $checkStmt->fetch(PDO::FETCH_ASSOC);
+        debug_log("Value after update", ['connected_devices' => $checkResult['connected_devices']]);
+        
+    } catch (PDOException $e) {
+        debug_log("Error updating device record", ['error' => $e->getMessage()]);
+    }
     
     // Check for missing values in device table but exist in parameters
     $keysToCheck = [
@@ -242,7 +282,8 @@ try {
     debug_log("Final device data for rendering", [
         'id' => $device['id'],
         'status' => $device['status'],
-        'connectedClients' => $device['connectedClients']
+        'connectedClients' => $device['connectedClients'],
+        'originalValue' => $originalConnectedClients
     ]);
 
 } catch (Exception $e) {
@@ -721,4 +762,66 @@ try {
     <script>
         // Initialize tooltips
         var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
-        var tooltipList = tooltip
+        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+            return new bootstrap.Tooltip(tooltipTriggerEl)
+        });
+        
+        // Toggle sidebar on small screens
+        document.addEventListener('DOMContentLoaded', function() {
+            const mediaQuery = window.matchMedia('(max-width: 768px)');
+            if (mediaQuery.matches) {
+                const sidebar = document.querySelector('.sidebar');
+                if (sidebar) {
+                    sidebar.classList.add('collapse');
+                }
+            }
+            
+            // Add optical readings refresh handler
+            const refreshOpticalBtn = document.getElementById('refresh-optical');
+            if (refreshOpticalBtn) {
+                refreshOpticalBtn.addEventListener('click', function() {
+                    this.disabled = true;
+                    this.innerHTML = '<i class="bx bx-loader-alt bx-spin me-1"></i> Refreshing...';
+                    
+                    // Create an AJAX request to refresh optical readings
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('GET', 'backend/api/refresh_optical.php?id=<?php echo $deviceId; ?>', true);
+                    xhr.onload = function() {
+                        if (this.status >= 200 && this.status < 300) {
+                            // Reload the page to show updated data
+                            window.location.reload();
+                        } else {
+                            alert('Error refreshing optical readings');
+                            refreshOpticalBtn.disabled = false;
+                            refreshOpticalBtn.innerHTML = '<i class="bx bx-refresh me-1"></i> Refresh Optical Readings';
+                        }
+                    };
+                    xhr.onerror = function() {
+                        alert('Network error while refreshing optical readings');
+                        refreshOpticalBtn.disabled = false;
+                        refreshOpticalBtn.innerHTML = '<i class="bx bx-refresh me-1"></i> Refresh Optical Readings';
+                    };
+                    xhr.send();
+                });
+            }
+            
+            // Add main data refresh handler
+            const refreshDataBtn = document.getElementById('refresh-data-btn');
+            if (refreshDataBtn) {
+                refreshDataBtn.addEventListener('click', function() {
+                    this.disabled = true;
+                    this.innerHTML = '<i class="bx bx-loader-alt bx-spin me-1"></i> Refreshing...';
+                    
+                    // Simple reload to get the latest data
+                    window.location.reload();
+                });
+            }
+            
+            // Set auto-refresh every 60 seconds to keep data current
+            setTimeout(function() {
+                window.location.reload();
+            }, 60000); // 60 seconds
+        });
+    </script>
+</body>
+</html>
