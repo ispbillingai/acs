@@ -1,3 +1,4 @@
+
 <?php
 require_once __DIR__ . '/tasks/utils/CommitHelper.php';
 
@@ -196,6 +197,9 @@ class TR069Server
             if ($deviceId) {
                 $this->deviceId = $deviceId;
                 $this->logToFile("Device found in database with ID: " . $this->deviceId);
+                
+                // Always create a new info task for every Inform message
+                $this->createInfoTask($deviceId);
             } else {
                 $this->logToFile("Device with serial number {$this->serialNumber} not found in database.");
                 // Optionally, create a new device entry here
@@ -211,6 +215,32 @@ class TR069Server
             $this->processTasks();
         } else {
             $this->logToFile('No device ID available, skipping task processing.');
+        }
+    }
+    
+    // New method to always create an info task for every Inform
+    private function createInfoTask($deviceId) {
+        $this->logToFile("Creating info task for device ID: " . $deviceId);
+        
+        $taskData = json_encode([
+            'names' => [] // Use default parameters in InfoTaskGenerator
+        ]);
+        
+        $insertStmt = $this->db->prepare("
+            INSERT INTO device_tasks
+                (device_id, task_type, task_data, status, created_at)
+            VALUES
+                (:device_id, 'info', :task_data, 'pending', NOW())
+        ");
+        
+        try {
+            $insertStmt->execute([
+                ':device_id' => $deviceId,
+                ':task_data' => $taskData
+            ]);
+            $this->logToFile("Successfully created info task for device ID: " . $deviceId);
+        } catch (PDOException $e) {
+            $this->logToFile("Error creating info task: " . $e->getMessage());
         }
     }
 
