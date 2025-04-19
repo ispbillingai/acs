@@ -120,7 +120,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"action\": \"configure_wifi\",\n    \"device_id\": \"1\",\n    \"ssid\": \"MyNewWiFi\",\n    \"password\": \"StrongPassword123\"\n}"
+              "raw": "{\n    \"action\": \"configure_wifi\",\n    \"device_id\": \"1\",\n    \"ssid\": \"MyNevwWiFi\",\n    \"password\": \"StrongPassword123\"\n}"
             },
             "url": {
               "raw": "{{base_url}}/parameters.php",
