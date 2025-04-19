@@ -361,13 +361,35 @@ try {
                     exit;
                 }
                 
-                // Create task data
+                // Create task data, default to Huawei vendor RPC
                 $taskData = [
                     'reboot_reason' => isset($_POST['reason']) ? $_POST['reason'] : 'User initiated reboot',
-                    'use_vendor_rpc' => isset($_POST['use_vendor_rpc']) && $_POST['use_vendor_rpc'] === 'true'
+                    'use_vendor_rpc' => !isset($_POST['use_vendor_rpc']) || $_POST['use_vendor_rpc'] !== 'false'
                 ];
                 
                 writeToDeviceLog("[Reboot] Creating reboot task for device: {$device['serial_number']}, Vendor RPC: " . ($taskData['use_vendor_rpc'] ? 'Yes' : 'No'));
+                
+                // If rpc_discovery is requested, queue a GetRPCMethods task first
+                if (isset($_POST['rpc_discovery']) && $_POST['rpc_discovery'] === 'true') {
+                    $rpcTaskData = [
+                        'method' => 'GetRPCMethods',
+                        'purpose' => 'Discover RPCs for reboot'
+                    ];
+                    
+                    writeToDeviceLog("[Reboot] Creating GetRPCMethods task for device: {$device['serial_number']}");
+                    
+                    $rpcStmt = $db->prepare("
+                        INSERT INTO device_tasks (device_id, task_type, task_data, status, created_at)
+                        VALUES (:device_id, 'rpc_discovery', :task_data, 'pending', NOW())
+                    ");
+                    $rpcStmt->execute([
+                        ':device_id' => $deviceId,
+                        ':task_data' => json_encode($rpcTaskData)
+                    ]);
+                    
+                    $rpcTaskId = $db->lastInsertId();
+                    writeToDeviceLog("[Task Created] ID: {$rpcTaskId}, Type: rpc_discovery");
+                }
                 
                 // Cancel any existing pending reboot tasks
                 $cancelStmt = $db->prepare("
@@ -387,7 +409,7 @@ try {
                     UPDATE device_tasks 
                     SET status = 'failed', message = 'Task timed out', updated_at = NOW()
                     WHERE device_id = :device_id AND task_type = 'reboot' AND status = 'in_progress' 
-                    AND updated_at < NOW() - INTERVAL 5 MINUTE
+                    AND updated_at < NOW() - INTERVAL 2 MINUTE
                 ");
                 $failStmt->execute([':device_id' => $deviceId]);
                 $failedCount = $failStmt->rowCount();
@@ -396,7 +418,7 @@ try {
                     writeToDeviceLog("[Reboot] Marked {$failedCount} stalled in-progress reboot tasks as failed");
                 }
                 
-                // Insert task
+                // Insert reboot task
                 $stmt = $db->prepare("
                     INSERT INTO device_tasks (device_id, task_type, task_data, status, created_at)
                     VALUES (:device_id, 'reboot', :task_data, 'pending', NOW())
@@ -414,7 +436,8 @@ try {
                 echo json_encode([
                     'success' => true,
                     'message' => 'Reboot task queued successfully, awaiting next Inform',
-                    'task_id' => $taskId
+                    'task_id' => $taskId,
+                    'rpc_discovery_task_id' => isset($rpcTaskId) ? $rpcTaskId : null
                 ]);
                 break;
             
