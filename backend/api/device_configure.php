@@ -369,8 +369,9 @@ try {
                 
                 writeToDeviceLog("[Reboot] Creating reboot task for device: {$device['serial_number']}, Vendor RPC: " . ($taskData['use_vendor_rpc'] ? 'Yes' : 'No'));
                 
-                // If rpc_discovery is requested, queue a GetRPCMethods task first
-                if (isset($_POST['rpc_discovery']) && $_POST['rpc_discovery'] === 'true') {
+                // Queue a GetRPCMethods task by default, unless explicitly disabled
+                $rpcTaskId = null;
+                if (!isset($_POST['rpc_discovery']) || $_POST['rpc_discovery'] !== 'false') {
                     $rpcTaskData = [
                         'method' => 'GetRPCMethods',
                         'purpose' => 'Discover RPCs for reboot'
@@ -437,7 +438,7 @@ try {
                     'success' => true,
                     'message' => 'Reboot task queued successfully, awaiting next Inform',
                     'task_id' => $taskId,
-                    'rpc_discovery_task_id' => isset($rpcTaskId) ? $rpcTaskId : null
+                    'rpc_discovery_task_id' => $rpcTaskId
                 ]);
                 break;
             
