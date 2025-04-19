@@ -97,6 +97,7 @@ function createPendingInfoTask($deviceId, $db) {
 }
 
 
+//Saving parameters
 // Helper function to save parameter values to the database
 function saveParameterValues($raw, $serialNumber, $db) {
     // Map TR-069 parameter names to devices table columns
@@ -197,8 +198,8 @@ function saveParameterValues($raw, $serialNumber, $db) {
     // Update connected_clients table if we have host data
     if (!empty($hosts)) {
         try {
-            // Get device_id from devices table
-            $stmt = $db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
+            // Get device_id and connected_devices from devices table
+            $stmt = $db->prepare("SELECT id, connected_devices FROM devices WHERE serial_number = :serial");
             $stmt->execute([':serial' => $serialNumber]);
             $device = $stmt->fetch(PDO::FETCH_ASSOC);
             
@@ -209,12 +210,48 @@ function saveParameterValues($raw, $serialNumber, $db) {
             }
             
             $deviceId = $device['id'];
+            $connectedDevices = (int) ($device['connected_devices'] ?? 0);
             
-            // Process each host
+            // Validate connected_devices
+            if ($connectedDevices < 0) {
+                file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Invalid connected_devices count: $connectedDevices for device $serialNumber\n", FILE_APPEND);
+                tr069_log("Invalid connected_devices count: $connectedDevices for device $serialNumber", "ERROR");
+                return;
+            }
+            
+            // Count current hosts in connected_clients
+            $countStmt = $db->prepare("SELECT COUNT(*) as count FROM connected_clients WHERE device_id = :device_id");
+            $countStmt->execute([':device_id' => $deviceId]);
+            $currentHostCount = (int) $countStmt->fetch(PDO::FETCH_ASSOC)['count'];
+            
+            // Delete all hosts if connected_devices is less than current host count or if connected_devices is 0
+            if ($connectedDevices < $currentHostCount || $connectedDevices === 0) {
+                $deleteStmt = $db->prepare("DELETE FROM connected_clients WHERE device_id = :device_id");
+                $deleteResult = $deleteStmt->execute([':device_id' => $deviceId]);
+                file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Deleted $currentHostCount hosts for device_id $deviceId (new connected_devices: $connectedDevices)\n", FILE_APPEND);
+                tr069_log("Deleted $currentHostCount hosts for device $serialNumber (new connected_devices: $connectedDevices)", "INFO");
+            }
+            
+            // Process each host, up to connected_devices limit
             $hostSuccess = 0;
-            foreach ($hosts as $hostIndex => $host) {
+            $hostCount = min(count($hosts), $connectedDevices);
+            
+            // Skip host processing if connected_devices is 0
+            if ($connectedDevices === 0) {
+                file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] No hosts to process (connected_devices: 0)\n", FILE_APPEND);
+                tr069_log("No hosts to process for device $serialNumber (connected_devices: 0)", "INFO");
+                return;
+            }
+            
+            for ($i = 1; $i <= $hostCount; $i++) {
+                if (!isset($hosts[$i])) {
+                    file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Skipping host $i: no data available\n", FILE_APPEND);
+                    continue;
+                }
+                
+                $host = $hosts[$i];
                 if (empty($host['ip_address']) && empty($host['mac_address'])) {
-                    file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Skipping host $hostIndex: no IP or MAC address\n", FILE_APPEND);
+                    file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Skipping host $i: no IP or MAC address\n", FILE_APPEND);
                     continue;
                 }
                 
@@ -247,9 +284,9 @@ function saveParameterValues($raw, $serialNumber, $db) {
                     
                     if ($updateResult) {
                         $hostSuccess++;
-                        file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Updated host $hostIndex for device_id $deviceId: ip_address={$host['ip_address']}, mac_address={$host['mac_address']}\n", FILE_APPEND);
+                        file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Updated host $i for device_id $deviceId: ip_address={$host['ip_address']}, mac_address={$host['mac_address']}\n", FILE_APPEND);
                     } else {
-                        file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Failed to update host $hostIndex for device_id $deviceId\n", FILE_APPEND);
+                        file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Failed to update host $i for device_id $deviceId\n", FILE_APPEND);
                     }
                 } else {
                     // Insert new host
@@ -277,9 +314,9 @@ function saveParameterValues($raw, $serialNumber, $db) {
                     
                     if ($insertResult) {
                         $hostSuccess++;
-                        file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Inserted host $hostIndex for device_id $deviceId: ip_address={$host['ip_address']}, mac_address={$host['mac_address']}\n", FILE_APPEND);
+                        file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Inserted host $i for device_id $deviceId: ip_address={$host['ip_address']}, mac_address={$host['mac_address']}\n", FILE_APPEND);
                     } else {
-                        file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Failed to insert host $hostIndex for device_id $deviceId\n", FILE_APPEND);
+                        file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Failed to insert host $i for device_id $deviceId\n", FILE_APPEND);
                     }
                 }
             }
@@ -293,6 +330,12 @@ function saveParameterValues($raw, $serialNumber, $db) {
     }
 }
 
+
+
+
+
+
+//it ends here please
 
 // Include required files
 require_once __DIR__ . '/backend/config/database.php';
