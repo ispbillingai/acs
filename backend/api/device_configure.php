@@ -79,6 +79,133 @@ try {
                 'updated_at' => $task['updated_at']
             ]);
             break;
+
+            case 'pppoe':
+                // Validate parameters
+                if (!isset($_POST['device_id']) || !isset($_POST['pppoe_username']) || !isset($_POST['pppoe_password'])) {
+                    writeToDeviceLog("[Error] Missing required parameters for PPPoE configuration");
+                    header('Content-Type: application/json');
+                    echo json_encode(['success' => false, 'message' => 'Device ID, PPPoE username, and password are required']);
+                    exit;
+                }
+            
+                $deviceId = $_POST['device_id'];
+                $pppoe_username = trim($_POST['pppoe_username']);
+                $pppoe_password = trim($_POST['pppoe_password']);
+            
+                if (empty($pppoe_username)) {
+                    writeToDeviceLog("[Error] PPPoE username is empty");
+                    header('Content-Type: application/json');
+                    echo json_encode(['success' => false, 'message' => 'PPPoE username is required']);
+                    exit;
+                }
+            
+                // Get device information
+                $stmt = $db->prepare("SELECT * FROM devices WHERE id = :id");
+                $stmt->execute([':id' => $deviceId]);
+                $device = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+                if (!$device) {
+                    writeToDeviceLog("[Error] Device not found: {$deviceId}");
+                    header('Content-Type: application/json');
+                    echo json_encode(['success' => false, 'message' => 'Device not found']);
+                    exit;
+                }
+            
+                // Create task data
+                $taskData = json_encode([
+                    'pppoe_username' => $pppoe_username,
+                    'pppoe_password' => $pppoe_password
+                ]);
+            
+                writeToDeviceLog("[PPPoE Config] Creating task for Username: {$pppoe_username}, Password length: " . strlen($pppoe_password));
+            
+                // Cancel any existing pending PPPoE tasks
+                $cancelStmt = $db->prepare("
+                    UPDATE device_tasks 
+                    SET status = 'canceled', message = 'Superseded by newer task', updated_at = NOW()
+                    WHERE device_id = :device_id AND task_type = 'pppoe' AND status = 'pending'
+                ");
+                $cancelStmt->execute([':device_id' => $deviceId]);
+                $canceledCount = $cancelStmt->rowCount();
+            
+                if ($canceledCount > 0) {
+                    writeToDeviceLog("[PPPoE Config] Canceled {$canceledCount} older pending PPPoE tasks");
+                }
+            
+                // Mark any stuck in-progress PPPoE tasks as failed
+                $failStmt = $db->prepare("
+                    UPDATE device_tasks 
+                    SET status = 'failed', message = 'Task timed out', updated_at = NOW()
+                    WHERE device_id = :device_id AND task_type = 'pppoe' AND status = 'in_progress' 
+                    AND updated_at < NOW() - INTERVAL 5 MINUTE
+                ");
+                $failStmt->execute([':device_id' => $deviceId]);
+                $failedCount = $failStmt->rowCount();
+            
+                if ($failedCount > 0) {
+                    writeToDeviceLog("[PPPoE Config] Marked {$failedCount} stalled in-progress PPPoE tasks as failed");
+                }
+            
+                // Insert task
+                $stmt = $db->prepare("
+                    INSERT INTO device_tasks (device_id, task_type, task_data, status, created_at)
+                    VALUES (:device_id, 'pppoe', :task_data, 'pending', NOW())
+                ");
+            
+                $stmt->execute([
+                    ':device_id' => $deviceId,
+                    ':task_data' => $taskData
+                ]);
+            
+                $taskId = $db->lastInsertId();
+                writeToDeviceLog("[Task Created] ID: {$taskId}, Type: pppoe");
+            
+                // Prepare connection request data for frontend display
+                $ipAddress = $device['ip_address'] ?? '';
+                $serialNumber = $device['serial_number'] ?? '';
+            
+                // Build connection request URLs
+                if (!empty($ipAddress)) {
+                    $ports = ['30005', '37215', '7547', '4567'];
+                    $username = 'admin';
+                    $password = 'admin';
+            
+                    $connectionUrl = "http://{$ipAddress}:30005/acs";
+                    $command = "curl -v -u \"{$username}:{$password}\" -d \"<cwmp:ID>API_".$taskId."</cwmp:ID>\" \"{$connectionUrl}\"";
+            
+                    $altCommands = [];
+                    foreach ($ports as $port) {
+                        if ($port === '30005') continue; // Skip default
+                        $altUrl = "http://{$ipAddress}:{$port}/acs";
+                        $altCommands[] = "curl -v -u \"{$username}:{$password}\" -d \"<cwmp:ID>API_".$taskId."</cwmp:ID>\" \"{$altUrl}\"";
+                    }
+            
+                    $connectionRequest = [
+                        'url' => $connectionUrl,
+                        'username' => $username,
+                        'password' => $password,
+                        'command' => $command,
+                        'alternative_commands' => $altCommands
+                    ];
+            
+                    header('Content-Type: application/json');
+                    echo json_encode([
+                        'success' => true,
+                        'message' => 'PPPoE configuration task created successfully',
+                        'task_id' => $taskId,
+                        'connection_request' => $connectionRequest,
+                        'tr069_session_id' => $GLOBALS['session_id'] ?? null
+                    ]);
+                } else {
+                    header('Content-Type: application/json');
+                    echo json_encode([
+                        'success' => true,
+                        'message' => 'PPPoE configuration task created successfully',
+                        'task_id' => $taskId
+                    ]);
+                }
+                break;
         
         case 'wifi':
             // Validate parameters
