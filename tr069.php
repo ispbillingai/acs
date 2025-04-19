@@ -44,16 +44,6 @@ function createPendingInfoTask($deviceId, $db) {
     try {
         tr069_log("TASK CREATION: Starting task creation for device ID: $deviceId", "INFO");
         
-        // Check for existing in-progress tasks
-        $checkStmt = $db->prepare("SELECT id, task_type FROM device_tasks WHERE device_id = :device_id AND status = 'in_progress' LIMIT 1");
-        $checkStmt->execute([':device_id' => $deviceId]);
-        $existingTask = $checkStmt->fetch(PDO::FETCH_ASSOC);
-        
-        if ($existingTask) {
-            tr069_log("TASK CREATION: Found existing in-progress task ID: {$existingTask['id']} ({$existingTask['task_type']}), skipping new task creation", "INFO");
-            return false;
-        }
-        
         $taskData = json_encode(['names' => []]);
         
         $insertStmt = $db->prepare("
@@ -403,8 +393,7 @@ try {
                 session_start();
                 $_SESSION['current_task'] = $pendingTasks[0];
                 $_SESSION['device_serial'] = $serialNumber;
-                $_SESSION['pending_requests'] = [];
-                $_SESSION['completed_contexts'] = [];
+                $_SESSION['pending_requests'] = []; // Initialize pending requests
                 session_write_close();
             } else {
                 tr069_log("No pending tasks for device ID: " . ($deviceId ?: 'unknown'), "INFO");
@@ -458,7 +447,6 @@ try {
          stripos($raw_post, 'ParameterValueStruct') !== false)) {
         
         tr069_log("Received GetParameterValuesResponse", "INFO");
-        tr069_log("Raw GetParameterValuesResponse: " . substr($raw_post, 0, 500) . "...", "DEBUG");
         
         preg_match('/<cwmp:ID [^>]*>(.*?)<\/cwmp:ID>/', $raw_post, $idMatches);
         $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
@@ -469,22 +457,12 @@ try {
         $pending_requests = isset($_SESSION['pending_requests']) ? $_SESSION['pending_requests'] : [];
         $completed_contexts = isset($_SESSION['completed_contexts']) ? $_SESSION['completed_contexts'] : [];
         
-        tr069_log("Session state - serial: $serialNumber, task_id: " . ($current_task['id'] ?? 'none') . ", pending_requests: " . count($pending_requests) . ", completed_contexts: " . implode(',', $completed_contexts), "DEBUG");
-        
         if ($serialNumber && $current_task) {
-            // Extract context from task message
+            // Extract context from task message or request
             $context = 'Unknown';
-            if (preg_match('/Context: ([\w_]+)/', $current_task['message'], $contextMatches)) {
+            if (preg_match('/Context: (\w+)/', $current_task['message'], $contextMatches)) {
                 $context = $contextMatches[1];
-            } else {
-                tr069_log("Failed to extract context from task message: {$current_task['message']}", "WARNING");
-                // Fallback: Assume Core if no context found and it's the first request
-                if (empty($completed_contexts)) {
-                    $context = 'Core';
-                }
             }
-            
-            tr069_log("Processing GetParameterValuesResponse for context: $context", "INFO");
             
             saveParameterValues($raw_post, $serialNumber, $db);
             
@@ -510,17 +488,16 @@ try {
             if (!in_array($context, $completed_contexts)) {
                 $completed_contexts[] = $context;
                 $_SESSION['completed_contexts'] = $completed_contexts;
-                tr069_log("Marked context as completed: $context", "INFO");
             }
             
             // Check if there are more pending requests
             if (!empty($pending_requests)) {
+                // Update task to indicate next request is being sent
                 $nextRequest = array_shift($pending_requests);
                 $_SESSION['pending_requests'] = $pending_requests;
                 
-                $nextContext = isset($nextRequest['context']) ? $nextRequest['context'] : 'Unknown';
-                $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', "Processed $context response, preparing next request (Context: $nextContext)");
-                tr069_log("Processed $context response, preparing next request: $nextContext", "INFO");
+                $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', "Processed $context response, preparing next request (Context: {$nextRequest['context']})");
+                tr069_log("Processed $context response, preparing next request: {$nextRequest['context']}", "INFO");
             } else {
                 // No more pending requests, complete the task
                 $taskHandler->updateTaskStatus($current_task['id'], 'completed', 'Successfully retrieved all device information');
@@ -635,8 +612,8 @@ try {
             $soapId = isset($idMatches[1]) ? $idMatches[1] : '1';
         }
         
-        session_start();
         $current_task = null;
+        session_start();
         if ($GLOBALS['current_task']) {
             $current_task = $GLOBALS['current_task'];
         } elseif (isset($_SESSION['current_task'])) {
@@ -659,22 +636,24 @@ try {
             exit;
         }
         
-        if ($current_task && $serialNumber) {
+        if ($current_task) {
             tr069_log("Processing task from session: {$current_task['task_type']} - ID: {$current_task['id']}", "INFO");
             
+            // Check if pending requests are already set
             $pending_requests = isset($_SESSION['pending_requests']) ? $_SESSION['pending_requests'] : [];
-            tr069_log("Pending requests count: " . count($pending_requests), "DEBUG");
             
             if (empty($pending_requests)) {
                 // Generate new requests
                 $parameterRequests = $taskHandler->generateParameterValues($current_task['task_type'], $current_task['task_data']);
                 
                 if ($parameterRequests) {
+                    // Handle single request or array of requests
                     $requests = is_array($parameterRequests) && isset($parameterRequests[0]) && is_array($parameterRequests[0]) ? $parameterRequests : [$parameterRequests];
+                    
+                    // Store all requests in session
                     $_SESSION['pending_requests'] = $requests;
                     $_SESSION['completed_contexts'] = [];
                     $pending_requests = $requests;
-                    tr069_log("Generated " . count($requests) . " parameter requests: " . print_r(array_map(function($r) { return $r['context'] ?? 'Unknown'; }, $requests), true), "DEBUG");
                 } else {
                     tr069_log("Failed to generate parameters for task {$current_task['id']}", "ERROR");
                     $taskHandler->updateTaskStatus($current_task['id'], 'failed', 'Failed to generate parameters');
@@ -698,8 +677,6 @@ try {
             if (!empty($pending_requests)) {
                 $request = array_shift($pending_requests);
                 $_SESSION['pending_requests'] = $pending_requests;
-                
-                tr069_log("Processing next request: " . ($request['context'] ?? 'Unknown'), "INFO");
                 
                 if ($request['method'] === 'GetParameterValues') {
                     $nameXml = '';
@@ -732,12 +709,99 @@ try {
                     session_write_close();
                     exit;
                 }
-            } else {
-                tr069_log("No pending requests for task {$current_task['id']}, marking as completed", "INFO");
-                $taskHandler->updateTaskStatus($current_task['id'], 'completed', 'No more pending requests');
-                unset($_SESSION['current_task']);
-                unset($_SESSION['pending_requests']);
-                unset($_SESSION['completed_contexts']);
+            }
+            
+            // Handle SetParameterValues (e.g., for wifi tasks)
+            if ($pending_requests[0]['method'] === 'SetParameterValues') {
+                $paramXml = '';
+                $paramCount = count($pending_requests[0]['parameters']);
+                
+                foreach ($pending_requests[0]['parameters'] as $param) {
+                    $paramXml .= "        <ParameterValueStruct>\n";
+                    $paramXml .= "          <Name>" . htmlspecialchars($param['name']) . "</Name>\n";
+                    $paramXml .= "          <Value xsi:type=\"" . $param['type'] . "\">" . htmlspecialchars($param['value']) . "</Value>\n";
+                    $paramXml .= "        </ParameterValueStruct>\n";
+                    tr069_log("Setting parameter: {$param['name']} = {$param['value']}", "DEBUG");
+                }
+                
+                $setParamRequest = '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0" xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:SetParameterValues>
+      <ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[' . $paramCount . ']">
+' . $paramXml . '      </ParameterList>
+      <ParameterKey>Task-' . $current_task['id'] . '-' . substr(md5(time()), 0, 8) . '</ParameterKey>
+    </cwmp:SetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>';
+
+                header('Content-Type: text/xml');
+                echo $setParamRequest;
+                
+                $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 'Sent parameters to device');
+                tr069_log("Task marked as in_progress: {$current_task['id']}", "INFO");
+                session_write_close();
+                exit;
+            } elseif ($pending_requests[0]['method'] === 'Reboot') {
+                $rebootRequest = '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:Reboot>
+      <CommandKey>' . $pending_requests[0]['commandKey'] . '</CommandKey>
+    </cwmp:Reboot>
+  </soapenv:Body>
+</soapenv:Envelope>';
+
+                tr069_log("Sending reboot command with key: " . $pending_requests[0]['commandKey'], "INFO");
+                
+                header('Content-Type: text/xml');
+                header('Connection: close');
+                header('Content-Length: ' . strlen($rebootRequest));
+                echo $rebootRequest;
+                flush();
+                if (function_exists('fastcgi_finish_request')) {
+                    fastcgi_finish_request();
+                }
+                
+                $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 'Sent reboot command to device');
+                tr069_log("Task marked as in_progress: {$current_task['id']}", "INFO");
+                session_write_close();
+                exit;
+            } elseif ($pending_requests[0]['method'] === 'X_HW_DelayReboot') {
+                $rebootRequest = '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:X_HW_DelayReboot>
+      <CommandKey>' . $pending_requests[0]['commandKey'] . '</CommandKey>
+      <DelaySeconds>' . $pending_requests[0]['delay'] . '</DelaySeconds>
+    </cwmp:X_HW_DelayReboot>
+  </soapenv:Body>
+</soapenv:Envelope>';
+
+                tr069_log("Sending Huawei vendor reboot command with key: " . $pending_requests[0]['commandKey'], "INFO");
+                
+                header('Content-Type: text/xml');
+                header('Connection: close');
+                header('Content-Length: ' . strlen($rebootRequest));
+                echo $rebootRequest;
+                flush();
+                if (function_exists('fastcgi_finish_request')) {
+                    fastcgi_finish_request();
+                }
+                
+                $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 'Sent vendor reboot command to device');
+                tr069_log("Task marked as in_progress: {$current_task['id']}", "INFO");
+                session_write_close();
+                exit;
             }
         }
         
