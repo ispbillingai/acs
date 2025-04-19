@@ -1,4 +1,3 @@
-
 <?php
 
 class RebootTaskGenerator {
@@ -8,31 +7,40 @@ class RebootTaskGenerator {
     
     public function __construct($logger) {
         $this->logger = $logger;
+        $this->logger->logToFile("RebootTaskGenerator initialized");
     }
     
     public function generateParameters($data) {
+        // Validate input data
+        if (!is_array($data)) {
+            $this->logger->logToFile("Error: Invalid task data for reboot task");
+            throw new Exception("Invalid task data for reboot task");
+        }
+        
         // Get the reboot reason from the task data or use a default
         $reason = $data['reboot_reason'] ?? 'User initiated reboot';
         
         // Generate a shorter CommandKey (≤ 30 ASCII characters)
         $commandKey = 'reboot-' . bin2hex(random_bytes(4));
         
-        // Detect if we should use the Huawei vendor-specific reboot RPC based on data
+        // Detect if we should use the Huawei vendor-specific reboot RPC
         $this->useHuaweiVendorRpc = isset($data['use_vendor_rpc']) && $data['use_vendor_rpc'] === true;
         
-        $this->logger->logToFile("Generated Reboot command with reason: $reason, CommandKey: $commandKey, Vendor RPC: " . ($this->useHuaweiVendorRpc ? 'Yes' : 'No'));
+        $rpcMethod = $this->useHuaweiVendorRpc ? 'X_HW_DelayReboot' : 'Reboot';
         
-        if ($this->useHuaweiVendorRpc) {
-            return [
-                'method' => 'X_HW_DelayReboot',
-                'commandKey' => $commandKey,
-                'delay' => 0
-            ];
-        }
+        $this->logger->logToFile("Generating reboot parameters: Reason: $reason, CommandKey: $commandKey, Method: $rpcMethod");
         
-        return [
-            'method' => 'Reboot',
+        $parameters = [
+            'method' => $rpcMethod,
             'commandKey' => $commandKey
         ];
+        
+        if ($this->useHuaweiVendorRpc) {
+            $parameters['delay'] = 0; // Immediate reboot
+            $this->logger->logToFile("Using Huawei vendor-specific reboot with delay: 0");
+        }
+        
+        return $parameters;
     }
 }
+?>

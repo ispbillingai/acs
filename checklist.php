@@ -1,3 +1,5 @@
+<?php
+/*
 Test Epon 
 Test gpon
 Use this  to get all the <details></details>
@@ -19,3 +21,10 @@ Use this  to get all the <details></details>
     </cwmp:GetParameterValues>
   </soapenv:Body>
 </soapenv:Envelope>
+
+Incase it restarts if its in porgress it stucks there we should sort that
+logging should be rotated just for two days okay?
+Test with gpon and epon 
+
+//Remember to refactor with gpon the file okay?
+//implement a way to find if a user is making too many request should just be within 5 minutes for request okay

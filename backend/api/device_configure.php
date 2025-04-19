@@ -138,6 +138,18 @@ try {
             $taskId = $db->lastInsertId();
             writeToDeviceLog("[Task Created] ID: {$taskId}, Type: wifi");
             
+            // Get device information
+            $stmt = $db->prepare("SELECT * FROM devices WHERE id = :id");
+            $stmt->execute([':id' => $deviceId]);
+            $device = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if (!$device) {
+                writeToDeviceLog("[Error] Device not found: {$deviceId}");
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => 'Device not found']);
+                exit;
+            }
+            
             // Prepare connection request data for frontend display
             $ipAddress = $device['ip_address'] ?? '';
             $serialNumber = $device['serial_number'] ?? '';
@@ -339,17 +351,61 @@ try {
             break;
             
         case 'reboot':
+            // Validate device ID
+            if (!isset($_POST['device_id'])) {
+                writeToDeviceLog("[Error] Missing device ID for reboot");
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => 'Device ID is required']);
+                exit;
+            }
+            
+            $deviceId = $_POST['device_id'];
+            
+            // Get device information
+            $stmt = $db->prepare("SELECT * FROM devices WHERE id = :id");
+            $stmt->execute([':id' => $deviceId]);
+            $device = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if (!$device) {
+                writeToDeviceLog("[Error] Device not found: {$deviceId}");
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => 'Device not found']);
+                exit;
+            }
+            
             // Create task data
             $taskData = [
-                'reboot_reason' => isset($_POST['reason']) ? $_POST['reason'] : 'User initiated reboot'
+                'reboot_reason' => isset($_POST['reason']) ? $_POST['reason'] : 'User initiated reboot',
+                'use_vendor_rpc' => isset($_POST['use_vendor_rpc']) && $_POST['use_vendor_rpc'] === 'true'
             ];
             
-            // Check if we should use vendor-specific RPC for Huawei devices
-            if (isset($_POST['use_vendor_rpc']) && $_POST['use_vendor_rpc'] === 'true') {
-                $taskData['use_vendor_rpc'] = true;
-                writeToDeviceLog("[Reboot] Creating Huawei vendor-specific reboot task for device: {$device['serial_number']}");
-            } else {
-                writeToDeviceLog("[Reboot] Creating standard reboot task for device: {$device['serial_number']}");
+            writeToDeviceLog("[Reboot] Creating reboot task for device: {$device['serial_number']}, Vendor RPC: " . ($taskData['use_vendor_rpc'] ? 'Yes' : 'No'));
+            
+            // Cancel any existing pending reboot tasks
+            $cancelStmt = $db->prepare("
+                UPDATE device_tasks 
+                SET status = 'canceled', message = 'Superseded by newer task', updated_at = NOW()
+                WHERE device_id = :device_id AND task_type = 'reboot' AND status = 'pending'
+            ");
+            $cancelStmt->execute([':device_id' => $deviceId]);
+            $canceledCount = $cancelStmt->rowCount();
+            
+            if ($canceledCount > 0) {
+                writeToDeviceLog("[Reboot] Canceled {$canceledCount} older pending reboot tasks");
+            }
+            
+            // Mark any stuck in-progress reboot tasks as failed
+            $failStmt = $db->prepare("
+                UPDATE device_tasks 
+                SET status = 'failed', message = 'Task timed out', updated_at = NOW()
+                WHERE device_id = :device_id AND task_type = 'reboot' AND status = 'in_progress' 
+                AND updated_at < NOW() - INTERVAL 5 MINUTE
+            ");
+            $failStmt->execute([':device_id' => $deviceId]);
+            $failedCount = $failStmt->rowCount();
+            
+            if ($failedCount > 0) {
+                writeToDeviceLog("[Reboot] Marked {$failedCount} stalled in-progress reboot tasks as failed");
             }
             
             // Insert task
@@ -484,3 +540,4 @@ try {
         'message' => 'An error occurred: ' . $e->getMessage()
     ]);
 }
+?>
