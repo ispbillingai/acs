@@ -296,7 +296,7 @@ try {
                 <!-- Configuration Panel -->
                 <div class="card mb-4">
                     <div class="card-header bg-white py-3">
-                        <h5 class="card-title mb-0"><i class='bx bx-cog me-2'></i>Device Configuration</h5>
+                        <h5 class="card-title mb-0"><i class='bx bx-cog me-2'></i>Device Configuration</h5NEGRO
                     </div>
                     <div class="card-body">
                         <?php if ($device['status'] === 'offline'): ?>
@@ -337,23 +337,23 @@ try {
                                 </div>
                             </div>
 
-                            <!-- WAN Configuration -->
+                            <!-- PPPoE Configuration -->
                             <div class="mb-4">
                                 <h3 class="h5 mb-3 d-flex align-items-center">
-                                    <i class='bx bx-globe me-2 text-primary'></i>WAN Configuration
+                                    <i class='bx bx-globe me-2 text-primary'></i>PPPoE Configuration
                                 </h3>
                                 <div class="row g-3">
                                     <div class="col-md-6">
-                                        <label for="wan-ip" class="form-label">IP Address</label>
-                                        <input type="text" class="form-control" id="wan-ip" value="<?php echo htmlspecialchars($device['ip_address'] ?? ''); ?>" placeholder="e.g., 192.168.1.1">
+                                        <label for="pppoe-username" class="form-label">PPPoE Username</label>
+                                        <input type="text" class="form-control" id="pppoe-username" placeholder="Enter username provided by ISP" required>
                                     </div>
                                     <div class="col-md-6">
-                                        <label for="wan-gateway" class="form-label">Gateway</label>
-                                        <input type="text" class="form-control" id="wan-gateway" placeholder="e.g., 192.168.1.254">
+                                        <label for="pppoe-password" class="form-label">PPPoE Password</label>
+                                        <input type="password" class="form-control" id="pppoe-password" placeholder="Enter password provided by ISP" required>
                                     </div>
                                     <div class="col-12">
-                                        <button type="button" class="btn btn-primary" id="update-wan-btn">
-                                            <i class='bx bx-save me-1'></i>Update WAN
+                                        <button type="button" class="btn btn-primary" id="update-pppoe-btn">
+                                            <i class='bx bx-save me-1'></i>Update PPPoE
                                         </button>
                                     </div>
                                 </div>
@@ -407,7 +407,7 @@ try {
                                                             case 'wifi':
                                                                 $taskIcon = 'bx-wifi';
                                                                 break;
-                                                            case 'wan':
+                                                            case 'pppoe':
                                                                 $taskIcon = 'bx-globe';
                                                                 break;
                                                             case 'reboot':
@@ -435,8 +435,8 @@ try {
                                                         $taskData = json_decode($task['task_data'], true);
                                                         if ($task['task_type'] == 'wifi' && isset($taskData['ssid'])) {
                                                             echo "SSID: " . htmlspecialchars($taskData['ssid']);
-                                                        } elseif ($task['task_type'] == 'wan' && isset($taskData['ip_address'])) {
-                                                            echo "IP: " . htmlspecialchars($taskData['ip_address']);
+                                                        } elseif ($task['task_type'] == 'pppoe' && isset($taskData['pppoe_username'])) {
+                                                            echo "Username: " . htmlspecialchars($taskData['pppoe_username']);
                                                         } else {
                                                             echo $task['message'] ?? "Waiting for device";
                                                         }
@@ -477,7 +477,7 @@ try {
                                                             case 'wifi':
                                                                 $taskIcon = 'bx-wifi';
                                                                 break;
-                                                            case 'wan':
+                                                            case 'pppoe':
                                                                 $taskIcon = 'bx-globe';
                                                                 break;
                                                             case 'reboot':
@@ -533,17 +533,17 @@ try {
                 makeConfigRequest('wifi', { ssid, password });
             });
             
-            // Update WAN configuration
-            document.getElementById('update-wan-btn').addEventListener('click', function() {
-                const ipAddress = document.getElementById('wan-ip').value;
-                const gateway = document.getElementById('wan-gateway').value;
+            // Update PPPoE configuration
+            document.getElementById('update-pppoe-btn').addEventListener('click', function() {
+                const username = document.getElementById('pppoe-username').value;
+                const password = document.getElementById('pppoe-password').value;
                 
-                if (!ipAddress) {
-                    alert('Please enter an IP address');
+                if (!username || !password) {
+                    alert('Please enter both PPPoE username and password');
                     return;
                 }
                 
-                makeConfigRequest('wan', { ip_address: ipAddress, gateway });
+                makeConfigRequest('pppoe', { pppoe_username: username, pppoe_password: password });
             });
             
             // Reboot device
