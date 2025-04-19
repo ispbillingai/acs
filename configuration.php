@@ -1,4 +1,3 @@
-
 <?php
 require_once __DIR__ . '/backend/config/database.php';
 require_once __DIR__ . '/backend/auth/login.php';
@@ -24,7 +23,6 @@ function logConfigChange($action, $details) {
 // Handle device reboot
 if (isset($_POST['reboot_device']) && $_POST['reboot_device'] == 1) {
     try {
-        // Log the reboot attempt
         logConfigChange("Device Reboot", "Initiated reboot for device");
         
         $_SESSION['success_message'] = "Reboot command sent to device!";
@@ -59,17 +57,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['success_message'] = "TR069 configuration updated successfully!";
         } 
         elseif (isset($_POST['wifi_config'])) {
-            // Log the WiFi configuration update
             logConfigChange("WiFi Configuration", "SSID: {$_POST['wifi_ssid']}");
-            
             $_SESSION['success_message'] = "WiFi configuration updated successfully!";
         }
-        elseif (isset($_POST['wan_config'])) {
-            // Log the WAN configuration update
-            $connectionType = $_POST['connection_type'];
-            logConfigChange("WAN Configuration", "Connection Type: {$connectionType}");
+        elseif (isset($_POST['pppoe_config'])) {
+            // Validate PPPoE inputs
+            $pppoe_username = trim($_POST['pppoe_username']);
+            $pppoe_password = trim($_POST['pppoe_password']);
             
-            $_SESSION['success_message'] = "WAN configuration updated successfully!";
+            if (empty($pppoe_username) || empty($pppoe_password)) {
+                throw new Exception("PPPoE username and password are required.");
+            }
+            
+            // Assume device serial number is stored in session or provided
+            // Replace '48575443A34AE49C' with actual serial number logic
+            $serial_number = isset($_SESSION['device_serial']) ? $_SESSION['device_serial'] : '48575443A34AE49C';
+            
+            // Fetch device ID
+            $stmt = $db->prepare("SELECT id FROM devices WHERE serial_number = ?");
+            $stmt->execute([$serial_number]);
+            $device_id = $stmt->fetchColumn();
+            
+            if (!$device_id) {
+                throw new Exception("Device not found for serial number: $serial_number");
+            }
+            
+            // Create PPPoE task
+            $task_data = json_encode([
+                'parameters' => [
+                    [
+                        'name' => 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Username',
+                        'value' => $pppoe_username,
+                        'type' => 'xsd:string'
+                    ],
+                    [
+                        'name' => 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Password',
+                        'value' => $pppoe_password,
+                        'type' => 'xsd:string'
+                    ]
+                ]
+            ]);
+            
+            $stmt = $db->prepare("
+                INSERT INTO device_tasks 
+                    (device_id, task_type, task_data, status, message, created_at, updated_at) 
+                VALUES 
+                    (?, 'pppoe', ?, 'pending', 'PPPoE configuration task created', NOW(), NOW())
+            ");
+            $stmt->execute([$device_id, $task_data]);
+            
+            logConfigChange("PPPoE Configuration", "Username: $pppoe_username");
+            $_SESSION['success_message'] = "PPPoE configuration task created successfully!";
         }
         
         header('Location: configuration.php');
@@ -132,8 +170,8 @@ include __DIR__ . '/backend/templates/header.php';
                         <a href="#wifi" class="border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm" id="wifi-tab">
                             WiFi Settings
                         </a>
-                        <a href="#wan" class="border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm" id="wan-tab">
-                            WAN Settings
+                        <a href="#pppoe" class="border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm" id="pppoe-tab">
+                            PPPoE Settings
                         </a>
                         <a href="#reboot" class="border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm" id="reboot-tab">
                             Reboot Device
@@ -209,7 +247,9 @@ include __DIR__ . '/backend/templates/header.php';
             <div id="wifi-panel" class="tab-panel hidden">
                 <div class="bg-white rounded-lg shadow-sm p-6">
                     <h2 class="text-lg font-medium text-gray-900 mb-4">WiFi Configuration</h2>
-                    <form method="POST" class="space-y-6">
+                    <form method="POST"
+
+ class="space-y-6">
                         <!-- WiFi SSID -->
                         <div>
                             <label for="wifi_ssid" class="block text-sm font-medium text-gray-700">WiFi Network Name (SSID)</label>
@@ -251,76 +291,34 @@ include __DIR__ . '/backend/templates/header.php';
                 </div>
             </div>
 
-            <!-- WAN Settings Panel -->
-            <div id="wan-panel" class="tab-panel hidden">
+            <!-- PPPoE Settings Panel -->
+            <div id="pppoe-panel" class="tab-panel hidden">
                 <div class="bg-white rounded-lg shadow-sm p-6">
-                    <h2 class="text-lg font-medium text-gray-900 mb-4">WAN Configuration</h2>
+                    <h2 class="text-lg font-medium text-gray-900 mb-4">PPPoE Configuration</h2>
                     <form method="POST" class="space-y-6">
-                        <!-- Connection Type -->
+                        <!-- PPPoE Username -->
                         <div>
-                            <label for="connection_type" class="block text-sm font-medium text-gray-700">Connection Type</label>
-                            <select name="connection_type" id="connection_type" 
+                            <label for="pppoe_username" class="block text-sm font-medium text-gray-700">PPPoE Username</label>
+                            <input type="text" name="pppoe_username" id="pppoe_username" 
+                                   placeholder="Enter username provided by ISP"
                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                                   onchange="toggleConnectionFields()">
-                                <option value="DHCP">DHCP (Automatic)</option>
-                                <option value="PPPoE">PPPoE</option>
-                                <option value="Static">Static IP</option>
-                            </select>
+                                   required>
                         </div>
 
-                        <!-- PPPoE Settings (initially hidden) -->
-                        <div id="pppoe_settings" class="hidden">
-                            <div class="space-y-4">
-                                <div>
-                                    <label for="pppoe_username" class="block text-sm font-medium text-gray-700">PPPoE Username</label>
-                                    <input type="text" name="pppoe_username" id="pppoe_username" 
-                                           placeholder="Enter username provided by ISP"
-                                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                                </div>
-                                <div>
-                                    <label for="pppoe_password" class="block text-sm font-medium text-gray-700">PPPoE Password</label>
-                                    <input type="password" name="pppoe_password" id="pppoe_password" 
-                                           placeholder="Enter password provided by ISP"
-                                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Static IP Settings (initially hidden) -->
-                        <div id="static_settings" class="hidden">
-                            <div class="space-y-4">
-                                <div>
-                                    <label for="static_ip" class="block text-sm font-medium text-gray-700">IP Address</label>
-                                    <input type="text" name="static_ip" id="static_ip" 
-                                           placeholder="e.g., 192.168.1.100"
-                                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                                </div>
-                                <div>
-                                    <label for="subnet_mask" class="block text-sm font-medium text-gray-700">Subnet Mask</label>
-                                    <input type="text" name="subnet_mask" id="subnet_mask" 
-                                           placeholder="e.g., 255.255.255.0"
-                                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                                </div>
-                                <div>
-                                    <label for="default_gateway" class="block text-sm font-medium text-gray-700">Default Gateway</label>
-                                    <input type="text" name="default_gateway" id="default_gateway" 
-                                           placeholder="e.g., 192.168.1.1"
-                                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                                </div>
-                                <div>
-                                    <label for="dns_servers" class="block text-sm font-medium text-gray-700">DNS Servers</label>
-                                    <input type="text" name="dns_servers" id="dns_servers" 
-                                           placeholder="e.g., 8.8.8.8, 8.8.4.4"
-                                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                                </div>
-                            </div>
+                        <!-- PPPoE Password -->
+                        <div>
+                            <label for="pppoe_password" class="block text-sm font-medium text-gray-700">PPPoE Password</label>
+                            <input type="password" name="pppoe_password" id="pppoe_password" 
+                                   placeholder="Enter password provided by ISP"
+                                   class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                   required>
                         </div>
 
                         <div class="pt-4">
-                            <input type="hidden" name="wan_config" value="1">
+                            <input type="hidden" name="pppoe_config" value="1">
                             <button type="submit" 
                                     class="inline-flex justify-center rounded-md border border-transparent bg-blue-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
-                                Update WAN Configuration
+                                Update PPPoE Configuration
                             </button>
                         </div>
                     </form>
@@ -366,7 +364,7 @@ include __DIR__ . '/backend/templates/header.php';
 <script>
     // Tab switching functionality
     document.addEventListener('DOMContentLoaded', function() {
-        const tabs = ['tr069', 'wifi', 'wan', 'reboot'];
+        const tabs = ['tr069', 'wifi', 'pppoe', 'reboot'];
         
         // Initialize tab event listeners
         tabs.forEach(tabId => {
@@ -382,24 +380,6 @@ include __DIR__ . '/backend/templates/header.php';
         if (hash && tabs.includes(hash)) {
             switchTab(hash);
         }
-
-        // Function to toggle connection type fields
-        window.toggleConnectionFields = function() {
-            const connectionType = document.getElementById('connection_type').value;
-            const pppoeSettings = document.getElementById('pppoe_settings');
-            const staticSettings = document.getElementById('static_settings');
-
-            // Hide all first
-            pppoeSettings.classList.add('hidden');
-            staticSettings.classList.add('hidden');
-
-            // Show relevant settings based on selection
-            if (connectionType === 'PPPoE') {
-                pppoeSettings.classList.remove('hidden');
-            } else if (connectionType === 'Static') {
-                staticSettings.classList.remove('hidden');
-            }
-        };
 
         // Confirm reboot action
         window.confirmReboot = function() {
@@ -434,11 +414,6 @@ include __DIR__ . '/backend/templates/header.php';
         if (selectedTab) {
             selectedTab.classList.remove('border-transparent', 'text-gray-500', 'hover:text-gray-700', 'hover:border-gray-300');
             selectedTab.classList.add('border-blue-500', 'text-blue-600');
-        }
-        
-        // Additional setup for WAN tab
-        if (tabId === 'wan') {
-            toggleConnectionFields();
         }
     }
 </script>

@@ -1,3 +1,13 @@
+<?php
+/*
+https://acs.ispledger.com/backend/api/rest/parameters.php
+
+{
+  "action": "configure_wifi",
+  "device_id": "1",
+  "ssid": "MyNevwWiFi",
+  "password": "StrongPassword123"
+}
 
 {
   "info": {

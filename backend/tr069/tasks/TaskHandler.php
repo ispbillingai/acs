@@ -114,6 +114,8 @@ class TaskHandler {
                 return $this->wifiTaskGenerator->generateParameters($data);
             case 'wan':
                 return $this->wanTaskGenerator->generateParameters($data);
+            case 'pppoe':
+                return $this->wanTaskGenerator->generateParameters($data);
             case 'reboot':
                 return $this->rebootTaskGenerator->generateParameters($data);
             case 'info':
@@ -166,3 +168,4 @@ class TaskHandler {
         return $this->commitHelper;
     }
 }
+?>
