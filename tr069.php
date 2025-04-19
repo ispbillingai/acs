@@ -99,20 +99,29 @@ function createPendingInfoTask($deviceId, $db) {
 
 // Helper function to save parameter values to the database
 function saveParameterValues($raw, $serialNumber, $db) {
-    // Map TR-069 parameter names to database columns
-    $map = [
+    // Map TR-069 parameter names to devices table columns
+    $deviceMap = [
         'ExternalIPAddress' => 'ip_address',
         'SoftwareVersion' => 'software_version',
         'HardwareVersion' => 'hardware_version',
         'UpTime' => 'uptime',
         'SSID' => 'ssid',
         'HostNumberOfEntries' => 'connected_devices',
-        'X_GponInterafceConfig.TXPower' => 'tx_power', // Added for optical TX power
-        'X_GponInterafceConfig.RXPower' => 'rx_power'  // Added for optical RX power
+        'X_GponInterafceConfig.TXPower' => 'tx_power',
+        'X_GponInterafceConfig.RXPower' => 'rx_power'
+    ];
+    
+    // Map TR-069 parameter names to connected_clients table columns
+    $hostMap = [
+        'IPAddress' => 'ip_address',
+        'HostName' => 'hostname',
+        'MACAddress' => 'mac_address',
+        'Active' => 'is_active'
     ];
     
     // Extract parameters from the response
-    $pairs = [];
+    $devicePairs = [];
+    $hosts = [];
     preg_match_all('/<ParameterValueStruct>.*?<Name>(.*?)<\/Name>.*?<Value[^>]*>(.*?)<\/Value>/s', $raw, $matches, PREG_SET_ORDER);
     
     $timestamp = date('Y-m-d H:i:s');
@@ -125,41 +134,165 @@ function saveParameterValues($raw, $serialNumber, $db) {
         // Ignore empty values
         if (empty($value)) continue;
         
-        // Try to match parameter name to database column
-        foreach ($map as $needle => $column) {
+        // Handle device parameters
+        foreach ($deviceMap as $needle => $column) {
             if (strpos($name, $needle) !== false) {
-                $pairs[$column] = $value;
-                file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Mapped $name to $column = $value\n", FILE_APPEND);
+                $devicePairs[$column] = $value;
+                file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Mapped $name to devices.$column = $value\n", FILE_APPEND);
+            }
+        }
+        
+        // Handle host parameters
+        if (preg_match('/Hosts\.Host\.(\d+)\.(\w+)/', $name, $hostMatches)) {
+            $hostIndex = $hostMatches[1];
+            $hostProperty = $hostMatches[2];
+            
+            // Initialize host array if not exists
+            if (!isset($hosts[$hostIndex])) {
+                $hosts[$hostIndex] = [
+                    'ip_address' => '',
+                    'hostname' => '',
+                    'mac_address' => '',
+                    'is_active' => 0
+                ];
+            }
+            
+            // Map host property to column
+            foreach ($hostMap as $needle => $column) {
+                if ($hostProperty === $needle) {
+                    // Convert Active boolean to integer (0 or 1)
+                    $hosts[$hostIndex][$column] = ($needle === 'Active') ? ($value === '1' || strtolower($value) === 'true' ? 1 : 0) : $value;
+                    file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Mapped $name to connected_clients.$column = " . $hosts[$hostIndex][$column] . "\n", FILE_APPEND);
+                }
             }
         }
     }
     
-    // Update database if we have values
-    if (!empty($pairs)) {
+    // Update devices table if we have values
+    if (!empty($devicePairs)) {
         try {
             $setStatements = [];
             $params = [':serial' => $serialNumber];
             
-            foreach ($pairs as $column => $value) {
+            foreach ($devicePairs as $column => $value) {
                 $setStatements[] = "$column = :$column";
                 $params[":$column"] = $value;
             }
             
             $sql = "UPDATE devices SET " . implode(', ', $setStatements) . " WHERE serial_number = :serial";
-            file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] SQL: $sql\n", FILE_APPEND);
-            file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Params: " . print_r($params, true) . "\n", FILE_APPEND);
+            file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] SQL (devices): $sql\n", FILE_APPEND);
+            file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Params (devices): " . print_r($params, true) . "\n", FILE_APPEND);
             
             $stmt = $db->prepare($sql);
             $result = $stmt->execute($params);
             
-            file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Update result: " . ($result ? "success" : "failed") . "\n", FILE_APPEND);
-            tr069_log("Device $serialNumber updated with " . implode(', ', array_keys($pairs)), "INFO");
+            file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Update result (devices): " . ($result ? "success" : "failed") . "\n", FILE_APPEND);
+            tr069_log("Device $serialNumber updated with " . implode(', ', array_keys($devicePairs)), "INFO");
         } catch (Exception $e) {
-            file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Database error: " . $e->getMessage() . "\n", FILE_APPEND);
+            file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Database error (devices): " . $e->getMessage() . "\n", FILE_APPEND);
             tr069_log("Error updating device data: " . $e->getMessage(), "ERROR");
         }
     }
+    
+    // Update connected_clients table if we have host data
+    if (!empty($hosts)) {
+        try {
+            // Get device_id from devices table
+            $stmt = $db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
+            $stmt->execute([':serial' => $serialNumber]);
+            $device = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if (!$device) {
+                file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Device not found for serial: $serialNumber\n", FILE_APPEND);
+                tr069_log("Device not found for serial: $serialNumber", "ERROR");
+                return;
+            }
+            
+            $deviceId = $device['id'];
+            
+            // Process each host
+            $hostSuccess = 0;
+            foreach ($hosts as $hostIndex => $host) {
+                if (empty($host['ip_address']) && empty($host['mac_address'])) {
+                    file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Skipping host $hostIndex: no IP or MAC address\n", FILE_APPEND);
+                    continue;
+                }
+                
+                // Check if host exists by mac_address or ip_address
+                $checkSql = "SELECT id FROM connected_clients WHERE device_id = :device_id AND (mac_address = :mac_address OR ip_address = :ip_address)";
+                $checkStmt = $db->prepare($checkSql);
+                $checkStmt->execute([
+                    ':device_id' => $deviceId,
+                    ':mac_address' => $host['mac_address'] ?: '',
+                    ':ip_address' => $host['ip_address'] ?: ''
+                ]);
+                $existingHost = $checkStmt->fetch(PDO::FETCH_ASSOC);
+                
+                if ($existingHost) {
+                    // Update existing host
+                    $updateSql = "UPDATE connected_clients SET 
+                        ip_address = :ip_address,
+                        hostname = :hostname,
+                        mac_address = :mac_address,
+                        is_active = :is_active
+                        WHERE id = :id";
+                    $updateStmt = $db->prepare($updateSql);
+                    $updateResult = $updateStmt->execute([
+                        ':ip_address' => $host['ip_address'],
+                        ':hostname' => $host['hostname'],
+                        ':mac_address' => $host['mac_address'],
+                        ':is_active' => $host['is_active'],
+                        ':id' => $existingHost['id']
+                    ]);
+                    
+                    if ($updateResult) {
+                        $hostSuccess++;
+                        file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Updated host $hostIndex for device_id $deviceId: ip_address={$host['ip_address']}, mac_address={$host['mac_address']}\n", FILE_APPEND);
+                    } else {
+                        file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Failed to update host $hostIndex for device_id $deviceId\n", FILE_APPEND);
+                    }
+                } else {
+                    // Insert new host
+                    $insertSql = "INSERT INTO connected_clients (
+                        device_id,
+                        ip_address,
+                        hostname,
+                        mac_address,
+                        is_active
+                    ) VALUES (
+                        :device_id,
+                        :ip_address,
+                        :hostname,
+                        :mac_address,
+                        :is_active
+                    )";
+                    $insertStmt = $db->prepare($insertSql);
+                    $insertResult = $insertStmt->execute([
+                        ':device_id' => $deviceId,
+                        ':ip_address' => $host['ip_address'],
+                        ':hostname' => $host['hostname'],
+                        ':mac_address' => $host['mac_address'],
+                        ':is_active' => $host['is_active']
+                    ]);
+                    
+                    if ($insertResult) {
+                        $hostSuccess++;
+                        file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Inserted host $hostIndex for device_id $deviceId: ip_address={$host['ip_address']}, mac_address={$host['mac_address']}\n", FILE_APPEND);
+                    } else {
+                        file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Failed to insert host $hostIndex for device_id $deviceId\n", FILE_APPEND);
+                    }
+                }
+            }
+            
+            file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Updated $hostSuccess hosts for device $serialNumber\n", FILE_APPEND);
+            tr069_log("Updated $hostSuccess hosts for device $serialNumber", "INFO");
+        } catch (Exception $e) {
+            file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Database error (connected_clients): " . $e->getMessage() . "\n", FILE_APPEND);
+            tr069_log("Error updating connected_clients for device $serialNumber: " . $e->getMessage(), "ERROR");
+        }
+    }
 }
+
 
 // Include required files
 require_once __DIR__ . '/backend/config/database.php';
