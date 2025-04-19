@@ -58,7 +58,7 @@ function createPendingInfoTask($deviceId, $db) {
             return false;
         }
         
-        // Define parameter groups
+        //Working Define parameter groups
         $parameterGroups = [
             [
                 'task_type' => 'info',
@@ -73,20 +73,11 @@ function createPendingInfoTask($deviceId, $db) {
             ],
             [
                 'task_type' => 'info_group',
-                'group' => 'WANIPConnection',
+                'group' => 'PPPOE DETAILS',
                 'parameters' => [
                     'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.DefaultGateway',
                     'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Username',
                     'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.ExternalIPAddress'
-                ]
-            ],
-            [
-                'task_type' => 'info_group',
-                'group' => 'WANPPPConnection2',
-                'parameters' => [
-                    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.DefaultGateway',
-                    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username',
-                    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress'
                 ]
             ],
             [
