@@ -54,7 +54,15 @@ function createPendingInfoTask($deviceId, $db) {
             return false;
         }
         
-        $taskData = json_encode(['names' => []]);
+        // Generate parameter requests
+        $taskHandler = new TaskHandler();
+        $parameterRequests = $taskHandler->generateParameterValues('info', json_encode(['names' => []]));
+        
+        // Initialize task_data with pending_requests and completed_contexts
+        $taskData = json_encode([
+            'pending_requests' => $parameterRequests,
+            'completed_contexts' => []
+        ]);
         
         $insertStmt = $db->prepare("
             INSERT INTO device_tasks 
@@ -650,106 +658,97 @@ try {
             session_write_close();
             header('Content-Type: text/xml');
             echo '<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-  <soapenv:Header>
-    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </soapenv:Header>
-  <soapenv:Body></soapenv:Body>
-</soapenv:Envelope>';
+    <soapenv:Envelope xmlns:soapenv="[invalid url, do not cite] xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+      <soapenv:Header>
+        <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+      </soapenv:Header>
+      <soapenv:Body></soapenv:Body>
+    </soapenv:Envelope>';
             exit;
         }
         
         if ($current_task && $serialNumber) {
             tr069_log("Processing task from session: {$current_task['task_type']} - ID: {$current_task['id']}", "INFO");
             
-            $pending_requests = isset($_SESSION['pending_requests']) ? $_SESSION['pending_requests'] : [];
-            tr069_log("Pending requests count: " . count($pending_requests), "DEBUG");
+            // Load task_data from database
+            $taskDataStmt = $db->prepare("SELECT task_data FROM device_tasks WHERE id = :task_id");
+            $taskDataStmt->execute([':task_id' => $current_task['id']]);
+            $taskData = json_decode($taskDataStmt->fetchColumn(), true);
             
-            if (empty($pending_requests)) {
-                // Generate new requests
-                $parameterRequests = $taskHandler->generateParameterValues($current_task['task_type'], $current_task['task_data']);
-                
-                if ($parameterRequests) {
-                    $requests = is_array($parameterRequests) && isset($parameterRequests[0]) && is_array($parameterRequests[0]) ? $parameterRequests : [$parameterRequests];
-                    $_SESSION['pending_requests'] = $requests;
-                    $_SESSION['completed_contexts'] = [];
-                    $pending_requests = $requests;
-                    tr069_log("Generated " . count($requests) . " parameter requests: " . print_r(array_map(function($r) { return $r['context'] ?? 'Unknown'; }, $requests), true), "DEBUG");
-                } else {
-                    tr069_log("Failed to generate parameters for task {$current_task['id']}", "ERROR");
-                    $taskHandler->updateTaskStatus($current_task['id'], 'failed', 'Failed to generate parameters');
-                    unset($_SESSION['current_task']);
-                    unset($_SESSION['pending_requests']);
-                    unset($_SESSION['completed_contexts']);
-                    session_write_close();
-                    header('Content-Type: text/xml');
-                    echo '<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-  <soapenv:Header>
-    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </soapenv:Header>
-  <soapenv:Body></soapenv:Body>
-</soapenv:Envelope>';
-                    exit;
-                }
-            }
+            $pending_requests = $taskData['pending_requests'] ?? [];
+            $completed_contexts = $taskData['completed_contexts'] ?? [];
             
-            // Process the next pending request
+            tr069_log("Pending requests count: " . count($pending_requests) . ", Completed contexts: " . implode(',', $completed_contexts), "DEBUG");
+            
             if (!empty($pending_requests)) {
                 $request = array_shift($pending_requests);
-                $_SESSION['pending_requests'] = $pending_requests;
+                // Update task_data with new pending_requests and completed_contexts
+                $taskData['pending_requests'] = $pending_requests;
+                $taskData['completed_contexts'] = $completed_contexts;
+                $taskDataJson = json_encode($taskData);
+                $updateStmt = $db->prepare("UPDATE device_tasks SET task_data = :task_data WHERE id = :task_id");
+                $updateStmt->execute([':task_data' => $taskDataJson, ':task_id' => $current_task['id']]);
                 
-                tr069_log("Processing next request: " . ($request['context'] ?? 'Unknown'), "INFO");
+                $context = isset($request['context']) ? $request['context'] : 'Unknown';
+                $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', "Sent GetParameterValues request (Context: $context)");
+                tr069_log("Task marked as in_progress: {$current_task['id']} (Context: $context)", "INFO");
                 
-                if ($request['method'] === 'GetParameterValues') {
-                    $nameXml = '';
-                    $paramCount = count($request['parameterNames']);
-                    $context = isset($request['context']) ? $request['context'] : 'Unknown';
-                    
-                    foreach ($request['parameterNames'] as $param) {
-                        $nameXml .= "        <string>" . htmlspecialchars($param) . "</string>\n";
-                        tr069_log("Requesting parameter: $param (Context: $context)", "DEBUG");
-                    }
-                    
-                    $getValuesRequest = '<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0" xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">
-  <soapenv:Header>
-    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </soapenv:Header>
-  <soapenv:Body>
-    <cwmp:GetParameterValues>
-      <ParameterNames soap-enc:arrayType="xsd:string[' . $paramCount . ']">
-' . $nameXml . '      </ParameterNames>
-    </cwmp:GetParameterValues>
-  </soapenv:Body>
-</soapenv:Envelope>';
-
-                    header('Content-Type: text/xml');
-                    echo $getValuesRequest;
-                    
-                    $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', "Sent GetParameterValues request (Context: $context)");
-                    tr069_log("Task marked as in_progress: {$current_task['id']} (Context: $context)", "INFO");
-                    session_write_close();
-                    exit;
+                // Send GetParameterValues request
+                $nameXml = '';
+                $paramCount = count($request['parameterNames']);
+                
+                foreach ($request['parameterNames'] as $param) {
+                    $nameXml .= "        <string>" . htmlspecialchars($param) . "</string>\n";
+                    tr069_log("Requesting parameter: $param (Context: $context)", "DEBUG");
                 }
+                
+                $getValuesRequest = '<?xml version="1.0" encoding="UTF-8"?>
+    <soapenv:Envelope xmlns:soapenv="[invalid url, do not cite] xmlns:cwmp="urn:dslforum-org:cwmp-1-0" xmlns:soap-enc="[invalid url, do not cite]
+      <soapenv:Header>
+        <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+      </soapenv:Header>
+      <soapenv:Body>
+        <cwmp:GetParameterValues>
+          <ParameterNames soap-enc:arrayType="xsd:string[' . $paramCount . ']">
+    ' . $nameXml . '      </ParameterNames>
+        </cwmp:GetParameterValues>
+      </soapenv:Body>
+    </soapenv:Envelope>';
+    
+                header('Content-Type: text/xml');
+                echo $getValuesRequest;
+                session_write_close();
+                exit;
             } else {
-                tr069_log("No pending requests for task {$current_task['id']}, marking as completed", "INFO");
-                $taskHandler->updateTaskStatus($current_task['id'], 'completed', 'No more pending requests');
+                // No more pending requests, complete the task
+                $taskHandler->updateTaskStatus($current_task['id'], 'completed', 'Successfully retrieved all device information');
+                tr069_log("Info task completed: {$current_task['id']}", "INFO");
+                
                 unset($_SESSION['current_task']);
                 unset($_SESSION['pending_requests']);
                 unset($_SESSION['completed_contexts']);
+                session_write_close();
+                header('Content-Type: text/xml');
+                echo '<?xml version="1.0" encoding="UTF-8"?>
+    <soapenv:Envelope xmlns:soapenv="[invalid url, do not cite] xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+      <soapenv:Header>
+        <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+      </soapenv:Header>
+      <soapenv:Body></soapenv:Body>
+    </soapenv:Envelope>';
+                exit;
             }
         }
         
         session_write_close();
         header('Content-Type: text/xml');
         echo '<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-  <soapenv:Header>
-    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
-  </soapenv:Header>
-  <soapenv:Body></soapenv:Body>
-</soapenv:Envelope>';
+    <soapenv:Envelope xmlns:soapenv="[invalid url, do not cite] xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+      <soapenv:Header>
+        <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+      </soapenv:Header>
+      <soapenv:Body></soapenv:Body>
+    </soapenv:Envelope>';
         exit;
     }
     
