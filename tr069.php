@@ -291,7 +291,7 @@ function saveParameterValues($raw, $serialNumber, $db) {
                 tr069_log("Device not found for serial: $serialNumber", "ERROR");
                 return;
             }
-            
+            //working
             $deviceId = $device['id'];
             $connectedDevices = (int) ($device['connected_devices'] ?? 0);
             
