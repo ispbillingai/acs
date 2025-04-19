@@ -79,6 +79,22 @@ try {
         }
     }
 
+    // Fetch connected clients
+    function getConnectedClients($db, $deviceId) {
+        try {
+            $sql = "SELECT mac_address, ip_address, hostname, is_active FROM connected_clients WHERE device_id = :deviceId";
+            $stmt = $db->prepare($sql);
+            $stmt->execute([':deviceId' => $deviceId]);
+            $clients = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+            debug_log("Connected clients data from database", ['clients' => $clients]);
+            return $clients;
+        } catch (PDOException $e) {
+            debug_log("Error in getConnectedClients function", ['error' => $e->getMessage()]);
+            return [];
+        }
+    }
+
     // Get parameter value from parameters table (for other parameters)
     function getParameterValue($db, $deviceId, $paramName) {
         try {
@@ -128,6 +144,9 @@ try {
         exit;
     }
 
+    // Get connected clients
+    $connectedClients = getConnectedClients($db, $deviceId);
+
     // Get the latest uptime value from parameters table
     $latestUptime = getParameterValue($db, $deviceId, 'UpTime');
     if ($latestUptime) {
@@ -176,7 +195,7 @@ try {
         $updateSql = "UPDATE devices SET ";
         $updateParams = [];
         
-        foreach ($updateValues as $column => $value) {
+        forEach ($updateValues as $column => $value) {
             $updateSql .= "$column = :$column, ";
             $updateParams[":$column"] = $value;
         }
@@ -626,6 +645,49 @@ try {
                         </div>
                     </div>
                 </div>
+
+                <!-- Connected Users -->
+                <div class="card table-card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0"><i class='bx bx-user me-2'></i>Connected Users</h5>
+                    </div>
+                    <div class="card-body">
+                        <?php if (empty($connectedClients)): ?>
+                            <div class="alert alert-info py-2">
+                                <i class='bx bx-info-circle me-2'></i>
+                                No connected clients found for this device.
+                            </div>
+                        <?php else: ?>
+                            <div class="table-responsive">
+                                <table class="table table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th>MAC Address</th>
+                                            <th>IP Address</th>
+                                            <th>Hostname</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($connectedClients as $client): ?>
+                                            <tr>
+                                                <td><?php echo htmlspecialchars($client['mac_address'] ?: 'N/A'); ?></td>
+                                                <td><?php echo htmlspecialchars($client['ip_address'] ?: 'N/A'); ?></td>
+                                                <td><?php echo htmlspecialchars($client['hostname'] ?: 'N/A'); ?></td>
+                                                <td>
+                                                    <span class="badge <?php echo $client['is_active'] ? 'bg-success' : 'bg-danger'; ?>">
+                                                        <?php echo $client['is_active'] ? 'Online' : 'Offline'; ?>
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+
             </div>
         </div>
     </div>
