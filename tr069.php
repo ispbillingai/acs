@@ -517,21 +517,18 @@ try {
                 $current_task = $_SESSION['in_progress_task'];
                 unset($_SESSION['in_progress_task']);
             }
+            $serialNumber = isset($_SESSION['device_serial']) ? $_SESSION['device_serial'] : null;
             session_write_close();
         }
         
         if ($current_task) {
             $taskStatus = ($status === '0') ? 'completed' : 'failed';
-            $taskMessage = ($status === '0') ? 'Successfully applied configuration' : 'Device returned error status: ' . $status;
+            $taskMessage = ($status === '0') ? 'Successfully applied ' . $current_task['task_type'] . ' configuration' : 'Device returned error status: ' . $status;
             $taskHandler->updateTaskStatus($current_task['id'], $taskStatus, $taskMessage);
             tr069_log("Task $taskStatus: " . $current_task['id'] . " - Status: $status", ($status === '0' ? "INFO" : "ERROR"));
             
             $GLOBALS['current_task'] = null;
         } else {
-            session_start();
-            $serialNumber = isset($_SESSION['device_serial']) ? $_SESSION['device_serial'] : null;
-            session_write_close();
-            
             if ($serialNumber) {
                 try {
                     $deviceStmt = $db->prepare("SELECT id FROM devices WHERE serial_number = :serial");
@@ -549,14 +546,18 @@ try {
                         
                         if ($inProgressTask) {
                             $taskStatus = ($status === '0') ? 'completed' : 'failed';
-                            $taskMessage = ($status === '0') ? 'Successfully applied configuration' : 'Device returned error status: ' . $status;
+                            $taskMessage = ($status === '0') ? 'Successfully applied ' . $inProgressTask['task_type'] . ' configuration' : 'Device returned error status: ' . $status;
                             $taskHandler->updateTaskStatus($inProgressTask['id'], $taskStatus, $taskMessage);
                             tr069_log("Processed in-progress task: " . $inProgressTask['id'] . " - $taskStatus", ($status === '0' ? "INFO" : "ERROR"));
+                        } else {
+                            tr069_log("No in-progress tasks found for device ID: $deviceId", "WARNING");
                         }
                     }
                 } catch (PDOException $e) {
                     tr069_log("Database error finding in-progress tasks: " . $e->getMessage(), "ERROR");
                 }
+            } else {
+                tr069_log("No current task or serial number found for SetParameterValuesResponse", "WARNING");
             }
         }
         
@@ -611,6 +612,40 @@ try {
             $requests = $taskHandler->generateParameterValues($current_task['task_type'], $current_task['task_data']);
             
             if ($requests) {
+                if ($current_task['task_type'] === 'wifi' && isset($requests[0]['method']) && $requests[0]['method'] === 'SetParameterValues') {
+                    $paramXml = '';
+                    $paramCount = count($requests[0]['parameters']);
+                    
+                    foreach ($requests[0]['parameters'] as $param) {
+                        $paramXml .= "        <ParameterValueStruct>\n";
+                        $paramXml .= "          <Name>" . htmlspecialchars($param['name']) . "</Name>\n";
+                        $paramXml .= "          <Value xsi:type=\"" . $param['type'] . "\">" . htmlspecialchars($param['value']) . "</Value>\n";
+                        $paramXml .= "        </ParameterValueStruct>\n";
+                        tr069_log("Setting WiFi parameter: {$param['name']} = {$param['value']}", "DEBUG");
+                    }
+                    
+                    $setParamRequest = '<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0" xmlns:soap-enc="http://schemas.xmlsoap.org/soap/encoding/">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">' . $soapId . '</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:SetParameterValues>
+      <ParameterList soap-enc:arrayType="cwmp:ParameterValueStruct[' . $paramCount . ']">
+' . $paramXml . '      </ParameterList>
+      <ParameterKey>Task-' . $current_task['id'] . '-' . substr(md5(time()), 0, 8) . '</ParameterKey>
+    </cwmp:SetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>';
+
+                    header('Content-Type: text/xml');
+                    echo $setParamRequest;
+                    
+                    $taskHandler->updateTaskStatus($current_task['id'], 'in_progress', 'Sent WiFi parameters to device');
+                    tr069_log("WiFi task marked as in_progress: {$current_task['id']}", "INFO");
+                    exit;
+                }
+                
                 foreach ($requests as $request) {
                     if ($request['method'] === 'GetParameterValues') {
                         $nameXml = '';
