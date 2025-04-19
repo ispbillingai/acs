@@ -43,8 +43,7 @@ class InfoTaskGenerator {
             'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
 
            // 'InternetGatewayDevice.WANDevice.1.',//  When i want to check which parameters are correct
-            'InternetGatewayDevice.WANDevice.1.X_GponInterafceConfig.TXPower',
-            'InternetGatewayDevice.WANDevice.1.X_GponInterafceConfig.RXPower',
+
             'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries'
         ];
         
