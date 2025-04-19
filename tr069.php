@@ -68,7 +68,6 @@ function createPendingInfoTask($deviceId, $db) {
                     'InternetGatewayDevice.DeviceInfo.SoftwareVersion',
                     'InternetGatewayDevice.DeviceInfo.UpTime',
                     'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
-                    'InternetGatewayDevice.',
                     'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries'
                 ]
             ],
@@ -76,19 +75,18 @@ function createPendingInfoTask($deviceId, $db) {
                 'task_type' => 'info_group',
                 'group' => 'WANIPConnection',
                 'parameters' => [
-                    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress',
-                    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DNSServers',
-                    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.SubnetMask',
-                    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DefaultGateway'
+                    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.DefaultGateway',
+                    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Username',
+                    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.ExternalIPAddress'
                 ]
             ],
             [
                 'task_type' => 'info_group',
-                'group' => 'WANPPPConnection',
+                'group' => 'WANPPPConnection2',
                 'parameters' => [
-                    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress',
-                    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.DNSServers',
-                    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.DefaultGateway'
+                    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.DefaultGateway',
+                    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username',
+                    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress'
                 ]
             ],
             [
