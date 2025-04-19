@@ -39,7 +39,7 @@ function tr069_log($message, $level = 'INFO') {
     }
 }
 
-// Create pending tasks for core info and additional parameter groups
+// Create pending tasks for core info, additional parameter groups, and host details
 function createPendingInfoTask($deviceId, $db) {
     try {
         tr069_log("TASK CREATION: Starting task creation for device ID: $deviceId", "INFO");
@@ -58,7 +58,7 @@ function createPendingInfoTask($deviceId, $db) {
             return false;
         }
         
-        //Working Define parameter groups
+        // Define parameter groups
         $parameterGroups = [
             [
                 'task_type' => 'info',
@@ -148,7 +148,8 @@ function saveParameterValues($raw, $serialNumber, $db) {
         'X_GponInterafceConfig.RXPower' => 'rx_power',
         'DNSServers' => 'dns_servers',
         'SubnetMask' => 'subnet_mask',
-        'DefaultGateway' => 'default_gateway'
+        'DefaultGateway' => 'default_gateway',
+        'Username' => 'pppoe_username'
     ];
     
     $hostMap = [
@@ -165,11 +166,18 @@ function saveParameterValues($raw, $serialNumber, $db) {
     $timestamp = date('Y-m-d H:i:s');
     file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Extracted parameters: " . print_r($matches, true) . "\n", FILE_APPEND);
     
+    $hostCount = 0;
     foreach ($matches as $param) {
         $name = $param[1];
         $value = $param[2];
         
         if (empty($value)) continue;
+        
+        // Check for HostNumberOfEntries to trigger follow-up host tasks
+        if (strpos($name, 'HostNumberOfEntries') !== false && is_numeric($value)) {
+            $hostCount = (int)$value;
+            file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Found HostNumberOfEntries: $hostCount\n", FILE_APPEND);
+        }
         
         foreach ($deviceMap as $needle => $column) {
             if (strpos($name, $needle) !== false) {
@@ -222,6 +230,53 @@ function saveParameterValues($raw, $serialNumber, $db) {
         } catch (Exception $e) {
             file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Database error (devices): " . $e->getMessage() . "\n", FILE_APPEND);
             tr069_log("Error updating device data: " . $e->getMessage(), "ERROR");
+        }
+    }
+    
+    // Create follow-up task for host details if hostCount > 0
+    if ($hostCount > 0) {
+        try {
+            $hostTasksCreated = false;
+            for ($i = 1; $i <= $hostCount; $i++) {
+                $hostParams = [
+                    "InternetGatewayDevice.LANDevice.1.Hosts.Host.{$i}.Active",
+                    "InternetGatewayDevice.LANDevice.1.Hosts.Host.{$i}.IPAddress",
+                    "InternetGatewayDevice.LANDevice.1.Hosts.Host.{$i}.HostName",
+                    "InternetGatewayDevice.LANDevice.1.Hosts.Host.{$i}.MACAddress"
+                ];
+                
+                $taskData = json_encode([
+                    'group' => "Host $i",
+                    'parameters' => $hostParams,
+                    'host_count' => $hostCount
+                ]);
+                
+                $insertStmt = $db->prepare("
+                    INSERT INTO device_tasks 
+                        (device_id, task_type, task_data, status, message, created_at, updated_at) 
+                    VALUES 
+                        (:device_id, 'info_group', :task_data, 'pending', 'Auto-created for Host $i parameters', NOW(), NOW())
+                ");
+                
+                $insertResult = $insertStmt->execute([
+                    ':device_id' => $db->query("SELECT id FROM devices WHERE serial_number = '$serialNumber'")->fetchColumn(),
+                    ':task_data' => $taskData
+                ]);
+                
+                if ($insertResult) {
+                    $taskId = $db->lastInsertId();
+                    tr069_log("TASK CREATION: Successfully created info_group task with ID: $taskId for Host $i", "INFO");
+                    $hostTasksCreated = true;
+                } else {
+                    tr069_log("TASK CREATION ERROR: Failed to create info_group task for Host $i. Database error: " . print_r($insertStmt->errorInfo(), true), "ERROR");
+                }
+            }
+            
+            if ($hostTasksCreated) {
+                file_put_contents($GLOBALS['retrieve_log'], "[$timestamp] Created follow-up tasks for $hostCount hosts\n", FILE_APPEND);
+            }
+        } catch (PDOException $e) {
+            tr069_log("TASK CREATION ERROR: Exception creating host tasks: " . $e->getMessage(), "ERROR");
         }
     }
     
@@ -509,24 +564,6 @@ try {
         
         if ($serialNumber && $current_task) {
             saveParameterValues($raw_post, $serialNumber, $db);
-            
-            $hostCount = 0;
-            preg_match('/<Name>InternetGatewayDevice\.LANDevice\.1\.Hosts\.HostNumberOfEntries<\/Name>.*?<Value[^>]*>(.*?)<\/Value>/s', $raw_post, $hostMatches);
-            if (isset($hostMatches[1]) && is_numeric($hostMatches[1])) {
-                $hostCount = (int)$hostMatches[1];
-                tr069_log("Found HostNumberOfEntries: $hostCount", "INFO");
-                
-                if ($hostCount > 0 && $current_task['task_type'] === 'info') {
-                    $taskData = json_decode($current_task['task_data'], true) ?: [];
-                    if (!isset($taskData['host_count'])) {
-                        $deviceId = $taskHandler->getDeviceIdFromSerialNumber($serialNumber);
-                        if ($deviceId) {
-                            $followUpTaskId = $taskHandler->createFollowUpInfoTask($deviceId, $hostCount);
-                            tr069_log("Created follow-up info task: $followUpTaskId for hosts details", "INFO");
-                        }
-                    }
-                }
-            }
             
             $taskHandler->updateTaskStatus($current_task['id'], 'completed', 'Successfully retrieved device information');
             tr069_log("Task completed: " . $current_task['id'] . " (Type: {$current_task['task_type']})", "INFO");
